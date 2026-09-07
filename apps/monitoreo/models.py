@@ -128,6 +128,20 @@ class FallaSeguimiento(models.Model):
 
     class Meta:
         db_table = "fallas_seguimientos"
+        # El historial se lee SIEMPRE del mas reciente al mas viejo, y se ordena
+        # aca y no en cada vista.
+        #
+        # Sin esto el orden lo decidia Postgres (sin ORDER BY no esta definido) y
+        # cada pantalla resolvia por su cuenta: `FallaDetailView.vue` ordenaba en
+        # el cliente y `FallaDetailSheet.vue` (movil) renderizaba tal cual
+        # llegaba, asi que la misma falla podia mostrar su cronologia desordenada
+        # en el telefono y bien en el escritorio. Es la tercera vez que esas dos
+        # vistas divergen por una decision duplicada (ver
+        # app/features/solar/serieSolar.js en el frontend).
+        #
+        # `-id` desempata: dos notas del mismo segundo (una carga masiva) no
+        # pueden quedar en orden arbitrario.
+        ordering = ["-created_at", "-id"]
 
 
 class FallaIntervalo(models.Model):
