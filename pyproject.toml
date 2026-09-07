@@ -1,7 +1,7 @@
 [project]
 name = "unergy-operaciones-backend"
 version = "0.1.0"
-description = "Backend FastAPI de la plataforma de Operaciones de Unergy"
+description = "Backend Django + DRF de la plataforma de Operaciones de Unergy"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.0",
@@ -45,8 +45,9 @@ dev = [
 
 [tool.uv]
 # El repo no es un paquete instalable: la app corre desde el codigo fuente
-# (`uvicorn app.main:app` con working_dir en la raiz). Sin esto, uv intentaria
-# construir un wheel y setuptools se atoraria con los ~10 directorios de la raiz.
+# (`gunicorn config.wsgi:application` con working_dir en la raiz). Sin esto, uv
+# intentaria construir un wheel y setuptools se atoraria con los ~10 directorios
+# de la raiz.
 package = false
 
 [tool.pyright]
