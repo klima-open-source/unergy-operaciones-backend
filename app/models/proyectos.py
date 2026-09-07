@@ -180,9 +180,9 @@ class Proyecto(Base):
     # ── Pipeline TSF / próximos a energizarse ───────────────────────────────────
     # Correlación con originabotdb.minifarm_project.name / base_name de Sun Factory.
     origina_code: Mapped[str | None] = mapped_column(String(100), index=True, nullable=True)
-    # ID interno de Sun Factory (sunfactory.solenium.co) para el proyecto en el
+    # ID interno de Sun Factory (sunfactory.sole.tech) para el proyecto en el
     # pipeline de construcción. Distinto de `project_id_solenium` (API de
-    # generación, data.solenium.co) -- espacios de IDs separados aunque ambos
+    # generación, data.sole.tech) -- espacios de IDs separados aunque ambos
     # productos son de Solenium. Estable aunque Sun Factory renombre el proyecto;
     # es la llave que usa sync_tsf_projects() para no crear duplicados.
     sunfactory_project_id: Mapped[int | None] = mapped_column(Integer, unique=True, nullable=True)

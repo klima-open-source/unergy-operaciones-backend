@@ -961,8 +961,8 @@ All endpoints are under `/api/v1/` and require JWT authentication (`Depends(get_
 | `UNERGY_ACCOUNT_ID` | str | "" | Unergy account ID |
 | `UNERGY_LOGIN` | str | "" | Unergy login |
 | `UNERGY_PASSWORD` | str | "" | Unergy password |
-| `SOLENIUM_AUTH_URL` | str | "https://auth.solenium.co/api" | Solenium auth URL |
-| `SOLENIUM_DATA_URL` | str | "https://data.solenium.co/api" | Solenium data URL |
+| `SOLENIUM_AUTH_URL` | str | "https://auth.sole.tech/api" | Solenium auth URL |
+| `SOLENIUM_DATA_URL` | str | "https://data.sole.tech/api" | Solenium data URL |
 | `SOLENIUM_USER` | str | "" | Solenium username |
 | `SOLENIUM_PASS` | str | "" | Solenium password |
 | `QUOIA_BASE_URL` | str | "https://api.quoia.co/api" | Quoia CGM API |
@@ -1016,7 +1016,7 @@ All endpoints are under `/api/v1/` and require JWT authentication (`Depends(get_
 | System | Protocol | Purpose |
 |--------|----------|---------|
 | **Unergy API** (api.unergy.io) | REST + JWT | Project generation data, project sync |
-| **Solenium** (auth.solenium.co / data.solenium.co) | REST + JWT (access+refresh) | FMO inverter availability, state |
+| **Solenium** (auth.sole.tech / data.sole.tech) | REST + JWT (access+refresh) | FMO inverter availability, state |
 | **Quoia CGM** (api.quoia.co) | REST + Token | Meter node status, real-time readings |
 | **EVO Energy** (Tailscale) | REST + X-EVO-Token | DailySpot bolsa prices, climate forecasts |
 | **OriginabotDB** | PostgreSQL (read-only) | Commercial data, supply requests |

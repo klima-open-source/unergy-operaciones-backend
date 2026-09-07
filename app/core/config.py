@@ -109,7 +109,7 @@ class Settings(BaseSettings):
     LIQUIDACIONES_GEMINI_API_KEY: str = ""
 
     # Sun Factory — Solenium EPC, cronogramas de construcción (próximos a energizarse).
-    # Auth = auth.solenium.co/api/token/ (username/password → JWT access).
+    # Auth = auth.sole.tech/api/token/ (username/password → JWT access).
     SUNFACTORY_API_URL: str = "https://sunfactory.sole.tech/api"
     SUNFACTORY_AUTH_URL: str = "https://auth.sole.tech/api/token/"
     SUNFACTORY_USERNAME: str = ""

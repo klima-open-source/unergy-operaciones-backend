@@ -1026,7 +1026,7 @@ def _identificacion(proyecto) -> dict:
 
     Van todos los identificadores juntos porque el error clásico de una
     integración es cruzar por el id equivocado: `sub_project` (API de generación
-    de Unergy), `project_id_solenium` (data.solenium.co) y
+    de Unergy), `project_id_solenium` (data.sole.tech) y
     `sunfactory_project_id` (el pipeline de obra) son tres espacios de ids
     distintos aunque los tres se lean como "el id de la planta". El nombre del
     sistema está en la clave a propósito.

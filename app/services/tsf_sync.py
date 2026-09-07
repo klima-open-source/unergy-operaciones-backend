@@ -4,7 +4,7 @@ Copia/actualiza los proyectos del pipeline de construcción de TSF hacia la tabl
 real `proyectos`, para que el equipo pueda relacionarlos con contratos y monitorear
 cumplimiento de energía antes de que la planta opere.
 
-Fuente del pipeline: Sun Factory (sunfactory.solenium.co) directo -- listado de
+Fuente del pipeline: Sun Factory (sunfactory.sole.tech) directo -- listado de
 proyectos, fase/estado, ubicación, y fecha de energización (hito RETIE/
 legalización) + % de avance de obra desde sus hitos. No depende de
 originabotdb (retirado 2026-08-20 junto con toda la correlación cross-DB con

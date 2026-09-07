@@ -114,8 +114,8 @@ Each meter has 7 typical curves (one per weekday, 0=Monday through 6=Sunday). Ea
 
 ## 2. Solenium API (Inverter Monitoring)
 
-**Auth URL:** `https://auth.solenium.co/api`
-**Data URL:** `https://data.solenium.co/api`
+**Auth URL:** `https://auth.sole.tech/api`
+**Data URL:** `https://data.sole.tech/api`
 **Auth:** JWT (username/password -> access + refresh tokens)
 **Credentials:** `${SOLENIUM_USER}` / `${SOLENIUM_PASSWORD}` (env vars)
 **Token lifetime:** ~5 minutes (refresh before expiry)
@@ -124,11 +124,11 @@ Each meter has 7 typical curves (one per weekday, 0=Monday through 6=Sunday). Ea
 ### Authentication
 
 ```python
-POST https://auth.solenium.co/api/token/
+POST https://auth.sole.tech/api/token/
 {"username": "${SOLENIUM_USER}", "password": "${SOLENIUM_PASSWORD}"}
 # Response: {"access": "eyJ...", "refresh": "eyJ..."}
 
-POST https://auth.solenium.co/api/token/refresh/
+POST https://auth.sole.tech/api/token/refresh/
 {"refresh": "<refresh_token>"}
 # Response: {"access": "eyJ..."}
 ```
