@@ -298,7 +298,9 @@ curl -G https://operaciones.unergy.io/api/v1/proyectos \
 | `estado` | `en_desarrollo`, `en_operacion`, `suspendido`, `cancelado` |
 | `tipo_proyecto` | `minigranja`, `autoconsumo`, `gd`, `movilidad_electrica`, `otro` |
 | `portafolio_id` | Entero |
-| `servicio` | `operacion`, `representacion`, `cgm`, `ppa`, `promotor`, `rec` |
+| `servicio` | `operacion`, `representacion`, `cgm`, `ppa`, `promotor`, `rec` — banderas de servicio contratado (`srv_*`), no el contrato PPA real |
+| `ppa_id` | Entero, repetible (`?ppa_id=12&ppa_id=45`). Proyectos vinculados a alguno de esos contratos (tabla `ppa_contratos`, join por `ppa_contrato_proyectos`) |
+| `sin_ppa` | `true` — proyectos sin ningún contrato PPA vinculado. Se combina con `ppa_id` como OR: `ppa_id=12&sin_ppa=true` trae los del contrato 12 más los que no tienen ninguno |
 
 Respuesta: `{"items": [...], "total": N, "page": 1, "size": 20, "pages": 5}`
 

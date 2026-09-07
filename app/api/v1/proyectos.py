@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import text
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
@@ -12,6 +12,7 @@ from app.models.proyectos import (
 )
 from app.models.contactos import ProyectoAreaContacto
 from app.models.clientes import Cliente
+from app.models.contratos import ppa_contrato_proyectos_table
 from app.models.fronteras import Frontera
 from app.schemas.proyectos import (
     ProyectoCreate, ProyectoUpdate, ProyectoOut, ProyectoListaResponse,
@@ -76,6 +77,8 @@ def list_proyectos(
     tipo_proyecto: str | None = None,
     portafolio_id: int | None = None,
     servicio: str | None = None,
+    ppa_id: list[int] | None = Query(None),
+    sin_ppa: bool | None = None,
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -98,6 +101,24 @@ def list_proyectos(
         query = query.filter(Proyecto.portafolio_id == portafolio_id)
     if servicio and servicio in SERVICIO_FILTER_MAP:
         query = query.filter(SERVICIO_FILTER_MAP[servicio] == True)
+    if ppa_id or sin_ppa:
+        # "tiene alguno de estos contratos" y/o "no tiene ningun contrato" -- se
+        # combinan con OR (mismo criterio que el MultiSelect de PPA del frontend,
+        # que permite mezclar contratos puntuales con el centinela "sin PPA").
+        condiciones = []
+        if ppa_id:
+            condiciones.append(ppa_contrato_proyectos_table.c.contrato_id.in_(ppa_id))
+        if sin_ppa:
+            condiciones.append(ppa_contrato_proyectos_table.c.contrato_id.is_(None))
+        query = (
+            query
+            .outerjoin(
+                ppa_contrato_proyectos_table,
+                Proyecto.id == ppa_contrato_proyectos_table.c.proyecto_id,
+            )
+            .filter(or_(*condiciones))
+            .distinct()
+        )
     total = query.count()
     items = query.order_by(Proyecto.nombre_comercial).offset((page - 1) * size).limit(size).all()
     return {"items": items, "total": total, "page": page, "size": size, "pages": -(-total // size)}
