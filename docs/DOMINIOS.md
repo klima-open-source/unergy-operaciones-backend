@@ -88,7 +88,7 @@ hay. Marcadas ⚠ las que exigen partir un archivo actual.
 | `liquidaciones` | `liquidaciones`, `liquidacion_costos`, `liquidacion_facturas` | `liquidaciones`, `liquidaciones_proxy` |
 | `registros_cnd` | `registro_conexion`, `registro_etapa`, `registro_transicion`, `registro_hito`, `registro_parametros_93`, `registro_equipo_frontera`, `registro_documento`, `registro_alerta` | `registros_cnd` |
 | `energia` | `generacion_diaria`, `reporte_energia_generacion`, `reporte_energia_exclusiones`, `reporte_energia_consumo` | `generacion`, `solar`, `generacion_solar`, `reporte_energia`, `reporte_cgm` |
-| `monitoreo` | `fallas` y sus 5 catálogos, `fallas_seguimientos`, `fallas_intervalos`, `falla_inversores`, `alertas`, `mantenimientos`, `starlink_facturas`, `starlink_mapeo_sitio`, `starlink_factura_linea` | `fallas`, `monitoreo`, `alertas`, `reconectadores`, `starlink` |
+| `monitoreo` | `fallas` y sus 5 catálogos, `fallas_seguimientos`, `fallas_intervalos`, `falla_inversores`, `alertas`, `starlink_facturas`, `starlink_mapeo_sitio`, `starlink_factura_linea` | `fallas`, `monitoreo`, `alertas`, `reconectadores`, `starlink` |
 | `om` | `om_ipc_tasas`, `om_seleccion_mensual`, `om_factura_mensual`, `om_pagina_sin_match`, `om_documento_proyecto`, `proyecto_informe_om` | `om`, `informe_om` |
 | `arriendos` | `arr_proyectos`, `arr_arrendador`, `arr_ipc_tasas`, `arr_documento`, `arr_seleccion_mensual` | `arriendos` |
 | `contabilidad` | `panel_contable`, `panel_contable_linea`, `clasificacion_liquidacion`, `mapeo_celda_concepto`, `alias_fuente_ingreso`, `panel_soporte`, `panel_consecutivo` | `panel_contable`, `estados_resultados` |

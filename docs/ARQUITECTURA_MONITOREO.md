@@ -144,7 +144,7 @@ Es el hallazgo más importante del análisis. **La plataforma no tiene una entid
 
 | # | Dónde | Forma | Qué cubre |
 |---|---|---|---|
-| 1 | `proyecto_inversores` | Tabla real | Solo inversores. Tiene marca, modelo, serie, potencia, `activo`. |
+| 1 | `proyecto_inversores` | Tabla real | Solo inversores, y solo `nombre`, `potencia_nominal_kw`, `orden`, `activo`. **Marca, modelo y numero de serie ya no existen**: los borro la revision 113 de Alembic (2026-08-27) porque estaban en **0 de 675 filas**. No hay serial de ningun equipo en la plataforma. |
 | 2 | `fronteras` | Tabla real | El punto de medida comercial, **no** los aparatos. |
 | 3 | `proyecto_inicio_operacion.checklist` | JSONB | 21 tipos de equipo, como casillas de verificación. |
 | 4 | `ESTRUCTURA_FALLAS` | Lista de Python | Los mismos equipos otra vez, como cadenas de texto. |
@@ -206,6 +206,7 @@ vínculo. Lo mismo con un huracán que golpea ocho plantas: ocho fallas sueltas.
 | Este corte de red, ¿a cuántas plantas afectó? | No — no existe el evento |
 | ¿Qué plantas cuelgan del mismo circuito? | No — solo sabemos el operador |
 | ¿Está en garantía el equipo que falló? | No — no hay fecha de instalación ni garantía |
+| ¿Cuándo se le hizo mantenimiento, y cuándo toca el siguiente? | No — `mantenimientos` se eliminó el 2026-09-07: 0 filas y **ninguna forma de crear un registro** (ver la migración `0006_eliminar_mantenimientos`). Nunca tuvo intervalo ni vínculo con el equipo |
 
 ---
 

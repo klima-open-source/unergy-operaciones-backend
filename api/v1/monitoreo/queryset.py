@@ -13,7 +13,6 @@ from datetime import date
 
 from apps.contratos import models as ct_models
 from apps.energia.services import unergy_api
-from apps.monitoreo import models as mo_models
 from apps.monitoreo.services import solenium_inversores
 from apps.proyectos import models as py_models
 from apps.proyectos.services import portafolios as portafolios_service
@@ -186,37 +185,26 @@ def _simulacion(proyecto, desde: date) -> dict | None:
 
 
 def build_fmo(sub_project: str, desde: date | None, hasta: date | None) -> dict:
-    """Contrato de O&M, inversores y mantenimientos de una planta."""
+    """Contrato de O&M e inversores de una planta.
+
+    Ya no devuelve `mantenimientos`: la tabla se elimino el 2026-09-07 (0 filas
+    y sin forma de crear un registro). La seccion 5 del informe FMO ya trataba
+    la clave ausente como lista vacia, asi que imprime el mismo aviso de
+    "Sin registros" que imprimia con la tabla vacia.
+    """
     proyecto = py_models.Proyecto.objects.filter(sub_project=sub_project).first()
     if proyecto is None:
         return {
             "ok": True, "contrato": None, "inverters": [],
-            "inverters_error": None, "mantenimientos": [],
+            "inverters_error": None,
         }
 
     contrato = _contrato_om(proyecto)
     inversores, error = solenium_inversores.inversores(proyecto)
-
-    consulta = mo_models.Mantenimiento.objects.filter(proyecto=proyecto)
-    if desde:
-        consulta = consulta.filter(fecha__gte=desde)
-    if hasta:
-        consulta = consulta.filter(fecha__lte=hasta)
 
     return {
         "ok": True,
         "contrato": _contrato_a_dict(contrato, proyecto) if contrato else None,
         "inverters": inversores,
         "inverters_error": error,
-        "mantenimientos": [
-            {
-                "id": m.id,
-                "tipo": m.tipo or "",
-                "descripcion": m.descripcion or "",
-                "fecha": m.fecha.isoformat() if m.fecha else "",
-                "estado": m.estado or "",
-                "observaciones": m.observaciones or "",
-            }
-            for m in consulta.order_by("fecha")
-        ],
     }

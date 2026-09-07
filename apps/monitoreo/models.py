@@ -184,20 +184,6 @@ class Alerta(Timer):
         unique_together = [("days_to_expiration", "ppa")]
 
 
-class Mantenimiento(Timer):
-    id = models.BigAutoField(primary_key=True)
-    proyecto = models.ForeignKey("proyectos.Proyecto", on_delete=models.DO_NOTHING, db_column="proyecto_id", related_name="mantenimientos_por_proyecto_id")
-    registrado_por = models.ForeignKey("plataforma.Usuario", on_delete=models.DO_NOTHING, db_column="registrado_por_id", related_name="mantenimientos_por_registrado_por_id")
-    fecha = models.DateField()
-    tipo = models.CharField(max_length=10, choices=[("preventivo", "preventivo"), ("correctivo", "correctivo"), ("predictivo", "predictivo")])
-    descripcion = models.TextField()
-    estado = models.CharField(max_length=12, choices=[("programado", "programado"), ("en_ejecucion", "en_ejecucion"), ("completado", "completado"), ("cancelado", "cancelado")], default="programado")
-    observaciones = models.TextField(null=True, blank=True)
-
-    class Meta:
-        db_table = "mantenimientos"
-
-
 class StarlinkFactura(Timer):
     id = models.BigAutoField(primary_key=True)
     periodo = models.CharField(max_length=7, db_index=True)
