@@ -16,6 +16,7 @@ from api.permissions import RolePermission
 from apps.liquidaciones import models as lq_models
 from apps.liquidaciones.services import excel as excel_service
 from apps.liquidaciones.services import impuestos, panel, resumen_panel
+from apps.mandatos import models as md_models
 
 from . import serializers as lq_serializers
 
@@ -300,10 +301,10 @@ class LiquidacionViewSet(viewsets.GenericViewSet):
         """
         liquidacion = self._liquidacion(pk)
         with transaction.atomic():
-            mandatos = lq_models.LiquidacionMandato.objects.filter(
+            mandatos = md_models.LiquidacionMandato.objects.filter(
                 liquidacion=liquidacion
             )
-            lq_models.LiquidacionMandatoLinea.objects.filter(
+            md_models.LiquidacionMandatoLinea.objects.filter(
                 mandato__in=mandatos
             ).delete()
             mandatos.delete()
