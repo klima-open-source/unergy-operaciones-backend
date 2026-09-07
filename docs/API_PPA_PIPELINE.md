@@ -5,9 +5,9 @@ un árbol:
 
 **PPA → PROYECTOS → detalles de cada proyecto.**
 
-- **Base URL:** `https://backend-production-63d8.up.railway.app`
+- **Base URL:** `https://operaciones.unergy.io`
 - **Endpoint:** `GET /api/v1/comercial/proyectos-operando`
-- **Swagger:** https://backend-production-63d8.up.railway.app/docs
+- **Sin Swagger interactivo.** La documentacion automatica la servia FastAPI en `/docs`, y desapareció con la migración a Django (2026-09-04). Esta guía es la referencia.
 - **Solo lectura.** No escribe nada.
 - **Auth:** header `X-API-Key`. Sirve cualquier rol; no exige rol comercial porque no
   expone precios, márgenes ni bitácora comercial.
@@ -420,7 +420,7 @@ Acotar la etapa **elige PPAs, no recorta su contenido**: un PPA que entra sigue 
 todas sus plantas.
 
 ```bash
-export BASE="https://backend-production-63d8.up.railway.app/api/v1"
+export BASE="https://operaciones.unergy.io/api/v1"
 
 # todo el pipeline de contratos
 curl "$BASE/comercial/proyectos-operando" -H "X-API-Key: $UNERGY_API_KEY"

@@ -7,9 +7,9 @@ Responde, en **una sola llamada**, la pregunta operativa de todos los días:
 
 No hace falta entender GESCON, vigencias ni piscinas: el backend ya lo resolvió.
 
-- **URL:** `https://backend-production-63d8.up.railway.app/api/v1/cumplimiento/vista-contratos`
+- **URL:** `https://operaciones.unergy.io/api/v1/cumplimiento/vista-contratos`
 - **Método:** `GET`. Es de **solo lectura**: no escribe nada, se puede llamar sin miedo.
-- **Swagger interactivo:** https://backend-production-63d8.up.railway.app/docs
+- **Sin Swagger interactivo.** La documentacion automatica la servia FastAPI en `/docs`, y desapareció con la migración a Django (2026-09-04). Esta guía es la referencia.
 
 ---
 
@@ -19,7 +19,7 @@ Header `X-API-Key` en cada llamada:
 
 ```bash
 curl -H "X-API-Key: uop_TU_KEY" \
-  "https://backend-production-63d8.up.railway.app/api/v1/cumplimiento/vista-contratos?fecha=2026-08-20"
+  "https://operaciones.unergy.io/api/v1/cumplimiento/vista-contratos?fecha=2026-08-20"
 ```
 
 La key la genera un admin de la plataforma. **Se muestra una sola vez, al
@@ -29,7 +29,7 @@ mide 68 (`uop_` + 64). Si copiás del listado vas a tener 12 y siempre dará 401
 Si no tenés key, sirve un token de sesión:
 
 ```bash
-curl -X POST "https://backend-production-63d8.up.railway.app/api/v1/auth/token" \
+curl -X POST "https://operaciones.unergy.io/api/v1/auth/token" \
   -d "username=tu@unergy.io&password=TU_CLAVE"
 # devuelve {"access_token": "eyJ..."} → usalo como  -H "Authorization: Bearer eyJ..."
 ```
@@ -188,7 +188,7 @@ marca `manual` y el recálculo ya no las pisa.
 ```python
 import requests
 
-BASE = "https://backend-production-63d8.up.railway.app/api/v1"
+BASE = "https://operaciones.unergy.io/api/v1"
 S = requests.Session()
 S.headers["X-API-Key"] = "uop_TU_KEY"      # nunca la pegues en un repo
 
@@ -230,7 +230,7 @@ pd.DataFrame(filas).to_excel("contratos_2026-08-20.xlsx", index=False)
 `Origen → Web → Avanzadas`, URL:
 
 ```
-https://backend-production-63d8.up.railway.app/api/v1/cumplimiento/vista-contratos?fecha=2026-08-20
+https://operaciones.unergy.io/api/v1/cumplimiento/vista-contratos?fecha=2026-08-20
 ```
 
 Encabezado: `X-API-Key` = tu key. Después expandí `contratos` y dentro `plantas`.
@@ -240,7 +240,7 @@ Encabezado: `X-API-Key` = tu key. Después expandí `contratos` y dentro `planta
 ```javascript
 function vistaContratos(fecha) {
   const r = UrlFetchApp.fetch(
-    "https://backend-production-63d8.up.railway.app/api/v1/cumplimiento/vista-contratos?fecha=" + fecha,
+    "https://operaciones.unergy.io/api/v1/cumplimiento/vista-contratos?fecha=" + fecha,
     {headers: {"X-API-Key": "uop_TU_KEY"}});
   const d = JSON.parse(r.getContentText());
   const filas = [["Contrato","Portafolio","Min_Mes","Max_mes","Estado","Planta","FPO","Gen_prom","%"]];

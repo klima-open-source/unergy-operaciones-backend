@@ -17,9 +17,9 @@ inicio de comercialización · tiempo del contrato de energía · API ID de Uner
 Es la misma lista que se ve en la plataforma en `/comercial` filtrando por las etapas
 **Firmado** y **Operando**, pero agrupada por planta y en un JSON pensado para integrar.
 
-- **Base URL:** `https://backend-production-63d8.up.railway.app`
+- **Base URL:** `https://operaciones.unergy.io`
 - **Endpoint:** `GET /api/v1/comercial/proyectos-operando`
-- **Swagger:** https://backend-production-63d8.up.railway.app/docs
+- **Sin Swagger interactivo.** La documentacion automatica la servia FastAPI en `/docs`, y desapareció con la migración a Django (2026-09-04). Esta guía es la referencia.
 - **Solo lectura.** Este endpoint no escribe nada; no hay forma de romper datos con él.
 
 ---
@@ -30,7 +30,7 @@ Header `X-API-Key` en cada request. La key la emite Juan José desde la platafor
 
 ```bash
 export UNERGY_API_KEY="uop_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-export BASE="https://backend-production-63d8.up.railway.app/api/v1"
+export BASE="https://operaciones.unergy.io/api/v1"
 
 # ¿la key sirve?
 curl "$BASE/api-keys/verify" -H "X-API-Key: $UNERGY_API_KEY"
@@ -412,7 +412,7 @@ pide rol `comercial` o `admin`).
 import os
 import requests
 
-BASE = "https://backend-production-63d8.up.railway.app/api/v1"
+BASE = "https://operaciones.unergy.io/api/v1"
 KEY = os.environ["UNERGY_API_KEY"]
 
 r = requests.get(f"{BASE}/comercial/proyectos-operando",
@@ -446,7 +446,7 @@ todo = requests.get(f"{BASE}/comercial/proyectos-operando",
 ### JavaScript
 
 ```js
-const BASE = "https://backend-production-63d8.up.railway.app/api/v1";
+const BASE = "https://operaciones.unergy.io/api/v1";
 
 const res = await fetch(`${BASE}/comercial/proyectos-operando`, {
   headers: { "X-API-Key": process.env.UNERGY_API_KEY },

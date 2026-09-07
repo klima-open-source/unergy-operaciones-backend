@@ -45,7 +45,7 @@ nunca estuvo hardcodeada en código.
 
 ## Verificación (consola del navegador, app logueada)
 ```js
-fetch('https://backend-production-63d8.up.railway.app/api/v1/proximos-energizar',{headers:{Authorization:'Bearer'+String.fromCharCode(32)+localStorage.getItem('token')}}).then(r=>r.json()).then(d=>console.log('SOURCE='+d.source+' | COUNT='+d.count))
+fetch('https://operaciones.unergy.io/api/v1/proximos-energizar',{headers:{Authorization:'Bearer'+String.fromCharCode(32)+localStorage.getItem('token')}}).then(r=>r.json()).then(d=>console.log('SOURCE='+d.source+' | COUNT='+d.count))
 ```
 Esperado: `SOURCE=originabotdb | COUNT=60`.
 

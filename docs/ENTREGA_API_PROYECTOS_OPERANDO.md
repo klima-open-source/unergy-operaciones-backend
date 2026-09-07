@@ -25,7 +25,7 @@ las plantas que todavía no están vinculadas a un proyecto de la plataforma. Lo
 pueden discrepar y la API **no los concilia**: los muestra como están.
 
 ```
-GET https://backend-production-63d8.up.railway.app/api/v1/comercial/proyectos-operando
+GET https://operaciones.unergy.io/api/v1/comercial/proyectos-operando
 Header: X-API-Key: uop_…
 ```
 
@@ -40,7 +40,7 @@ Este documento es solo el trámite de entrega.
 permisos del usuario dueño, y hoy los `scopes` de la key no se aplican: una key marcada
 "read" puede escribir. El único límite real es el **rol del usuario** al que cuelga.
 
-1. Entrá a https://frontend-taupe-six-252g9aw47x.vercel.app/admin/usuarios
+1. Entrá a https://operaciones.unergy.io/admin/usuarios
 2. **Nuevo usuario**
    - Nombre: `Integración <plataforma de tu compañera>`
    - Email: algo identificable, p. ej. `integracion-<plataforma>@unergy.io`
@@ -64,7 +64,7 @@ permisos del usuario dueño, y hoy los `scopes` de la key no se aplican: una key
 Pegá esto en una terminal, reemplazando la key:
 
 ```bash
-curl "https://backend-production-63d8.up.railway.app/api/v1/comercial/proyectos-operando" \
+curl "https://operaciones.unergy.io/api/v1/comercial/proyectos-operando" \
   -H "X-API-Key: uop_TU_KEY_ACA"
 ```
 
@@ -88,7 +88,7 @@ Hola, te paso la API con nuestras plantas firmadas y operando.
 
 **Endpoint (una sola llamada, trae todo):**
 ```
-GET https://backend-production-63d8.up.railway.app/api/v1/comercial/proyectos-operando
+GET https://operaciones.unergy.io/api/v1/comercial/proyectos-operando
 Header: X-API-Key: <te la mando aparte>
 ```
 
@@ -99,7 +99,7 @@ energía y el **API ID de Unergy**.
 
 Prueba rápida:
 ```bash
-curl "https://backend-production-63d8.up.railway.app/api/v1/comercial/proyectos-operando" \
+curl "https://operaciones.unergy.io/api/v1/comercial/proyectos-operando" \
   -H "X-API-Key: LA_KEY"
 ```
 
@@ -258,7 +258,7 @@ vínculo la API no tiene de dónde sacarlos.
 
 ```bash
 export KEY="uop_TU_KEY_ADMIN"
-export BASE="https://backend-production-63d8.up.railway.app/api/v1"
+export BASE="https://operaciones.unergy.io/api/v1"
 
 # 1) ver qué propone — NO escribe nada
 curl -s -X POST "$BASE/comercial/ofertas/vincular-proyectos?dry_run=true" -H "X-API-Key: $KEY"
@@ -336,7 +336,7 @@ API: con el vínculo puesto, la oferta muestra los datos de su planta en toda la
 
 ### B. ¿Hay plantas en etapa "Operando" que falten?
 
-Abrí https://frontend-taupe-six-252g9aw47x.vercel.app/comercial y filtrá por la etapa
+Abrí https://operaciones.unergy.io/comercial y filtrá por la etapa
 **Operando**. Lo que veas ahí es exactamente lo que devuelve la API. Si falta alguna planta
 que sí está operando, hay que moverla de etapa en el CRM.
 
@@ -346,7 +346,7 @@ Con tu key de admin:
 
 ```bash
 export KEY="uop_TU_KEY_ADMIN"
-export BASE="https://backend-production-63d8.up.railway.app/api/v1"
+export BASE="https://operaciones.unergy.io/api/v1"
 
 # 1) generación promedio: cuáles no la tienen
 curl -s "$BASE/proyectos/gen-promedio?solo_faltantes=true" -H "X-API-Key: $KEY"

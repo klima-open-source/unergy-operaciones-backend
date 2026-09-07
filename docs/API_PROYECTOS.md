@@ -2,9 +2,9 @@
 
 Guía para consultar los proyectos de la plataforma de forma programática.
 
-- **Base URL:** `https://backend-production-63d8.up.railway.app`
+- **Base URL:** `https://operaciones.unergy.io`
 - **Prefijo:** todos los endpoints viven bajo `/api/v1`
-- **Swagger interactivo:** https://backend-production-63d8.up.railway.app/docs
+- **Sin Swagger interactivo.** La documentacion automatica la servia FastAPI en `/docs`, y desapareció con la migración a Django (2026-09-04). Esta guía es la referencia.
 - **Formato:** JSON en las respuestas
 
 Los tres endpoints de esta guía son de **solo lectura**: no modifican nada, así que
@@ -37,7 +37,7 @@ Todos los endpoints exigen autenticación. Hay dos formas.
 Header `X-API-Key` en cada request:
 
 ```bash
-curl https://backend-production-63d8.up.railway.app/api/v1/proyectos/lista \
+curl https://operaciones.unergy.io/api/v1/proyectos/lista \
   -H "X-API-Key: uop_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ```
 
@@ -47,7 +47,7 @@ desde Admin → Usuarios → API Keys y solo se muestra una vez, al crearla.
 Verificá que funciona:
 
 ```bash
-curl https://backend-production-63d8.up.railway.app/api/v1/api-keys/verify \
+curl https://operaciones.unergy.io/api/v1/api-keys/verify \
   -H "X-API-Key: $UNERGY_API_KEY"
 # → {"user_id": 3, "nombre": "...", "email": "...", "rol": "operaciones"}
 ```
@@ -60,7 +60,7 @@ curl https://backend-production-63d8.up.railway.app/api/v1/api-keys/verify \
 ### Bearer token (alternativa)
 
 ```bash
-curl -X POST https://backend-production-63d8.up.railway.app/api/v1/auth/token \
+curl -X POST https://operaciones.unergy.io/api/v1/auth/token \
   -d "username=correo@unergy.io&password=tu-contraseña"
 # → {"access_token": "eyJ..."}
 ```
@@ -85,7 +85,7 @@ Devuelve **todos** los proyectos vigentes en una sola llamada, sin paginar, con 
 campos justos para identificarlos y quedarte con el `id`.
 
 ```bash
-curl https://backend-production-63d8.up.railway.app/api/v1/proyectos/lista \
+curl https://operaciones.unergy.io/api/v1/proyectos/lista \
   -H "X-API-Key: $UNERGY_API_KEY"
 ```
 
@@ -136,7 +136,7 @@ Detalles del comportamiento:
 Tomá el `id` del listado y pedí el detalle completo:
 
 ```bash
-curl https://backend-production-63d8.up.railway.app/api/v1/proyectos/12 \
+curl https://operaciones.unergy.io/api/v1/proyectos/12 \
   -H "X-API-Key: $UNERGY_API_KEY"
 ```
 
@@ -206,7 +206,7 @@ El atajo para cuando ya sabés el nombre. Devuelve **exactamente la misma estruc
 que `GET /proyectos/{id}`.
 
 ```bash
-curl -G https://backend-production-63d8.up.railway.app/api/v1/proyectos/buscar \
+curl -G https://operaciones.unergy.io/api/v1/proyectos/buscar \
   --data-urlencode "nombre=Minigranja 0029 - Monterrubio" \
   -H "X-API-Key: $UNERGY_API_KEY"
 ```
@@ -285,7 +285,7 @@ El endpoint que usa el frontend. Trae el objeto **completo** de cada proyecto (c
 todas las relaciones anidadas), paginado, y acepta filtros:
 
 ```bash
-curl -G https://backend-production-63d8.up.railway.app/api/v1/proyectos \
+curl -G https://operaciones.unergy.io/api/v1/proyectos \
   -d "estado=en_operacion" -d "tipo_proyecto=minigranja" -d "size=100" \
   -H "X-API-Key: $UNERGY_API_KEY"
 ```
@@ -313,7 +313,7 @@ necesites filtrar o ya quieras los datos completos de varios proyectos a la vez.
 
 ```bash
 export UNERGY_API_KEY="uop_..."
-BASE="https://backend-production-63d8.up.railway.app/api/v1"
+BASE="https://operaciones.unergy.io/api/v1"
 
 # 1. Buscar el id del proyecto por su nombre en el listado
 ID=$(curl -s "$BASE/proyectos/lista" -H "X-API-Key: $UNERGY_API_KEY" \
@@ -329,7 +329,7 @@ curl -s "$BASE/proyectos/$ID" -H "X-API-Key: $UNERGY_API_KEY" | jq '.'
 import os
 import requests
 
-BASE = "https://backend-production-63d8.up.railway.app/api/v1"
+BASE = "https://operaciones.unergy.io/api/v1"
 SESION = requests.Session()
 SESION.headers["X-API-Key"] = os.environ["UNERGY_API_KEY"]
 

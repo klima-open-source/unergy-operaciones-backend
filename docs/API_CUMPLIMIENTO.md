@@ -2,9 +2,9 @@
 
 Guía para consultar **compromisos mínimo/máximo de energía por contrato** y **generación de los proyectos** de forma programática. Es exactamente la data que alimenta la vista `/mem/cumplimiento`.
 
-- **Base URL:** `https://frontend-taupe-six-252g9aw47x.vercel.app/api/v1`
-  (también funciona directo contra el backend: `https://backend-production-63d8.up.railway.app/api/v1`)
-- **Swagger interactivo:** https://backend-production-63d8.up.railway.app/docs
+- **Base URL:** `https://operaciones.unergy.io/api/v1`
+  (también funciona directo contra el backend: `https://operaciones.unergy.io/api/v1`)
+- **Sin Swagger interactivo.** La documentacion automatica la servia FastAPI en `/docs`, y desapareció con la migración a Django (2026-09-04). Esta guía es la referencia.
 - **Formato:** JSON. Todo lo de esta guía es `GET` — **no se necesita escribir nada**.
 - **Unidades:** energía en **MWh** salvo donde diga `kwh` explícitamente. Precios en **COP/kWh**.
 
@@ -68,7 +68,7 @@ Header `X-API-Key` en cada request:
 
 ```bash
 curl -H "X-API-Key: uop_xxxx..." \
-  "https://frontend-taupe-six-252g9aw47x.vercel.app/api/v1/cumplimiento/ppa/resumen?year=2026&month=7"
+  "https://operaciones.unergy.io/api/v1/cumplimiento/ppa/resumen?year=2026&month=7"
 ```
 
 La key hereda el rol y permisos del usuario al que se le creó. Los endpoints de esta guía solo exigen estar autenticado (no filtran por rol), así que ve la totalidad de los contratos.
@@ -347,7 +347,7 @@ Regla general que sí sigue vigente: antes de graficar agregados, descarte compr
 ```python
 import os, requests
 
-BASE = "https://frontend-taupe-six-252g9aw47x.vercel.app/api/v1"
+BASE = "https://operaciones.unergy.io/api/v1"
 S = requests.Session()
 S.headers["X-API-Key"] = os.environ["UNERGY_API_KEY"]   # nunca hardcodear la key
 

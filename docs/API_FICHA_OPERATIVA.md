@@ -4,9 +4,9 @@ Guía para consultar, por cada oferta comercial, los seis parámetros que pidió
 **nombre del proyecto, lugar, operador de red, energía real, energía promedio, fecha de
 inicio de operación y tiempo del contrato de compra de energía.**
 
-- **Base URL:** `https://backend-production-63d8.up.railway.app`
+- **Base URL:** `https://operaciones.unergy.io`
 - **Prefijo:** todos los endpoints viven bajo `/api/v1`
-- **Swagger interactivo:** https://backend-production-63d8.up.railway.app/docs
+- **Sin Swagger interactivo.** La documentacion automatica la servia FastAPI en `/docs`, y desapareció con la migración a Django (2026-09-04). Esta guía es la referencia.
 - **Formato:** JSON en request y response (`Content-Type: application/json`)
 
 ---
@@ -57,7 +57,7 @@ Igual que en la [API de Fallas](API_FALLAS.md): header `X-API-Key` en cada reque
 
 ```bash
 export UNERGY_API_KEY="uop_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-export BASE="https://backend-production-63d8.up.railway.app/api/v1"
+export BASE="https://operaciones.unergy.io/api/v1"
 
 curl "$BASE/api-keys/verify" -H "X-API-Key: $UNERGY_API_KEY"
 # → {"user_id": 3, "nombre": "...", "rol": "comercial"}

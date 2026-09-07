@@ -3,8 +3,8 @@
 Guía para reconstruir la gráfica y las tablas de la pestaña **Cumplimiento** de
 `/mem/cumplimiento` en un panel propio.
 
-- **Base URL:** `https://backend-production-63d8.up.railway.app`
-- **Swagger interactivo:** https://backend-production-63d8.up.railway.app/docs
+- **Base URL:** `https://operaciones.unergy.io`
+- **Sin Swagger interactivo.** La documentacion automatica la servia FastAPI en `/docs`, y desapareció con la migración a Django (2026-09-04). Esta guía es la referencia.
 - **Formato:** JSON. Todo lo de esta guía es `GET` — **no escribe nada**.
 - **Unidades:** energía siempre en **MWh**.
 
@@ -14,7 +14,7 @@ Guía para reconstruir la gráfica y las tablas de la pestaña **Cumplimiento** 
 
 ```bash
 curl -H "X-API-Key: uop_xxxx..." \
-  "https://backend-production-63d8.up.railway.app/api/v1/cumplimiento/panel-anual?year=2026"
+  "https://operaciones.unergy.io/api/v1/cumplimiento/panel-anual?year=2026"
 ```
 
 Esa **única llamada** trae todo: el consolidado de todos los contratos, cada contrato por
@@ -282,7 +282,7 @@ Los contratos individuales sí están bien. Pregúntenle a Juan José por el est
 import os
 import requests
 
-BASE = "https://backend-production-63d8.up.railway.app/api/v1"
+BASE = "https://operaciones.unergy.io/api/v1"
 KEY = os.environ["UNERGY_API_KEY"]          # nunca hardcodeada
 
 def panel_anual(year: int, incluir_plantas: bool = True) -> dict:
@@ -322,7 +322,7 @@ print(f"\nCompras en bolsa proyectadas {data['year']}: {a_comprar:,.1f} MWh")
 ### En JavaScript
 
 ```js
-const BASE = "https://backend-production-63d8.up.railway.app/api/v1";
+const BASE = "https://operaciones.unergy.io/api/v1";
 
 // OJO: esto va del lado del SERVIDOR. La API key no puede llegar al navegador.
 async function panelAnual(year) {

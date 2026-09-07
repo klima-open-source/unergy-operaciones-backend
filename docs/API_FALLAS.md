@@ -2,9 +2,9 @@
 
 Guía para crear y consultar fallas de forma programática.
 
-- **Base URL:** `https://backend-production-63d8.up.railway.app`
+- **Base URL:** `https://operaciones.unergy.io`
 - **Prefijo:** todos los endpoints viven bajo `/api/v1`
-- **Swagger interactivo:** https://backend-production-63d8.up.railway.app/docs
+- **Sin Swagger interactivo.** La documentacion automatica la servia FastAPI en `/docs`, y desapareció con la migración a Django (2026-09-04). Esta guía es la referencia.
 - **Formato:** JSON en request y response (`Content-Type: application/json`), salvo la subida de archivos
 
 ---
@@ -39,7 +39,7 @@ Todos los endpoints exigen autenticación. Hay dos formas; **usen la API Key**.
 Header `X-API-Key` en cada request:
 
 ```bash
-curl https://backend-production-63d8.up.railway.app/api/v1/fallas/catalogos \
+curl https://operaciones.unergy.io/api/v1/fallas/catalogos \
   -H "X-API-Key: uop_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ```
 
@@ -48,7 +48,7 @@ La key tiene formato `uop_` + 64 caracteres hex. **Pídansela a Juan José** —
 Verifiquen que funciona:
 
 ```bash
-curl https://backend-production-63d8.up.railway.app/api/v1/api-keys/verify \
+curl https://operaciones.unergy.io/api/v1/api-keys/verify \
   -H "X-API-Key: $UNERGY_API_KEY"
 # → {"user_id": 3, "nombre": "...", "email": "...", "rol": "operaciones"}
 ```
@@ -58,7 +58,7 @@ curl https://backend-production-63d8.up.railway.app/api/v1/api-keys/verify \
 ### Bearer token (alternativa)
 
 ```bash
-curl -X POST https://backend-production-63d8.up.railway.app/api/v1/auth/token \
+curl -X POST https://operaciones.unergy.io/api/v1/auth/token \
   -d "username=correo@unergy.io&password=..."
 # → {"access_token": "eyJ..."}
 ```
@@ -80,7 +80,7 @@ Luego `Authorization: Bearer eyJ...`. El body es `application/x-www-form-urlenco
 ### Paso 1: traer los catálogos (los IDs que van a necesitar)
 
 ```bash
-curl https://backend-production-63d8.up.railway.app/api/v1/fallas/catalogos \
+curl https://operaciones.unergy.io/api/v1/fallas/catalogos \
   -H "X-API-Key: $UNERGY_API_KEY"
 ```
 
@@ -108,7 +108,7 @@ Los IDs **no son estables entre entornos** y los ejemplos de arriba son ilustrat
 ### Paso 2: elegir un proyecto
 
 ```bash
-curl "https://backend-production-63d8.up.railway.app/api/v1/proyectos?page=1&size=50" \
+curl "https://operaciones.unergy.io/api/v1/proyectos?page=1&size=50" \
   -H "X-API-Key: $UNERGY_API_KEY"
 ```
 
@@ -119,7 +119,7 @@ Necesitan el `id` del proyecto. Para pruebas, pídanle a Juan José que les indi
 ### Paso 3: crear la falla
 
 ```bash
-curl -X POST https://backend-production-63d8.up.railway.app/api/v1/fallas \
+curl -X POST https://operaciones.unergy.io/api/v1/fallas \
   -H "X-API-Key: $UNERGY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -260,7 +260,7 @@ Solo con `categoria_codigo: "inversores"`. Una entrada por inversor afectado.
 Fuente de verdad en vivo: `GET /api/v1/fallas/estructura`. Lo de abajo es su contenido al 28 de julio de 2026.
 
 ```bash
-curl https://backend-production-63d8.up.railway.app/api/v1/fallas/estructura \
+curl https://operaciones.unergy.io/api/v1/fallas/estructura \
   -H "X-API-Key: $UNERGY_API_KEY"
 # → {"categorias": [ ... ]}
 ```
@@ -459,7 +459,7 @@ el historial de git, no se perdio.
 ### `GET /api/v1/fallas` — listado paginado
 
 ```bash
-curl "https://backend-production-63d8.up.railway.app/api/v1/fallas?page=1&size=20&proyecto_id=147" \
+curl "https://operaciones.unergy.io/api/v1/fallas?page=1&size=20&proyecto_id=147" \
   -H "X-API-Key: $UNERGY_API_KEY"
 ```
 
@@ -511,7 +511,7 @@ Acepta el mismo conjunto de campos que el create (todos opcionales), más `pendi
 Solo se aplican los campos presentes en el body. Mandar `categoria_codigo` recalcula toda la clasificación y, si el nuevo subtipo no es de los pendientes, limpia `pendiente_reclasificar` — así se reclasifica una desconexión sin identificar:
 
 ```bash
-curl -X PATCH https://backend-production-63d8.up.railway.app/api/v1/fallas/5831 \
+curl -X PATCH https://operaciones.unergy.io/api/v1/fallas/5831 \
   -H "X-API-Key: $UNERGY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"categoria_codigo": "red", "subtipo_codigo": "transformador"}'
@@ -538,7 +538,7 @@ Ambos campos son opcionales. Devuelve `201`.
 `multipart/form-data`, campo `archivo`. Límite **20 MB** (`400` si se excede). Los archivos van a Google Drive, en `Raíz → Proyecto → Código de falla`. Alias equivalente: `POST /api/v1/fallas/{id}/attachments`.
 
 ```bash
-curl -X POST https://backend-production-63d8.up.railway.app/api/v1/fallas/5831/archivos \
+curl -X POST https://operaciones.unergy.io/api/v1/fallas/5831/archivos \
   -H "X-API-Key: $UNERGY_API_KEY" \
   -F "archivo=@evidencia.jpg"
 ```
@@ -580,7 +580,7 @@ Razones de "Clasificación inválida" que van a ver:
 import os
 import requests
 
-BASE = "https://backend-production-63d8.up.railway.app/api/v1"
+BASE = "https://operaciones.unergy.io/api/v1"
 SESSION = requests.Session()
 SESSION.headers["X-API-Key"] = os.environ["UNERGY_API_KEY"]
 
