@@ -144,6 +144,10 @@ REST_FRAMEWORK = {
     # Repone el cuerpo dict bajo `detail`: DRF lo devuelve crudo en la raiz
     # y el frontend lee `e.data.detail`. Ver api/exceptions.py.
     "EXCEPTION_HANDLER": "api.exceptions.manejador_de_excepciones",
+    # Global a proposito: el default de DRF es True y serializa cada `Decimal`
+    # como string ("2205.225"), donde Pydantic mandaba el numero. Cualquier
+    # aritmetica del frontend sobre esos campos daba NaN.
+    "COERCE_DECIMAL_TO_STRING": False,
 }
 
 # El contenedor corre en UTC y el codigo asume UTC (ver _hoy_col()).
