@@ -18,9 +18,14 @@ from app.services.mgs.solenium_client import SoleniumClient
 logger = logging.getLogger("reconectadores")
 router = APIRouter(prefix="/reconectadores", tags=["Reconectadores"])
 
-_SOLENIUM_AUTH_URL  = "https://auth.solenium.co/api/token/"
-_SOLENIUM_RELAY_SET = "https://data.solenium.co/api/project/{sol_id}/relay/set-status/"
-_SOLENIUM_RELAY_GET = "https://data.solenium.co/api/project/{sol_id}/relay/"
+# Solenium migro de solenium.co a sole.tech (2026-09-07); el dominio viejo
+# esta muerto. La version viva de este modulo es
+# apps/monitoreo/services/reconectadores.py, que ya las toma de
+# configuracion -- estas se actualizan para que los dos arboles no digan
+# cosas distintas si alguien compara.
+_SOLENIUM_AUTH_URL  = "https://auth.sole.tech/api/token/"
+_SOLENIUM_RELAY_SET = "https://data.sole.tech/api/project/{sol_id}/relay/set-status/"
+_SOLENIUM_RELAY_GET = "https://data.sole.tech/api/project/{sol_id}/relay/"
 
 # Cliente interno (usa credenciales de Railway — no necesita creds del usuario)
 _client: SoleniumClient | None = None

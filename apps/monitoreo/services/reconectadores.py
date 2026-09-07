@@ -15,11 +15,22 @@ from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 
+from apps.comun.config import settings
+
 logger = logging.getLogger("operaciones.reconectadores")
 
-AUTH_URL = "https://auth.solenium.co/api/token/"
-RELAY_SET = "https://data.solenium.co/api/project/{sol_id}/relay/set-status/"
-RELAY_GET = "https://data.solenium.co/api/project/{sol_id}/relay/"
+# Las URLs salen de la configuracion, no hardcodeadas. Estaban fijas en este
+# archivo y cuando Solenium migro de solenium.co a sole.tech (2026-09-07) el
+# ON/OFF de los relays quedo roto sin que hubiera forma de arreglarlo sin
+# desplegar. Ahora es el mismo `SOLENIUM_*` que usa `SoleniumClient` para leer,
+# asi que las dos rutas de credenciales apuntan siempre al mismo servidor -- que
+# apuntaran a hosts distintos era un bug esperando.
+_AUTH = settings.SOLENIUM_AUTH_URL.rstrip("/").removesuffix("/token")
+_DATA = settings.SOLENIUM_DATA_URL.rstrip("/")
+
+AUTH_URL = f"{_AUTH}/token/"
+RELAY_SET = f"{_DATA}/project/{{sol_id}}/relay/set-status/"
+RELAY_GET = f"{_DATA}/project/{{sol_id}}/relay/"
 
 # Solenium tarda; 8 en paralelo es lo que hace que la pantalla cargue.
 HILOS = 8

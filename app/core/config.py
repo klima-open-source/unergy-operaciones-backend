@@ -101,14 +101,20 @@ class Settings(BaseSettings):
 
     # Sun Factory — Solenium EPC, cronogramas de construcción (próximos a energizarse).
     # Auth = auth.solenium.co/api/token/ (username/password → JWT access).
-    SUNFACTORY_API_URL: str = "https://sunfactory.solenium.co/api"
-    SUNFACTORY_AUTH_URL: str = "https://auth.solenium.co/api/token/"
+    SUNFACTORY_API_URL: str = "https://sunfactory.sole.tech/api"
+    SUNFACTORY_AUTH_URL: str = "https://auth.sole.tech/api/token/"
     SUNFACTORY_USERNAME: str = ""
     SUNFACTORY_PASSWORD: str = ""
 
     # Solenium API (FMO inverter data) — OAuth2 username/password
-    SOLENIUM_AUTH_URL: str = "https://auth.solenium.co/api"
-    SOLENIUM_DATA_URL: str = "https://data.solenium.co/api"
+    # Solenium migro de solenium.co a sole.tech. El dominio viejo esta MUERTO:
+    # resuelve por DNS pero el TLS lo rechaza (TLSV1_UNRECOGNIZED_NAME), asi que
+    # no falla como un 404 legible sino como un error de conexion. Verificado el
+    # 2026-09-07 contra los dos dominios; las rutas (/api/token/, /api/) no
+    # cambiaron. Estos defaults NO estan en el .env (ver el docstring de
+    # apps/comun/config.py), asi que este archivo es el que manda.
+    SOLENIUM_AUTH_URL: str = "https://auth.sole.tech/api"
+    SOLENIUM_DATA_URL: str = "https://data.sole.tech/api"
     SOLENIUM_USER: str = ""
     SOLENIUM_PASS: str = ""
 

@@ -153,7 +153,7 @@ def _set(monkeypatch, **vals):
 def test_sunfactory_token_falls_back_to_solenium_creds(monkeypatch):
     # Sin credenciales SUNFACTORY_* dedicadas → debe reusar SOLENIUM_USER/PASS.
     _set(monkeypatch, SUNFACTORY_USERNAME="", SUNFACTORY_PASSWORD="",
-         SUNFACTORY_AUTH_URL="https://auth.solenium.co/api/token/",
+         SUNFACTORY_AUTH_URL="https://auth.sole.tech/api/token/",
          SOLENIUM_USER="sol-user", SOLENIUM_PASS="sol-pass")
     monkeypatch.setattr(pe.httpx, "Client", _FakeClient)
     assert pe._sunfactory_token() == "tok-123"
@@ -163,7 +163,7 @@ def test_sunfactory_token_falls_back_to_solenium_creds(monkeypatch):
 def test_sunfactory_token_prefers_dedicated_creds(monkeypatch):
     # Si SUNFACTORY_* están seteadas, ganan sobre las de Solenium.
     _set(monkeypatch, SUNFACTORY_USERNAME="sf-user", SUNFACTORY_PASSWORD="sf-pass",
-         SUNFACTORY_AUTH_URL="https://auth.solenium.co/api/token/",
+         SUNFACTORY_AUTH_URL="https://auth.sole.tech/api/token/",
          SOLENIUM_USER="sol-user", SOLENIUM_PASS="sol-pass")
     monkeypatch.setattr(pe.httpx, "Client", _FakeClient)
     assert pe._sunfactory_token() == "tok-123"

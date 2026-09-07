@@ -37,10 +37,16 @@ DEFECTOS = {
     "TIMEZONE": "America/Bogota",
     "PPA_ALERT_DAYS": "90,60,30",
     "PPA_ALERT_EMAILS": "adhara@unergy.io,jessica@unergy.io",
-    "SUNFACTORY_API_URL": "https://sunfactory.solenium.co/api",
-    "SUNFACTORY_AUTH_URL": "https://auth.solenium.co/api/token/",
-    "SOLENIUM_AUTH_URL": "https://auth.solenium.co/api",
-    "SOLENIUM_DATA_URL": "https://data.solenium.co/api",
+    # Solenium migro de solenium.co a sole.tech. El dominio viejo esta MUERTO:
+    # resuelve por DNS pero el TLS lo rechaza (TLSV1_UNRECOGNIZED_NAME), asi que
+    # no falla como un 404 legible sino como un error de conexion. Verificado el
+    # 2026-09-07 contra los dos dominios; las rutas (/api/token/, /api/) no
+    # cambiaron. Estos defaults NO estan en el .env (ver el docstring de
+    # apps/comun/config.py), asi que este archivo es el que manda.
+    "SUNFACTORY_API_URL": "https://sunfactory.sole.tech/api",
+    "SUNFACTORY_AUTH_URL": "https://auth.sole.tech/api/token/",
+    "SOLENIUM_AUTH_URL": "https://auth.sole.tech/api",
+    "SOLENIUM_DATA_URL": "https://data.sole.tech/api",
     "SOLARVIEW_BASE_URL": "https://api.sole.tech",
     "QUOIA_BASE_URL": "https://gaia.quoia.energy/api",
     "GAIA_BASE_URL": "https://gaia.quoia.energy",

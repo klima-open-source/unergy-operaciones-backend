@@ -17,7 +17,7 @@ TOKEN_MARGIN_SECONDS = 60
 
 class SoleniumClient:
     def __init__(self):
-        # SOLENIUM_AUTH_URL debe ser la BASE (ej: https://auth.solenium.co/api)
+        # SOLENIUM_AUTH_URL debe ser la BASE (ej: https://auth.sole.tech/api)
         # El cliente agrega /token/ y /token/refresh/ según necesite.
         auth = settings.SOLENIUM_AUTH_URL.rstrip("/")
         # Si la URL ya incluye /token al final, quitar para quedarnos con la base
