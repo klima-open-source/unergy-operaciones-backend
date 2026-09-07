@@ -1,32 +1,35 @@
-"""El enlace del correo al cliente no puede apuntar a localhost.
+"""El correo de falla al cliente NO lleva enlace a la plataforma. Y `FRONTEND_URL`
+--que sigue vivo para otro correo-- no puede apuntar a localhost.
 
-Bug real (2026-09-07): `FRONTEND_URL` tenia como default
-`http://localhost:5173`, y ese valor termina en el boton "Ver detalle de la
-falla" del correo que se manda AL CLIENTE cuando se le notifica una falla
-(`app/services/email_service.py`). El cliente recibia un enlace que no lleva a
-ninguna parte.
+Dos cosas distintas que comparten la misma variable, y por eso viven juntas acá.
 
-Dos defectos encadenados, y el segundo es el interesante:
+── 1. El correo de falla no debe ofrecer un botón ────────────────────────────
 
-  1. El default era de desarrollo. Encima con el puerto viejo: venia de antes de
-     Nuxt (`nuxt dev` usa 3000, no 5173), asi que no servia ni localmente.
+Tenía un botón "Ver detalle de la falla" apuntando a `/fallas/{id}` de la
+plataforma interna. El cliente **no puede abrirlo**: no hay rol de cliente
+(admin, operaciones, monitoreo, liquidaciones, comercial, coordinador, tecnico
+son los siete que existen, todos internos) y el guard global del frontend lo
+manda al login, donde se queda.
 
-  2. `send_falla_notification_email` **ya degrada bien**: con `frontend_url`
-     vacio pone un texto sin enlace en vez del boton. Pero
-     `fallas/notificacion.py` pasaba `settings.FRONTEND_URL or
-     "http://localhost:5173"` -- siempre verdadero-- asi que esa defensa NUNCA
-     podia dispararse. Un fallback puesto "por seguridad" anulaba la proteccion
-     que existia una capa mas abajo.
+Antes del 2026-09-07 era peor: la URL era `http://localhost:5173` --el default
+de desarrollo, con el puerto de antes de Nuxt-- así que el botón no llevaba a
+ninguna parte. Corregir el dominio lo dejó llevando a un login inaccesible, que
+sigue sin servirle a nadie. Decisión de la usuaria: quitar el botón. El correo
+conserva código, proyecto, estado, prioridad y descripción, que es lo que el
+cliente necesita.
 
-Por que nadie lo veia: del lado de la plataforma no se nota nada. El correo se
-manda, el boton se ve bien, y el fallo solo aparece cuando alguien del lado del
-cliente le da clic. No hay log, no hay error, no hay pantalla donde mirarlo.
+Para terceros que sí necesiten consultar existe `GET /fallas/por-proyecto` con
+API Key -- una API para integrar, no una página.
 
-Este test cubre las dos mitades: que el default sea de produccion, y que
-`notificacion.py` no reintroduzca un fallback que tape la degradacion.
+── 2. `FRONTEND_URL` sigue importando, para el correo de recuperar contraseña ─
+
+`email_service.py` arma `f"{FRONTEND_URL}/reset-password/{token}"`, y ese sí va
+a un usuario interno CON cuenta. Con el default viejo, quien olvidaba su
+contraseña recibía un enlace a localhost. Ese default vive en el código y el
+`.env` de producción no lo trae (ver el docstring de apps/comun/config.py), así
+que el valor de acá es el que usa producción.
 """
 import inspect
-import re
 
 import pytest
 
@@ -47,64 +50,72 @@ def _django_listo():
 PLATAFORMA = "https://operaciones.unergy.io"
 
 
-def test_el_default_es_produccion_no_localhost():
-    """El default vive en el codigo, no en el `.env` (ver el docstring de
-    apps/comun/config.py), asi que este valor es el que usa produccion."""
+# ── El correo de falla ────────────────────────────────────────────────────────
+
+def test_el_correo_de_falla_no_lleva_ningun_enlace():
+    """Un cliente no puede pasar del login, así que cualquier enlace a la
+    plataforma es un botón que no funciona."""
+    from app.services.email_service import send_falla_notification_email
+
+    fuente = inspect.getsource(send_falla_notification_email)
+
+    assert "<a href" not in fuente, (
+        "El correo de falla volvió a tener un enlace. El cliente no tiene cuenta "
+        "en la plataforma: el guard lo manda al login y ahí se queda. Si hace "
+        "falta que consulte, el camino es GET /fallas/por-proyecto con API Key, "
+        "o una vista pública nueva."
+    )
+    assert "frontend_url" not in fuente, (
+        "Volvió el parámetro `frontend_url` a este correo. Se quitó junto con el "
+        "botón; si vuelve, alguien está armando otra vez un enlace."
+    )
+
+
+def test_el_correo_de_falla_sigue_registrando_su_proyecto():
+    """`proyecto_id` NO era del enlace: va al log de auditoría del envío
+    (`_log_envio`). Se quitó por error al sacar el botón y se restituyó -- este
+    test es para no repetirlo."""
+    from app.services.email_service import send_falla_notification_email
+
+    firma = inspect.signature(send_falla_notification_email).parameters
+
+    assert "proyecto_id" in firma
+    assert "proyecto_id=proyecto_id" in inspect.getsource(send_falla_notification_email)
+
+
+# ── FRONTEND_URL, para el correo de recuperar contraseña ─────────────────────
+
+def test_el_default_de_frontend_url_es_produccion_no_localhost():
     from apps.comun.config import DEFECTOS
 
     url = DEFECTOS["FRONTEND_URL"]
 
     assert "localhost" not in url and "127.0.0.1" not in url, (
-        f"FRONTEND_URL es {url!r}. Ese valor va al boton del correo al cliente: "
-        "un enlace a localhost no lleva a ninguna parte y no se nota desde la "
-        "plataforma."
+        f"FRONTEND_URL es {url!r}. Ese valor arma el enlace del correo de "
+        "recuperar contraseña: con localhost, un usuario interno que olvida su "
+        "clave recibe un enlace que no lleva a ninguna parte."
     )
     assert url == PLATAFORMA, url
 
 
 def test_los_dos_arboles_declaran_el_mismo_default():
-    """`SoleniumClient` y otros servicios portados leen la config de FastAPI, y
-    el correo la de Django: si divergen, el enlace depende de quien lo mande."""
+    """El correo lo manda código que lee la config de FastAPI; si divergen, el
+    enlace depende de quién lo mande."""
     from app.core.config import settings as fastapi
     from apps.comun.config import DEFECTOS
 
     assert fastapi.FRONTEND_URL == DEFECTOS["FRONTEND_URL"]
 
 
-def test_la_notificacion_no_tapa_la_degradacion_con_un_fallback():
-    """Con `frontend_url` vacio el correo pone un texto sin enlace en vez de un
-    boton roto. Un `or "http://..."` al pasarlo hace que eso nunca ocurra."""
-    from apps.monitoreo.services.fallas import notificacion
+def test_el_correo_de_reset_arma_su_enlace_sobre_la_ruta_que_existe():
+    """`/reset-password/{token}` es una ruta real del frontend
+    (app/pages/reset-password/[token]). Es el ÚNICO correo que debe llevar a la
+    plataforma, porque va a alguien que sí tiene cuenta."""
+    from app.services.email_service import send_reset_password_email
 
-    fuente = inspect.getsource(notificacion)
-    linea = re.search(r"frontend_url\s*=\s*(.+?),\s*$", fuente, re.MULTILINE)
+    fuente = inspect.getsource(send_reset_password_email)
 
-    assert linea, "no se encontro el paso de `frontend_url` -- revisar este test"
-    assert "or " not in linea.group(1), (
-        f"`frontend_url={linea.group(1)}` trae un fallback. Con eso la rama de "
-        "email_service que evita el boton roto nunca se ejecuta."
-    )
-    # Sin los comentarios: el docstring y las notas de este modulo mencionan
-    # localhost a proposito, para explicar el bug. Lo que no puede haberlo es el
-    # codigo.
-    codigo = "\n".join(
-        l for l in fuente.splitlines() if not l.lstrip().startswith("#")
-    )
-    assert "localhost" not in codigo, (
-        "notificacion.py tiene una URL de desarrollo en el codigo: no puede "
-        "haber localhost en el camino del correo al cliente."
-    )
-
-
-def test_el_correo_arma_el_enlace_sobre_la_ruta_que_existe():
-    """`/fallas/{id}` es una ruta real del frontend
-    (app/pages/fallas/[id]/index.vue). Se fija el patron para que un cambio de
-    ruta no deje el boton apuntando a un 404."""
-    from app.services import email_service
-
-    fuente = inspect.getsource(email_service.send_falla_notification_email)
-
-    assert 'f"{frontend_url}/fallas/{falla_id}"' in fuente, (
-        "cambio la forma del enlace: verificar que la ruta nueva exista en el "
-        "frontend antes de actualizar este test."
+    assert 'f"{settings.FRONTEND_URL}/reset-password/{token}"' in fuente, (
+        "cambió la forma del enlace de reset: verificar que la ruta nueva exista "
+        "en el frontend antes de actualizar este test."
     )

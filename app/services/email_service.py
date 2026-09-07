@@ -423,8 +423,7 @@ def send_falla_notification_email(
     fecha_programada: str = "",
     registrado_por: str,
     accion: str = "creada",
-    frontend_url: str = "",
-    falla_id: int | None = None,
+    # No es del enlace: va al log de auditoria del envio (_log_envio).
     proyecto_id: int | None = None,
     # backwards-compat
     estado_color: str = "",
@@ -480,7 +479,6 @@ def send_falla_notification_email(
         ("Seguimiento en curso",
          "Nuestro equipo está gestionando esta falla. Recibirás actualizaciones ante cualquier cambio de estado o resolución.")
     )
-    falla_url  = f"{frontend_url}/fallas/{falla_id}" if (frontend_url and falla_id) else (f"{frontend_url}/fallas" if frontend_url else "")
     logo_svg   = (
         '<svg width="44" height="36" viewBox="0 0 44 36" fill="none" xmlns="http://www.w3.org/2000/svg">'
         '<circle cx="22" cy="4" r="3" fill="white"/>'
@@ -582,7 +580,7 @@ def send_falla_notification_email(
 
   <!-- 8. CTA -->
   <tr><td style="background:#ffffff;padding:20px 28px;text-align:center;border-left:1px solid #EDE8F5;border-right:1px solid #EDE8F5">
-    {'<a href="' + falla_url + '" style="display:inline-block;background:#1A0F2E;color:#F6FF72;font-size:13px;font-weight:800;padding:13px 32px;border-radius:8px;text-decoration:none;letter-spacing:.3px">Ver detalle de la falla →</a>' if falla_url else '<span style="display:inline-block;background:#1A0F2E;color:#F6FF72;font-size:13px;font-weight:800;padding:13px 32px;border-radius:8px;letter-spacing:.3px">Plataforma Unergy Operaciones</span>'}
+    <span style="display:inline-block;background:#1A0F2E;color:#F6FF72;font-size:13px;font-weight:800;padding:13px 32px;border-radius:8px;letter-spacing:.3px">Plataforma Unergy Operaciones</span>
   </td></tr>
 
   <!-- 9. FOOTER -->

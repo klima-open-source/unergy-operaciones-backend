@@ -54,14 +54,6 @@ def enviar_notificacion(falla, accion: str, usuario_nombre: str) -> dict:
         fecha_programada=str(falla.fecha_programada or ""),
         registrado_por=usuario_nombre,
         accion=accion,
-        # Sin fallback: `send_falla_notification_email` ya degrada bien --
-        # con `frontend_url` vacio pone un texto sin enlace en vez del boton
-        # (email_service.py:585). El `or "http://localhost:5173"` que habia
-        # aca ANULABA esa defensa: al ser siempre verdadero, el correo al
-        # cliente nunca caia al texto y en su lugar llevaba un enlace a
-        # localhost. Mejor sin boton que con un boton que no lleva a nada.
-        frontend_url=settings.FRONTEND_URL,
-        falla_id=falla.id,
         proyecto_id=falla.proyecto_id,
     )
     resultado["sin_correos"] = False

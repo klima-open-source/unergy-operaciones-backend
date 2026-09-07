@@ -764,8 +764,6 @@ def _enviar_notificacion(
         fecha_programada=str(falla.fecha_programada or ""),
         registrado_por=usuario_nombre,
         accion=accion,
-        frontend_url=settings.FRONTEND_URL,
-        falla_id=falla.id,
         proyecto_id=falla.proyecto_id,
     )
     resultado["sin_correos"] = False
