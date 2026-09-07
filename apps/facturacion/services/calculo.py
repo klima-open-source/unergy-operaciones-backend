@@ -160,7 +160,7 @@ def periodo(per: str) -> dict:
     anio, mes = int(per[:4]), int(per[5:7])
     ultimo_dia = date(anio, mes, monthrange(anio, mes)[1])
 
-    ipp_fila = mx_models.IppMensual.objects.filter(
+    ipp_fila = ppa_models.IppMensual.objects.filter(
         **{"año": anio, "mes": mes}
     ).first()
     ipp = float(ipp_fila.valor) if ipp_fila else None
