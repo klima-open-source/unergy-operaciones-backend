@@ -46,6 +46,17 @@ FALLA_MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 DRIVE_ROOT_FOLDER_ID = "0AD_e3wIWHByDUk9PVA"
 
 
+class PaginacionFallas(PaginacionConPaginas):
+    """20/5000, los limites que declaraba `app/api/v1/fallas.py:609-611`.
+
+    No se cambia `api.pagination` porque sus 50/500 son el default de los otros
+    46 recursos, y en FastAPI cada listado traia sus propios limites.
+    """
+
+    page_size = 20
+    max_page_size = 5000
+
+
 def _drive():
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
@@ -119,7 +130,7 @@ class FallaViewSet(viewsets.GenericViewSet):
     """
 
     permission_classes = [RolePermission]
-    pagination_class = PaginacionConPaginas
+    pagination_class = PaginacionFallas
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
     queryset = mo_models.Falla.objects.filter(deleted_at__isnull=True)
@@ -222,8 +233,8 @@ class FallaViewSet(viewsets.GenericViewSet):
         # `page_size` es un alias histórico de `size` solo en este listado.
         alias = request.query_params.get("page_size")
         if alias and not request.query_params.get("size"):
-            request.GET = request.GET.copy()
-            request.GET["size"] = alias
+            request._request.GET = request._request.GET.copy()
+            request._request.GET["size"] = alias
         pagina = self.paginate_queryset(consultas.filtrar(parametros))
         return self.get_paginated_response(
             fa_serializers.FallaListaSerializer(pagina, many=True).data
