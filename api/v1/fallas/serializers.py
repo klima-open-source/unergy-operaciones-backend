@@ -62,10 +62,17 @@ class ProyectoResumenSerializer(serializers.Serializer):
 
 class FallaIntervaloSerializer(serializers.ModelSerializer):
     falla_id = serializers.IntegerField(read_only=True)
+    # ponytail: FastAPI declaraba `duracion_horas` en FallaIntervaloOut y nunca
+    # lo poblaba. Se repone la llave con su `null` historico para no romper a un
+    # consumidor estricto; si algun dia hay que calcularla, va en `dominio`.
+    duracion_horas = serializers.SerializerMethodField()
 
     class Meta:
         model = mo_models.FallaIntervalo
-        fields = ["id", "falla_id", "inicio", "fin", "nota", "created_at"]
+        fields = ["id", "falla_id", "inicio", "fin", "nota", "duracion_horas", "created_at"]
+
+    def get_duracion_horas(self, obj) -> None:
+        return None
 
 
 class FallaInversorSerializer(serializers.ModelSerializer):
@@ -175,6 +182,14 @@ class FallaInversorEntradaSerializer(serializers.Serializer):
     tipos = serializers.ListField(child=serializers.CharField(), required=False, default=list)
 
 
+# `tipo_id`, `estado_id`, `prioridad_id`, `resolucion_id` y `alarma_monitoreo_id`
+# son *attnames* de FK, no nombres de campo del modelo: `ModelSerializer` no sabe
+# construirlos y cae en `build_property_field`, que los degrada a `ReadOnlyField`.
+# El serializer valida sin errores y `validated_data` sale SIN ellos — un PATCH de
+# estado respondia 200 sin cambiar nada. Van declarados a mano en los dos
+# serializers de entrada, y como `IntegerField` (no `PrimaryKeyRelatedField`) para
+# conservar el contrato: el FK lo valida la base y `dominio.integridad_a_error`
+# traduce el `IntegrityError` a 422, igual que FastAPI.
 _COLUMNAS_ENTRADA = [
     "tipo_id", "estado_id", "prioridad_id", "resolucion_id", "descripcion",
     "fecha_identificacion", "hora_identificacion", "fecha_ocurrencia",
@@ -186,14 +201,24 @@ _COLUMNAS_ENTRADA = [
 ]
 
 
+_COLUMNAS_ACTUALIZAR = [c for c in _COLUMNAS_ENTRADA if c != "alarma_monitoreo_id"]
+
+
 class FallaCrearSerializer(serializers.ModelSerializer):
     """POST. `intervalos`, `inversores` y `generar_impacto` NO son columnas."""
 
     proyecto_id = serializers.IntegerField()
     estado_id = serializers.IntegerField()
     prioridad_id = serializers.IntegerField()
-    intervalos = FallaIntervaloEntradaSerializer(many=True, required=False, allow_null=True, default=None)
-    inversores = FallaInversorEntradaSerializer(many=True, required=False, allow_null=True, default=None)
+    tipo_id = serializers.IntegerField(required=False, allow_null=True)
+    resolucion_id = serializers.IntegerField(required=False, allow_null=True)
+    alarma_monitoreo_id = serializers.IntegerField(required=False, allow_null=True)
+    # Sin `default=None`: `intervalos` es tambien el `related_name` del FK inverso,
+    # y DRF se niega a darle default a un campo m2m — reventaba con ValueError al
+    # CONSTRUIR el serializer, o sea 500 en todo POST. El view ya tolera la
+    # ausencia (`datos.pop("intervalos", None)`).
+    intervalos = FallaIntervaloEntradaSerializer(many=True, required=False, allow_null=True)
+    inversores = FallaInversorEntradaSerializer(many=True, required=False, allow_null=True)
     generar_impacto = serializers.BooleanField(required=False, default=False)
 
     class Meta:
@@ -209,10 +234,16 @@ class FallaActualizarSerializer(serializers.ModelSerializer):
     """PATCH. `sla_cumplido` NO es editable: siempre lo calcula
     `dominio.sincronizar_resolucion`."""
 
+    tipo_id = serializers.IntegerField(required=False, allow_null=True)
+    estado_id = serializers.IntegerField(required=False, allow_null=True)
+    prioridad_id = serializers.IntegerField(required=False, allow_null=True)
+    resolucion_id = serializers.IntegerField(required=False, allow_null=True)
     intervalos = FallaIntervaloEntradaSerializer(many=True, required=False, allow_null=True)
     inversores = FallaInversorEntradaSerializer(many=True, required=False, allow_null=True)
 
     class Meta:
         model = mo_models.Falla
-        fields = [*_COLUMNAS_ENTRADA, "pendiente_reclasificar", "intervalos", "inversores"]
-        extra_kwargs = {c: {"required": False} for c in _COLUMNAS_ENTRADA}
+        # `alarma_monitoreo_id` fuera: `FallaUpdate` no lo expone, y aceptarlo
+        # dejaria reasignar la alarma de una falla por PATCH.
+        fields = [*_COLUMNAS_ACTUALIZAR, "pendiente_reclasificar", "intervalos", "inversores"]
+        extra_kwargs = {c: {"required": False} for c in _COLUMNAS_ACTUALIZAR}

@@ -19,6 +19,7 @@ según `es_estado_final` — nunca queda invisible. Ver `grupo_de_estado`.
 """
 from datetime import date
 
+from apps.monitoreo.services.fallas import dominio
 from apps.monitoreo.services.fallas.titulo import titulo_falla
 
 # El único estado agendado. Todo lo demás se decide por `es_estado_final`,
@@ -129,8 +130,8 @@ def falla_publica(falla) -> dict:
         "fecha_ocurrencia": falla.fecha_ocurrencia,
         "fecha_programada": falla.fecha_programada,
         "fecha_resolucion": falla.fecha_resolucion,
-        "dias_abierta": falla.dias_abierta,
-        "tiempo_afectacion_horas": falla.tiempo_afectacion_horas,
+        "dias_abierta": dominio.dias_abierta(falla),
+        "tiempo_afectacion_horas": dominio.tiempo_afectacion_horas(falla),
         "sla_limite_horas": falla.sla_limite_horas,
         "sla_cumplido": falla.sla_cumplido,
         "kwh_perdidos_estimado": _num(falla.kwh_perdidos_estimado),
