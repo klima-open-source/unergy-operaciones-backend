@@ -1,6 +1,6 @@
 # unergy-operaciones-backend
 
-Backend FastAPI de la plataforma de Operaciones de Unergy. Qué hace y cómo está
+Backend Django + DRF de la plataforma de Operaciones de Unergy. Qué hace y cómo está
 organizado por dentro: `backend.md`. Convenciones para trabajar en el repo:
 `CLAUDE.md`. Este archivo es solo cómo se construye, se corre y se despliega.
 
@@ -23,10 +23,11 @@ cp .env.example .env
 Mínimo a completar: las cinco `POSTGRES_*`/`PG_*` de la base, `SECRET_KEY`,
 `IMAGE` y `PORT`.
 
-La URL de conexión se arma en `app/core/config.py::armar_database_url`, y de ahí
-la leen igual la app, Alembic y los scripts. Si el proveedor entrega una URL de
-un solo pegue, ponla en `DATABASE_URL` y gana sobre las cinco piezas; acepta
-`postgres://` y `postgresql://` tal cual.
+La conexión se arma en `config/settings.py::DATABASES` desde esas cinco piezas, y
+de ahí la leen igual Django, Celery y los scripts. Si el proveedor entrega una URL
+de un solo pegue, ponla en `DATABASE_URL` y gana sobre las cinco piezas; acepta
+`postgres://` y `postgresql://` tal cual, y el `+psycopg` del dialecto de
+SQLAlchemy se ignora.
 
 ⚠️ Desde el contenedor, `PG_HOST=localhost` es el propio contenedor. Si el
 Postgres corre en el host, usa `PG_HOST=host.docker.internal` — el compose ya
@@ -35,11 +36,28 @@ trae el `extra_hosts` que lo resuelve.
 ## Correr en local sin Docker
 
 ```bash
-uv sync                          # crea .venv desde uv.lock
-uv run alembic upgrade head      # el esquema sale SOLO de aca
-uv run python scripts/verificar_esquema.py
-uv run uvicorn app.main:app --reload
+uv sync                                              # crea .venv desde uv.lock
+uv run python manage.py migrate                      # el esquema sale SOLO de aca
+uv run python scripts/verificar_esquema_django.py    # modelos vs. base
+uv run python manage.py runserver
 ```
+
+Contra una base que YA tiene las tablas (un dump de producción), la primera vez:
+`uv run python manage.py migrate --fake-initial`. Ver el comentario del servicio
+`migrate` en el `docker-compose.yml`.
+
+Las tareas programadas no las corre `runserver`. Si necesitás probarlas, con un
+Redis a mano (`docker run --rm -p 6379:6379 redis:7-alpine`) y `CELERY_BROKER_URL`
+apuntándole:
+
+```bash
+uv run celery -A config worker --loglevel=info --concurrency=1
+uv run celery -A config beat --loglevel=info      # solo si querés las franjas reales
+```
+
+Para disparar una tarea sola sin esperar su franja:
+`uv run python manage.py shell` y `from apps.<dominio>.tasks import <tarea>;
+<tarea>()` — llamarla directo la corre en proceso, sin cola.
 
 ## Construir la imagen
 
@@ -55,23 +73,19 @@ Qué hace el `Dockerfile`, en orden:
    `--no-install-recommends` a propósito: los recommends (JRE, fuentes, ayuda)
    inflaban la imagen cientos de MB y el build se quedaba sin disco.
 3. Copia el binario de `uv` desde `ghcr.io/astral-sh/uv:0.9`.
-4. `COPY pyproject.toml uv.lock` y `uv sync --frozen --no-dev`.
-
-
-
-6. 
-7. 
-8.  Solo los dos
+4. `COPY pyproject.toml uv.lock` y `uv sync --frozen --no-dev`. Solo los dos
    archivos, antes del código, para que el layer de dependencias se cachee y un
    cambio en un `.py` no reinstale nada.
-5. `COPY . .` y `CMD uvicorn app.main:app`.
+5. `COPY . .` y `CMD gunicorn config.wsgi:application`. Ese `CMD` es solo el
+   default de un `docker run` suelto: en el compose cada servicio trae su propio
+   `command`.
 
 Dos detalles que no son obvios:
 
 - El venv se instala en **`/opt/venv`** (`UV_PROJECT_ENVIRONMENT`), no en
   `/app/.venv`: el compose monta el repo sobre `/app` y taparía el venv de la
-  imagen. `PATH=/opt/venv/bin:$PATH` es lo que hace que `uvicorn` y `alembic` se
-  encuentren.
+  imagen. `PATH=/opt/venv/bin:$PATH` es lo que hace que `gunicorn`, `celery` y
+  `django-admin` se encuentren.
 - `--frozen` falla si `uv.lock` está desactualizado respecto al `pyproject.toml`.
   Si el build se queja, corre `uv lock` y commitea los dos archivos.
 
@@ -85,24 +99,31 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
-Dos servicios, del mismo `Dockerfile` (ancla `x-app-base` en el
-`docker-compose.yml`):
+Cinco servicios. Cuatro salen del mismo `Dockerfile` (ancla `x-app-base` en el
+`docker-compose.yml`); `redis` es la imagen oficial:
 
-| Servicio | Qué hace |
-|---|---|
-| `migrate` | One-shot: `alembic upgrade head && alembic current && python scripts/verificar_esquema.py`, y termina. Sin `\|\|`: si falla, sale con código ≠ 0 |
-| `operaciones` | Solo `uvicorn`. Espera con `service_completed_successfully` a que `migrate` haya terminado bien |
+| Servicio | `command` | Qué hace |
+|---|---|---|
+| `redis` | `redis-server --save "" --appendonly no` | Broker de Celery. Sin persistencia a propósito: el horario vive en Postgres y las tareas son idempotentes |
+| `migrate` | `manage.py migrate --fake-initial --no-input && showmigrations --plan && python scripts/verificar_esquema_django.py` | One-shot: crea/actualiza el esquema, verifica modelos vs. base y termina. Sin `\|\|`: si falla, sale con código ≠ 0 |
+| `operaciones` | `gunicorn config.wsgi:application` | La API. Espera con `service_completed_successfully` a que `migrate` haya terminado bien |
+| `worker` | `celery -A config worker --concurrency=1` | Corre las 19 tareas programadas |
+| `beat` | `celery -A config beat` | Las dispara según `config/horarios.py`. **Uno solo en todo el despliegue**: dos replicas dispararían la misma franja |
 
-O sea: **si la migración falla, el servicio no arranca**. Es deliberado — antes el
-arranque toleraba el fallo y la app quedaba sirviendo 500 con el esquema atrasado
-(ver `tests/test_modelo_vs_ddl.py`).
+O sea: **si la migración falla, nada arranca**. Es deliberado — antes el
+arranque toleraba el fallo y la app quedaba sirviendo 500 con el esquema atrasado.
+
+`gunicorn` y no `uvicorn`: las vistas de DRF son sincrónicas y bajo ASGI Django las
+corre con `thread_sensitive=True`, que las serializa en un solo hilo. Con workers
+sincrónicos cada petición tiene su proceso, que es el modelo para el que están
+escritas.
 
 Desplegar un cambio, a mano:
 
 ```bash
 git pull
 docker compose up -d --build          # rebuild solo si cambió pyproject.toml/uv.lock/Dockerfile
-docker compose restart operaciones    # si solo cambió código Python
+docker compose restart operaciones worker beat   # si solo cambió código Python
 ```
 
 El repo está montado en `/app`, así que un cambio de Python entra con un restart,
@@ -137,19 +158,24 @@ gestor de secretos que usen), nunca en el repo — `.gitignore` bloquea todo
 Un solo secret en vez de 60 sueltos: agregar una variable no obliga a tocar el
 workflow. Antes de escribirlo, el step exige que traiga `SECRET_KEY`, `IMAGE` y
 alguna de `DATABASE_URL`/`POSTGRES_DB`, y aborta el deploy si no — con un `.env`
-vacío la app arrancaría con los defaults de `app/core/config.py`, apuntando a
-`postgres:postgres@localhost`, y `migrate` sembraría ahí. El `.env` anterior queda
+vacío la app arrancaría con los defaults de `config/settings.py::DATABASES`,
+apuntando a `postgres:postgres@localhost`, y `migrate` migraría ahí. El `.env` anterior queda
 en `.env.anterior` por si el secret quedó mal.
 
 `migrate` **no** se levanta en todos los deploys. Corre si:
 
-1. el diff toca `alembic/` — el único camino que aplica esquema desde que se
-   retiraron `_PENDING_DDLS` e `init_db.py` (2026-08-31),
+1. el diff toca `apps/*/migrations/` — el único camino que aplica esquema desde
+   que Django lo tomó (2026-09-04). También se sigue mirando `alembic/`, que
+   debería ser inmutable: si alguien lo toca, mejor que dispare la migración y
+   falle a la vista,
 2. se lanzó a mano con `workflow_dispatch` y `migrar=siempre`, o
-3. `operaciones` no estaba arriba (arranque en frío: no se sabe en qué revisión
+3. `operaciones` no estaba arriba (arranque en frío: no se sabe en qué migración
    quedó la base).
 
-Si no, el deploy es `docker compose build` + `up -d --no-deps operaciones`. El
+Migre o no, el deploy termina en `docker compose up -d redis` +
+`up -d --no-deps operaciones worker beat`. **Los tres de larga vida, no solo el
+web**: levantar solo `operaciones` deja la API sirviendo con el sondeo de MGS, las
+alertas de vencimiento y el reporte de energía APAGADOS, sin ningún error. El
 `--no-deps` es deliberado: quien decide si se migra es el workflow, no el
 `depends_on`.
 
@@ -163,11 +189,17 @@ si no, imprime `ps` + las últimas 80 líneas de log y falla.
 | Variable | Default | Para qué |
 |---|---|---|
 | `IMAGE` | — | Tag de la imagen construida |
-| `PORT` | 8000 | Puerto de uvicorn, el publicado en el host y el del healthcheck |
-| `WORKERS` | 1 | Procesos de uvicorn. **>1 duplica los jobs del `BackgroundScheduler`**, que vive dentro del proceso web |
+| `PORT` | 8000 | Puerto de gunicorn, el publicado en el host y el del healthcheck |
+| `WORKERS` | 3 | Procesos de gunicorn. Ya puede ser >1: los jobs viven en el servicio `worker`, no dentro del proceso web |
+| `CELERY_BROKER_URL` | `redis://localhost:6379/0` | Lo apunta el compose a `redis://redis:6379/0` por `.env` |
+
+El `--concurrency=1` del `worker` **no** es configurable y no es provisional: dos
+tareas (`monitoreo.sondeo_mgs` y `mandatos.revisar_correos`) guardan estado en
+memoria del proceso y fallan calladas si se reparten entre workers. Subirlo exige
+sacar ese estado a Redis primero; el detalle está en el comentario del servicio.
 
 Las de la base (`POSTGRES_*`, `PG_*`, `DATABASE_URL`) no las usa el compose: van
-por `env_file` a los dos servicios y las lee el código.
+por `env_file` a los cuatro servicios de la app y las lee `config/settings.py`.
 
 Puertos y red: `operaciones` publica `${PORT}` en todas las interfaces. Si el
 servidor ya tiene nginx/Caddy con TLS, cambia el mapeo a
@@ -178,7 +210,9 @@ Volúmenes: `.:/app` (código), `./uploads:/app/uploads`
 Docker rotan a 3 × 10 MB (`logging:` en el compose); sin eso llenan el disco.
 
 Zona horaria: el contenedor corre en **UTC** (`TZ=UTC`) porque el código compensa
-Colombia (UTC−5) con `_hoy_col()`. No cambiarla.
+Colombia (UTC−5) con `apps.plataforma.services.fechas.hoy_col()`. Celery es la
+excepción y va en hora de Bogotá (`CELERY_TIMEZONE`), para que las franjas de
+`config/horarios.py` se lean como se escriben. No cambiarla.
 
 ## Pruebas
 
@@ -195,8 +229,9 @@ Deben pasar todas antes de subir. `tests.yml` las corre en cada PR a `master`, y
 ```bash
 docker compose ps                                    # estado + healthcheck
 docker compose logs -f operaciones
-docker compose exec operaciones alembic current      # revisión aplicada
+docker compose exec operaciones python manage.py showmigrations   # qué está aplicado
 docker compose run --rm migrate                      # re-correr migraciones a mano
+docker compose logs -f worker beat                   # tareas programadas
 docker compose down                                  # bajar todo
 ```
 
