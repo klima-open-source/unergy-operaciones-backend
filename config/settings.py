@@ -19,6 +19,7 @@ Dos decisiones que definen toda la migracion:
 """
 
 import os
+import sys
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -45,6 +46,15 @@ SECRET_KEY = os.getenv("SECRET_KEY", "")
 # variables locales (credenciales incluidas) y ALLOWED_HOSTS no se aplicaria.
 DEBUG = ENTORNO != "production"
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
+
+# El `Client` de django.test manda `Host: testserver`, asi que un ALLOWED_HOSTS
+# con el dominio real —lo correcto en produccion— hace que TODA peticion de una
+# prueba devuelva 400 DisallowedHost. Se agrega solo bajo pytest: en el
+# contenedor `pytest` no esta importado y la lista queda tal cual la define el
+# .env. Aqui y no en cada fixture para que valga tambien para la proxima prueba
+# que use el Client.
+if "pytest" in sys.modules and "testserver" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS = [*ALLOWED_HOSTS, "testserver"]
 
 # Los JWT se firman con SECRET_KEY. Vacia, jose firma con "" y cualquiera puede
 # forjar un token valido para cualquier sub/rol: toma total de una cuenta admin.
