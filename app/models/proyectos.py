@@ -212,7 +212,6 @@ class Proyecto(Base):
     operador: Mapped["OperadorRed | None"] = relationship("OperadorRed", back_populates="proyectos")
     fallas: Mapped[list["Falla"]] = relationship("Falla", back_populates="proyecto", uselist=True)
     generaciones: Mapped[list["GeneracionDiaria"]] = relationship("GeneracionDiaria", back_populates="proyecto", uselist=True)
-    mantenimientos: Mapped[list["Mantenimiento"]] = relationship("Mantenimiento", back_populates="proyecto", uselist=True)
     liquidaciones: Mapped[list["Liquidacion"]] = relationship("Liquidacion", back_populates="proyecto", uselist=True)
     asic_solicitudes: Mapped[list["AsicSolicitud"]] = relationship("AsicSolicitud", back_populates="proyecto", uselist=True)
     rec_procesos: Mapped[list["RecProceso"]] = relationship("RecProceso", back_populates="proyecto", uselist=True)

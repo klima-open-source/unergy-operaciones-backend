@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
@@ -788,7 +788,6 @@ def create_falla(
     fotos = dump.pop("fotos_urls", None)
     intervalos = dump.pop("intervalos", None)
     inversores = dump.pop("inversores", None)  # no es columna → se procesa aparte
-    generar_impacto = dump.pop("generar_impacto", False)  # dispara MantenimientoImpacto
 
     # Camino estructurado: validar antes de crear nada.
     categoria_codigo = dump.get("categoria_codigo")
@@ -835,65 +834,7 @@ def create_falla(
     # Alarmas de comunicación (frontera / inversores / total) — no bloqueante
     _alarmas_post_guardado(falla.id, db)
 
-    # Impacto de mantenimiento (opcional): si la falla derivó en una intervención,
-    # crea el registro con energía perdida/impacto calculados. No bloqueante.
-    if generar_impacto:
-        _generar_impacto_mantenimiento(falla, current_user, db)
-
     return _get_or_404(falla.id, db)
-
-
-def _generar_impacto_mantenimiento(falla: Falla, current_user, db: Session) -> None:
-    """Crea un MantenimientoImpacto ligado a la falla usando su ventana temporal.
-
-    Ventana: [fecha_ocurrencia, fecha_resolucion]; si falta la ocurrencia se usa
-    fecha/hora de identificación, y si falta la resolución se cierra con la hora
-    actual. Silenciosa ante errores: nunca debe tumbar la creación de la falla.
-    """
-    from app.models.mantenimiento_impacto import MantenimientoImpacto
-    from app.services.impact_calculator import ImpactCalculator
-
-    try:
-        inicio = falla.fecha_ocurrencia
-        if inicio is None and falla.fecha_identificacion:
-            inicio = datetime.combine(
-                falla.fecha_identificacion, falla.hora_identificacion or time(0, 0),
-                tzinfo=_COL_TZ,
-            )
-        if inicio is None:
-            return
-        fin = falla.fecha_resolucion or datetime.now(_COL_TZ)
-        if inicio.tzinfo is None:
-            inicio = inicio.replace(tzinfo=_COL_TZ)
-        if fin.tzinfo is None:
-            fin = fin.replace(tzinfo=_COL_TZ)
-        if fin < inicio:
-            fin = inicio
-
-        m = MantenimientoImpacto(
-            proyecto_id=falla.proyecto_id,
-            falla_id=falla.id,
-            maintenance_type="unscheduled",  # nace de una falla → no programado
-            start_time=inicio,
-            end_time=fin,
-            created_by=getattr(current_user, "id", None),
-        )
-        metrics = ImpactCalculator(db).calculate_impact(
-            proyecto_id=m.proyecto_id, start=m.start_time, end=m.end_time,
-        )
-        m.expected_generation_kwh = metrics["expected_generation_kwh"]
-        m.actual_generation_kwh = metrics["actual_generation_kwh"]
-        m.lost_energy_kwh = metrics["lost_energy_kwh"]
-        m.financial_impact_cop = metrics["financial_impact_cop"]
-        m.ppa_penalty_risk_flag = metrics["ppa_penalty_risk_flag"]
-        db.add(m)
-        db.commit()
-    except Exception:
-        db.rollback()
-        logging.getLogger(__name__).warning(
-            "No se pudo generar impacto de mantenimiento para falla %s", falla.id,
-            exc_info=True,
-        )
 
 
 # backfill_tipos_estructurados() / POST /backfill-tipos vivieron acá --

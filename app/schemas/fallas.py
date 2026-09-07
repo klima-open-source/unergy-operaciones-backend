@@ -128,9 +128,6 @@ class FallaCreate(BaseModel):
     frontera_afecta_medicion: Optional[bool] = None
     frontera_perdida_comunicacion: Optional[bool] = None
     inversores: Optional[list[FallaInversorIn]] = None
-    # Si True y la falla derivó en un mantenimiento, genera un registro en
-    # `mantenimiento_impacto` con la energía perdida/impacto calculados.
-    generar_impacto: bool = False
 
 
 class FallaUpdate(BaseModel):

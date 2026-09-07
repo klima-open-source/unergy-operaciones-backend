@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.config import settings
 from app.core.database import get_db
 from app.api.v1.auth import get_current_user
-from app.models import ContratoServicio, Mantenimiento
+from app.models import ContratoServicio
 from app.models.usuarios import Usuario
 from app.models.proyectos import Proyecto
 
@@ -361,25 +361,6 @@ async def _action_get_fmo_data(sub_project: str | None, date_from: str | None, d
                 "numero_contrato": cs.numero_contrato or "",
             }
 
-    mantenimientos = []
-    if proyecto:
-        try:
-            d_from = datetime.strptime(date_from, "%Y-%m-%d").date() if date_from else None
-            d_to = datetime.strptime(date_to, "%Y-%m-%d").date() if date_to else None
-        except Exception:
-            d_from = d_to = None
-        mq = db.query(Mantenimiento).filter(Mantenimiento.proyecto_id == proyecto.id)
-        if d_from:
-            mq = mq.filter(Mantenimiento.fecha >= d_from)
-        if d_to:
-            mq = mq.filter(Mantenimiento.fecha <= d_to)
-        for m in mq.order_by(Mantenimiento.fecha).all():
-            mantenimientos.append({
-                "id": m.id, "tipo": m.tipo or "", "descripcion": m.descripcion or "",
-                "fecha": m.fecha.isoformat() if m.fecha else "",
-                "estado": m.estado or "", "observaciones": m.observaciones or "",
-            })
-
     inverters: list = []
     inverters_error: str | None = None
     if proyecto:
@@ -390,7 +371,6 @@ async def _action_get_fmo_data(sub_project: str | None, date_from: str | None, d
         "contrato": contrato,
         "inverters": inverters,
         "inverters_error": inverters_error,
-        "mantenimientos": mantenimientos,
     }
 
 
