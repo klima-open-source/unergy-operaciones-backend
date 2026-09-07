@@ -15,7 +15,6 @@ import calendar
 import logging
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
 from typing import Optional
 
 from apps.plataforma.services.fechas import hoy_col
@@ -23,8 +22,7 @@ from apps.ppa.models import PpaCompromisoEnergia
 
 from .anual import _anual_meses_para_contrato, _build_fetch_sets
 from .consultas import (
-    _contratos_vigentes, _get_bolsa_avg, _lost_energy_mwh_por_proyecto,
-    _query_contratos_venta, _resolve_gescon,
+    _contratos_vigentes, _get_bolsa_avg, _query_contratos_venta, _resolve_gescon,
 )
 from .periodos import _responsable_payload, _rollup_cumplimiento
 from .xm_api import _fetch_month, _fetch_range, _fetch_recent_avg, _unergy_token
@@ -43,13 +41,6 @@ def resumen(year: int, month: int, incluir_todos: bool = False) -> dict:
     es_mes_futuro = (year > today.year) or (year == today.year and month > today.month)
     total_dias = calendar.monthrange(year, month)[1]
     dia_actual = today.day if es_mes_actual else total_dias
-    first_day = date(year, month, 1)
-    last_day = date(year, month, total_dias)
-
-    # Energía perdida por mantenimiento (MWh) por proyecto en el período: se
-    # descuenta del esperado para no penalizar el downtime excusado (ver
-    # _lost_energy_mwh_por_proyecto).
-    lost_map = _lost_energy_mwh_por_proyecto(first_day, last_day)
 
     # ── 1. Contratos y compromisos ────────────────────────────────────────────
     contratos = _contratos_vigentes(year, month, solo_relevantes=not incluir_todos)
@@ -184,17 +175,6 @@ def resumen(year: int, month: int, incluir_todos: bool = False) -> dict:
         total_gen += gen_total_c
         total_proy += gen_proy_c
 
-        # Energía perdida por mantenimiento atribuible a las plantas del contrato.
-        # Se descuenta del esperado (mínimo PPA) al medir disponibilidad, para no
-        # penalizar el downtime excusado y así reflejar el riesgo real de penalización.
-        pids_c = {asic.proyecto_id for asic in assignments if asic.proyecto_id}
-        perdida_mant_c = round(sum(lost_map.get(pid, 0.0) for pid in pids_c), 3)
-        gen_disponible_c = round(val_b + perdida_mant_c, 3)
-        if min_mwh is not None:
-            compras_ajustada_c = round(max(0.0, min_mwh - gen_disponible_c), 3)
-        else:
-            compras_ajustada_c = None
-
         contratos_result.append({
             "id": c.id,
             "nombre_interno": c.nombre_interno,
@@ -208,11 +188,6 @@ def resumen(year: int, month: int, incluir_todos: bool = False) -> dict:
             "estado": estado_c,
             "compras_bolsa_mwh": compras_c,
             "excedentes_bolsa_mwh": excedentes_c,
-            # Impacto de mantenimiento (excusa el downtime programado/no programado).
-            "energia_perdida_mantenimiento_mwh": perdida_mant_c if perdida_mant_c > 0 else None,
-            "gen_disponible_mwh": gen_disponible_c,
-            "compras_bolsa_ajustada_mwh": compras_ajustada_c,
-            "riesgo_penalizacion_mantenimiento": perdida_mant_c > 0,
             "exposicion_bolsa_duplicados_mwh": bolsa_dup_c if bolsa_dup_c > 0 else None,
             "uso_recurso_mwh": ur_c if ur_c > 0 else None,
             "n_plantas_activas": len(assignments),

@@ -35,7 +35,6 @@ urlpatterns = [
     path("", include("api.v1.liquidaciones.urls")),
     path("", include("api.v1.liquidaciones_proxy.urls")),
     path("", include("api.v1.mandatos.urls")),
-    path("", include("api.v1.mantenimiento_impacto.urls")),
     path("", include("api.v1.mapa.urls")),
     path("", include("api.v1.monitoreo.urls")),
     path("", include("api.v1.notificaciones.urls")),

@@ -88,7 +88,7 @@ hay. Marcadas ⚠ las que exigen partir un archivo actual.
 | `liquidaciones` | `liquidaciones`, `liquidacion_costos`, `liquidacion_facturas` | `liquidaciones`, `liquidaciones_proxy` |
 | `registros_cnd` | `registro_conexion`, `registro_etapa`, `registro_transicion`, `registro_hito`, `registro_parametros_93`, `registro_equipo_frontera`, `registro_documento`, `registro_alerta` | `registros_cnd` |
 | `energia` | `generacion_diaria`, `reporte_energia_generacion`, `reporte_energia_exclusiones`, `reporte_energia_consumo` | `generacion`, `solar`, `generacion_solar`, `reporte_energia`, `reporte_cgm` |
-| `monitoreo` | `fallas` y sus 5 catálogos, `fallas_seguimientos`, `fallas_intervalos`, `falla_inversores`, `alertas`, `mantenimientos`, `mantenimiento_impacto`, `starlink_facturas`, `starlink_mapeo_sitio`, `starlink_factura_linea` | `fallas`, `monitoreo`, `alertas`, `mantenimiento_impacto`, `reconectadores`, `starlink` |
+| `monitoreo` | `fallas` y sus 5 catálogos, `fallas_seguimientos`, `fallas_intervalos`, `falla_inversores`, `alertas`, `mantenimientos`, `starlink_facturas`, `starlink_mapeo_sitio`, `starlink_factura_linea` | `fallas`, `monitoreo`, `alertas`, `reconectadores`, `starlink` |
 | `om` | `om_ipc_tasas`, `om_seleccion_mensual`, `om_factura_mensual`, `om_pagina_sin_match`, `om_documento_proyecto`, `proyecto_informe_om` | `om`, `informe_om` |
 | `arriendos` | `arr_proyectos`, `arr_arrendador`, `arr_ipc_tasas`, `arr_documento`, `arr_seleccion_mensual` | `arriendos` |
 | `contabilidad` | `panel_contable`, `panel_contable_linea`, `clasificacion_liquidacion`, `mapeo_celda_concepto`, `alias_fuente_ingreso`, `panel_soporte`, `panel_consecutivo` | `panel_contable`, `estados_resultados` |
@@ -125,9 +125,10 @@ no son dominios separables.
 ### `app/api/v1/cumplimiento.py` — 3 805 líneas
 
 El archivo más grande del proyecto, y un router no debería tener 3 800 líneas de
-nada. Importa `asic`, `cumplimiento`, `contratos`, `liquidaciones`, `proyectos` y
-`mantenimiento_impacto`. Antes de portarlo hay que saber qué parte es consulta,
-qué parte es cálculo y qué parte pertenece a `mercado_xm` frente a `monitoreo`.
+nada. Importa `asic`, `cumplimiento`, `contratos`, `liquidaciones` y `proyectos`
+(también `mantenimiento_impacto`, eliminado el 2026-09-07). Antes de portarlo hay
+que saber qué parte es consulta, qué parte es cálculo y qué parte pertenece a
+`mercado_xm` frente a `monitoreo`.
 Es la única pieza cuyo destino este mapa no resuelve del todo.
 
 ### `app/main.py` — 2 665 líneas

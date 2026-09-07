@@ -20,19 +20,17 @@ Dos cosas que NO cambiaron y no deben cambiar:
 from __future__ import annotations
 
 import calendar
-from datetime import date, datetime
+from datetime import date
 
 from django.db import connection
-from django.db.models import F, Q, Sum
+from django.db.models import F, Q
 
 from apps.mercado_xm.models import AsicSolicitud
 from apps.mercado_xm.services.gescon_vigencia import resolver_vigencias
-from apps.monitoreo.models import MantenimientoImpacto
 from apps.plataforma.services.fechas import hoy_col
 from apps.ppa.models import PpaContrato, PpaResponsable
 
 from .periodos import UNGC_COMERCIALIZADOR
-from .xm_api import _COL_TZ
 
 # Los tres filtros que se repiten en cada consulta a GESCON: publicada y sin
 # contar los desistimientos. Escribirlos una vez evita que una consulta nueva
@@ -265,34 +263,6 @@ def _fin_efectivo_asic(asic, last_day: date) -> date | None:
     )
     v = resolver_vigencias(universo, hasta=last_day).get(asic.id)
     return v.fecha_fin_efectiva if v else asic.fecha_fin
-
-
-def _lost_energy_mwh_por_proyecto(first_day: date, last_day: date) -> dict[int, float]:
-    """MWh perdidos por mantenimiento por proyecto, para eventos que solapan el
-    período. Fuente: `mantenimiento_impacto`.
-
-    Es energía que la planta HABRÍA entregado de no estar en intervención: al
-    descontarla del esperado, la razón de disponibilidad deja de penalizar el
-    downtime excusado y refleja el verdadero riesgo de penalización PPA.
-    """
-    inicio = datetime(first_day.year, first_day.month, first_day.day, 0, 0, 0, tzinfo=_COL_TZ)
-    fin = datetime(last_day.year, last_day.month, last_day.day, 23, 59, 59, tzinfo=_COL_TZ)
-
-    filas = (
-        MantenimientoImpacto.objects
-        .filter(
-            lost_energy_kwh__isnull=False,
-            start_time__lte=fin,
-            end_time__gte=inicio,
-        )
-        .values("proyecto_id")
-        .annotate(lost_kwh=Sum("lost_energy_kwh"))
-    )
-    return {
-        f["proyecto_id"]: round(float(f["lost_kwh"]) / 1000, 3)
-        for f in filas
-        if f["lost_kwh"] is not None
-    }
 
 
 def _query_contratos_venta(year: int | None = None, month: int | None = None,
