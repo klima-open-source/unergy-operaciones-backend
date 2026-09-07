@@ -194,16 +194,12 @@ def test_patch_no_cierra_una_falla_pendiente_de_reclasificar(datos):
 
 
 # ── P0-3 · `por-proyecto` reventaba en cuanto devolvía filas ──────────────────
-
-def test_por_proyecto_devuelve_items(datos):
-    _falla(datos)
-    respuesta = _pedir(
-        "get", f"/api/v1/fallas/por-proyecto?proyecto_id={datos['proyecto'].id}",
-        datos, acciones={"get": "por_proyecto"},
-    )
-    assert respuesta.status_code == 200, respuesta.data
-    assert respuesta.data["items"], "sin filas no se ejercita el AttributeError"
-    assert "dias_abierta" in respuesta.data["items"][0]
+#
+# El test de este caso se retiro junto con el endpoint (2026-09-07): no lo
+# consumia ningun flujo interno ni el frontend. El arreglo que lo motivo NO se
+# perdio: `dominio.dias_abierta` / `dominio.tiempo_afectacion_horas` --las dos
+# propiedades que el port a Django no habia traido-- las sigue usando el
+# serializer del detalle (api/v1/fallas/serializers.py:146).
 
 
 # ── P1-4 y P1-5 · forma de la respuesta ───────────────────────────────────────

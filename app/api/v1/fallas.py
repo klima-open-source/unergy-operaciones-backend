@@ -14,17 +14,13 @@ from app.models import (
     FallaCatEstado, FallaCatPrioridad, FallaCatTipo, FallaCatCategoria, FallaCatResolucion,
 )
 from app.models.fallas import DEFAULT_SLA_HOURS
-from app.models.proyectos import Proyecto, ProyectoInversionista
+from app.models.proyectos import ProyectoInversionista
 from app.models.usuarios import Usuario
 from app.schemas.fallas import (
     FallaCreate, FallaUpdate, FallaOut, FallaListOut,
     FallaSeguimientoCreate, FallaSeguimientoOut,
     FallaCatalogos, FallaCatEstadoOut, FallaCatPrioridadOut, FallaCatTipoOut, FallaCatResolucionOut,
     FallaSLADashboard, FallaImpacto,
-)
-from app.services.fallas.consulta_publica import (
-    GRUPOS, GRUPOS_CONSULTABLES, GRUPO_TODAS, DESCRIPCION_GRUPOS,
-    grupo_de_estado, codigos_de_grupo, falla_publica, proyecto_publico,
 )
 from app.services.fallas.estructura import (
     ESTRUCTURA_FALLAS, get_categoria, validar_clasificacion, tipo_codigo,
@@ -966,150 +962,6 @@ def backfill_sla_endpoint(
     campo es siempre calculado (antes se podía fijar a mano). Con dry_run=true
     solo reporta qué cambiaría."""
     return backfill_sla_cumplido(db, dry_run=dry_run)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Consulta pública por proyecto (consumidores externos con API Key)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _resolver_proyecto(db: Session, proyecto_id, api_id_unergy, nombre) -> Proyecto:
-    """Resuelve la planta por id interno, llave de la API de Unergy o nombre.
-
-    Exige exactamente una llave. El match por nombre lo hace `_id_por_nombre` de
-    proyectos.py -- el mismo que respalda GET /proyectos/buscar: exacto sobre el
-    nombre normalizado (tolera tildes/mayúsculas/guiones, NO es difuso), con 409
-    y la lista de candidatos si el nombre es ambiguo.
-
-    Se reusa en vez de reimplementarse. Una versión propia con prefiltro ILIKE
-    sobre el texto crudo es sensible a tildes: "Santa Fe 2" no traía a "Santa Fé
-    2" como candidata, así que un nombre ambiguo se resolvía como único y la
-    integración se llevaba las fallas de la planta equivocada sin enterarse --
-    justo el caso que el 409 existe para atrapar.
-    """
-    llaves = [k for k in (proyecto_id, api_id_unergy, nombre) if k not in (None, "")]
-    if len(llaves) != 1:
-        raise HTTPException(422, "Indique exactamente una de: proyecto_id, api_id_unergy, nombre.")
-
-    if proyecto_id is not None:
-        proyecto = db.query(Proyecto).filter(
-            Proyecto.id == proyecto_id, Proyecto.deleted_at.is_(None)).first()
-        if not proyecto:
-            raise HTTPException(404, f"No existe un proyecto con id {proyecto_id}.")
-        return proyecto
-
-    if api_id_unergy:
-        proyecto = db.query(Proyecto).filter(
-            Proyecto.sub_project == api_id_unergy, Proyecto.deleted_at.is_(None)).first()
-        if not proyecto:
-            raise HTTPException(404, f"No existe un proyecto con api_id_unergy '{api_id_unergy}'.")
-        return proyecto
-
-    from app.api.v1.proyectos import _id_por_nombre
-    return db.get(Proyecto, _id_por_nombre(db, nombre))
-
-
-@router.get("/por-proyecto")
-def fallas_por_proyecto(
-    proyecto_id: int | None = Query(
-        None, description="Id interno de la planta en la Plataforma de Operaciones."),
-    api_id_unergy: str | None = Query(
-        None, description="Llave de la planta en la API de generacion de Unergy "
-                          "(el `sub_project`). Alternativa a proyecto_id."),
-    nombre: str | None = Query(
-        None, description="Nombre exacto de la planta (sin distinguir tildes ni "
-                          "mayusculas). Si es ambiguo devuelve 409."),
-    estado: str = Query(
-        "vigente",
-        description="Cubeta de estado a consultar: vigente | programado | terminado | todas."),
-    desde: date | None = Query(
-        None, description="Filtra por fecha de identificacion >= esta fecha (YYYY-MM-DD)."),
-    hasta: date | None = Query(
-        None, description="Filtra por fecha de identificacion <= esta fecha (YYYY-MM-DD)."),
-    page: int = Query(1, ge=1),
-    size: int = Query(100, ge=1, le=1000),
-    db: Session = Depends(get_db),
-    _=Depends(get_current_user),
-):
-    """Fallas de una planta, agrupadas en tres estados de cara al consumidor.
-
-    Los estados internos son seis (`abierta`, `en_gestion`, `en_espera`,
-    `programado`, `cerrada`, `sin_solucion`). Aca se traducen a las tres
-    cubetas que pidio la integracion:
-
-      · **vigente**    -> la falla sigue viva (abierta / en gestion / en espera)
-      · **programado** -> hay intervencion agendada (ver `fecha_programada`)
-      · **terminado**  -> ya se cerro (`cerrada` o `sin_solucion`)
-
-    `todas` trae las tres. El `resumen` siempre trae el conteo de las tres
-    cubetas, sin importar cual se haya filtrado, para que el consumidor sepa
-    que mas hay sin pedir otra pagina.
-
-    El identificador de la planta puede ser `proyecto_id`, `api_id_unergy`
-    (el `sub_project`, la misma llave de /comercial/proyectos-operando) o
-    `nombre` exacto. Va exactamente uno.
-    """
-    grupo = (estado or "").strip().lower()
-    if grupo not in GRUPOS_CONSULTABLES:
-        raise HTTPException(
-            422,
-            f"estado '{estado}' no es valido. Use uno de: "
-            f"{', '.join(GRUPOS_CONSULTABLES)}.",
-        )
-    if desde and hasta and desde > hasta:
-        raise HTTPException(422, "El parametro 'desde' no puede ser posterior a 'hasta'.")
-
-    proyecto = _resolver_proyecto(db, proyecto_id, api_id_unergy, nombre)
-
-    catalogo_estados = db.query(FallaCatEstado).order_by(FallaCatEstado.orden).all()
-
-    base = db.query(Falla).filter(
-        Falla.proyecto_id == proyecto.id,
-        Falla.deleted_at.is_(None),
-    )
-    if desde:
-        base = base.filter(Falla.fecha_identificacion >= desde)
-    if hasta:
-        base = base.filter(Falla.fecha_identificacion <= hasta)
-
-    # Resumen de las tres cubetas sobre el MISMO universo filtrado por fecha,
-    # en una sola consulta agrupada (no una por cubeta).
-    conteo_por_codigo = dict(
-        base.join(FallaCatEstado, Falla.estado_id == FallaCatEstado.id)
-            .with_entities(FallaCatEstado.codigo, func.count(Falla.id))
-            .group_by(FallaCatEstado.codigo)
-            .all()
-    )
-    resumen = {g: 0 for g in GRUPOS}
-    for e in catalogo_estados:
-        resumen[grupo_de_estado(e.codigo, e.es_estado_final)] += conteo_por_codigo.get(e.codigo, 0)
-    resumen["total"] = sum(resumen[g] for g in GRUPOS)
-
-    if grupo == GRUPO_TODAS:
-        codigos = [e.codigo for e in catalogo_estados]
-    else:
-        codigos = codigos_de_grupo(catalogo_estados, grupo)
-
-    query = (base.options(*_FALLA_LOAD_LISTA)
-                 .join(FallaCatEstado, Falla.estado_id == FallaCatEstado.id)
-                 .filter(FallaCatEstado.codigo.in_(codigos)))
-
-    total = query.count()
-    items = (query.order_by(Falla.fecha_identificacion.desc(), Falla.id.desc())
-                  .offset((page - 1) * size).limit(size).all())
-
-    return {
-        "proyecto": proyecto_publico(proyecto),
-        "estado_consultado": grupo,
-        "estados_incluidos": codigos,
-        "significado_estados": DESCRIPCION_GRUPOS,
-        "filtro_fechas": {"desde": desde, "hasta": hasta},
-        "resumen": resumen,
-        "total": total,
-        "page": page,
-        "size": size,
-        "pages": -(-total // size) if total else 0,
-        "items": [falla_publica(f) for f in items],
-    }
 
 
 @router.get("/{id}", response_model=FallaOut)

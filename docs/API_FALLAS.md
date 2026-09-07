@@ -444,139 +444,17 @@ Cuando mandan `categoria_codigo`, el servidor calcula y sobrescribe estos campos
 
 ## 7. Consultar las fallas creadas
 
-### `GET /api/v1/fallas/por-proyecto` — las fallas de una planta, en tres estados
+### `GET /api/v1/fallas/por-proyecto` — **RETIRADO** (2026-09-07)
 
-Este es el endpoint pensado para integraciones que solo quieren responder *"¿qué fallas tiene esta planta?"*. A diferencia de `GET /fallas`, no hay que aprenderse el catálogo interno de estados ni resolver IDs: se pide la planta, se elige el estado, y listo.
+Este endpoint devolvia las fallas de una planta agrupadas en tres estados
+(`vigente` / `programado` / `terminado`). **Se elimino**: no lo consumia
+ningun flujo interno ni el frontend, y no habia evidencia de integracion
+activa contra el.
 
-```bash
-curl "https://backend-production-63d8.up.railway.app/api/v1/fallas/por-proyecto?proyecto_id=147&estado=vigente" \
-  -H "X-API-Key: $UNERGY_API_KEY"
-```
-
-#### Los tres estados
-
-Adentro la plataforma maneja seis estados. De cara a ustedes se agrupan en tres:
-
-| `estado=` | Qué trae | Estados internos que incluye |
-|---|---|---|
-| `vigente` | La falla sigue viva: identificada y sin resolver | `abierta`, `en_gestion`, `en_espera` |
-| `programado` | Hay una intervención agendada — miren `fecha_programada` | `programado` |
-| `terminado` | Ya se cerró y no está afectando la operación | `cerrada`, `sin_solucion` |
-| `todas` | Las tres juntas | todos |
-
-**`vigente` es el default** si no mandan `estado`. Ojo con una sutileza: `programado` *no* está incluido dentro de `vigente` aunque la falla no esté cerrada. Se separan a propósito, porque una falla con fecha de intervención ya tiene un plan y una en gestión no. Si quieren "todo lo que no está cerrado", pidan `vigente` y `programado`, o usen `todas` y filtren por `estado.grupo`.
-
-Cada ítem trae además su estado interno crudo en `estado.codigo`, por si necesitan el detalle fino.
-
-#### Cómo identificar la planta
-
-Va **exactamente una** de estas tres (si mandan cero o dos, es `422`):
-
-| Parámetro | Qué es |
-|---|---|
-| `proyecto_id` | El ID interno de la planta. Es el más directo si ya lo tienen |
-| `api_id_unergy` | El `sub_project` — la misma llave con la que la planta se identifica en la API de generación de Unergy y en `/comercial/proyectos-operando` |
-| `nombre` | El nombre exacto de la planta. Tolera mayúsculas, tildes y espacios de más, pero **no** es búsqueda parcial |
-
-Si el nombre coincide con más de una planta devuelve `409` con la lista de candidatos y sus IDs, en vez de elegir una por ustedes. Reconsulten con `proyecto_id`.
-
-#### Filtros y paginación
-
-| Parámetro | Tipo | Descripción |
-|---|---|---|
-| `estado` | `string` | `vigente` (default) / `programado` / `terminado` / `todas` |
-| `desde` / `hasta` | `date` | Rango sobre `fecha_identificacion` (`YYYY-MM-DD`) |
-| `page` | `int` ≥1 | Default 1 |
-| `size` | `int` 1–1000 | Default 100 |
-
-Orden fijo: `fecha_identificacion` descendente. Las fallas borradas nunca salen.
-
-#### La respuesta
-
-```json
-{
-  "proyecto": {
-    "id": 10, "nombre": "Santa Fe 2", "api_id_unergy": "SF2", "sub_project": "SF2",
-    "estado": "en_operacion", "municipio": "Sincelejo", "departamento": "Sucre",
-    "potencia_instalada_kwp": 990.0
-  },
-  "estado_consultado": "programado",
-  "estados_incluidos": ["programado"],
-  "significado_estados": { "vigente": "...", "programado": "...", "terminado": "..." },
-  "filtro_fechas": { "desde": null, "hasta": null },
-  "resumen": { "vigente": 3, "programado": 1, "terminado": 2, "total": 6 },
-  "total": 1, "page": 1, "size": 100, "pages": 1,
-  "items": [
-    {
-      "id": 4,
-      "codigo": "FAL-2026-00004",
-      "estado":    { "codigo": "programado", "etiqueta": "Programado",
-                     "grupo": "programado", "es_estado_final": false },
-      "prioridad": { "codigo": "alta", "etiqueta": "Alta", "nivel": 3 },
-      "descripcion": "Mantenimiento correctivo del inversor 3",
-      "tipo": "Inversores",
-      "clasificacion": { "categoria_codigo": "inversores", "categoria": "Inversores",
-                         "subtipo_codigo": "no_generacion", "subtipo": "No generación",
-                         "detalle": null },
-      "resolucion": null,
-      "causa_raiz": null,
-      "acciones_correctivas": null,
-      "fecha_identificacion": "2026-08-21",
-      "hora_identificacion": null,
-      "fecha_ocurrencia": null,
-      "fecha_programada": "2026-08-28",
-      "fecha_resolucion": null,
-      "dias_abierta": 4,
-      "tiempo_afectacion_horas": null,
-      "sla_limite_horas": null,
-      "sla_cumplido": null,
-      "kwh_perdidos_estimado": null,
-      "impacto_economico_cop": null,
-      "frontera_afecta_medicion": null,
-      "frontera_perdida_comunicacion": null,
-      "inversores_perdida_comunicacion": null,
-      "origen": null,
-      "creada_en": "2026-08-21T09:14:02Z",
-      "actualizada_en": "2026-08-25T11:02:44Z"
-    }
-  ]
-}
-```
-
-Dos campos que ahorran llamadas:
-
-- **`resumen`** cuenta las tres cubetas *siempre*, sin importar cuál filtraron (y respetando `desde`/`hasta`). Es como saben que hay 3 vigentes sin pedir otra página.
-- **`total`** / **`pages`** son de la consulta filtrada, no del resumen.
-
-#### Diferencias con `GET /fallas?proyecto_id=…`
-
-Los dos sirven; este es más cómodo para integrar:
-
-| | `GET /fallas` | `GET /fallas/por-proyecto` |
-|---|---|---|
-| Estados | Los seis internos, por código o ID | Tres cubetas estables |
-| Identificar la planta | Solo `proyecto_id` | `proyecto_id`, `api_id_unergy` o `nombre` |
-| Conteos | Hay que pedirlos aparte | `resumen` viene en la misma respuesta |
-| Datos de usuarios internos | Incluye nombre y **correo** | No incluye ningún dato de usuarios internos |
-| Estabilidad | Expone IDs de catálogo, que **no** son estables entre entornos | No expone IDs de catálogo |
-
-#### Errores
-
-| Código | Cuándo |
-|---|---|
-| `401` | Falta el `X-API-Key`, o la key no es válida |
-| `404` | No existe una planta con ese `proyecto_id` / `api_id_unergy` / `nombre` |
-| `409` | El `nombre` coincide con más de una planta. El `detail` trae `candidatos[]` con sus IDs |
-| `422` | No mandaron exactamente una llave de planta, o `estado` no es uno de los cuatro, o `desde` > `hasta` |
-
-#### Probarlo
-
-```bash
-export UNERGY_API_KEY=uop_...
-python scripts/pruebas_api_fallas/probar_prod.py --proyecto-id 147
-```
-
-Recorre los cuatro estados, imprime una muestra y verifica que las cubetas sumen el total. Es de solo lectura.
+Si necesitan consultar fallas, usen **`GET /api/v1/fallas`** (documentado mas
+abajo): trae los mismos datos con el catalogo de estados completo. Y si
+hacen falta las tres cubetas otra vez, escribannos y lo reponemos -- esta en
+el historial de git, no se perdio.
 
 ### `GET /api/v1/fallas` — listado paginado
 

@@ -24,19 +24,14 @@ from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
-from api.exceptions import NoProcesable, ServicioNoDisponible
+from api.exceptions import ServicioNoDisponible
 from api.logging import class_logger_wrapper
 from api.pagination import PaginacionConPaginas
 from api.permissions import RolePermission
 from api.v1.cumplimiento import parametros as par
 from apps.monitoreo import models as mo_models
 from apps.monitoreo.services.fallas import consultas, dominio
-from apps.monitoreo.services.fallas.consulta_publica import (
-    DESCRIPCION_GRUPOS, GRUPO_TODAS, GRUPOS, GRUPOS_CONSULTABLES,
-    codigos_de_grupo, falla_publica, grupo_de_estado, proyecto_publico,
-)
 from apps.monitoreo.services.fallas.estructura import ESTRUCTURA_FALLAS
-from apps.proyectos.services.resolucion import resolver_proyecto
 
 from . import serializers as fa_serializers
 
@@ -115,7 +110,7 @@ class FallaViewSet(viewsets.GenericViewSet):
     """Fallas de las plantas: registro, seguimiento y SLA.
 
     GET  /api/v1/fallas/sla-dashboard · /catalogos · /estructura
-    GET  /api/v1/fallas/stats/resumen · /actividad-hoy · /por-proyecto
+    GET  /api/v1/fallas/stats/resumen · /actividad-hoy
     GET|POST /api/v1/fallas
     POST /api/v1/fallas/backfill-sla
     GET|PATCH|DELETE /api/v1/fallas/{id}
@@ -361,83 +356,6 @@ class FallaViewSet(viewsets.GenericViewSet):
         return Response(consultas.backfill_sla_cumplido(
             dry_run=par.bandera(request, "dry_run", defecto=True)
         ))
-
-    # ── Consulta pública por planta ───────────────────────────────────────
-
-    @action(detail=False, methods=["get"], url_path="por-proyecto")
-    def por_proyecto(self, request):
-        """Fallas de una planta, en las tres cubetas que pidió la integración.
-
-        Los estados internos son seis; acá se traducen a `vigente` (sigue viva),
-        `programado` (hay intervención agendada) y `terminado` (ya se cerró). El
-        `resumen` SIEMPRE trae el conteo de las tres, sin importar cuál se filtró,
-        para que el consumidor sepa qué más hay sin pedir otra página.
-        """
-        grupo = (request.query_params.get("estado") or "vigente").strip().lower()
-        if grupo not in GRUPOS_CONSULTABLES:
-            raise NoProcesable(
-                f"estado '{request.query_params.get('estado')}' no es valido. "
-                f"Use uno de: {', '.join(GRUPOS_CONSULTABLES)}."
-            )
-        desde = request.query_params.get("desde")
-        hasta = request.query_params.get("hasta")
-        if desde and hasta and desde > hasta:
-            raise NoProcesable("El parametro 'desde' no puede ser posterior a 'hasta'.")
-
-        proyecto = resolver_proyecto(
-            proyecto_id=par.entero(request, "proyecto_id"),
-            api_id_unergy=request.query_params.get("api_id_unergy"),
-            nombre=request.query_params.get("nombre"),
-        )
-        catalogo = list(mo_models.FallaCatEstado.objects.order_by("orden"))
-
-        base = mo_models.Falla.objects.filter(
-            proyecto_id=proyecto.id, deleted_at__isnull=True,
-        )
-        if desde:
-            base = base.filter(fecha_identificacion__gte=desde)
-        if hasta:
-            base = base.filter(fecha_identificacion__lte=hasta)
-
-        # El resumen de las tres cubetas sobre el MISMO universo filtrado por
-        # fecha, en una sola consulta agrupada (no una por cubeta).
-        from django.db.models import Count
-
-        conteo = dict(
-            base.values_list("estado__codigo")
-            .annotate(n=Count("id"))
-            .values_list("estado__codigo", "n")
-        )
-        resumen = {g: 0 for g in GRUPOS}
-        for e in catalogo:
-            resumen[grupo_de_estado(e.codigo, e.es_estado_final)] += conteo.get(e.codigo, 0)
-        resumen["total"] = sum(resumen[g] for g in GRUPOS)
-
-        codigos = ([e.codigo for e in catalogo] if grupo == GRUPO_TODAS
-                   else codigos_de_grupo(catalogo, grupo))
-        qs = (
-            base.select_related(*consultas.RELACIONES_LISTA)
-            .filter(estado__codigo__in=codigos)
-            .order_by("-fecha_identificacion", "-id")
-        )
-        total = qs.count()
-        page = par.entero(request, "page", 1, 1, None)
-        size = par.entero(request, "size", 100, 1, 1000)
-        items = qs[(page - 1) * size: page * size]
-
-        return Response({
-            "proyecto": proyecto_publico(proyecto),
-            "estado_consultado": grupo,
-            "estados_incluidos": codigos,
-            "significado_estados": DESCRIPCION_GRUPOS,
-            "filtro_fechas": {"desde": desde, "hasta": hasta},
-            "resumen": resumen,
-            "total": total,
-            "page": page,
-            "size": size,
-            "pages": -(-total // size) if total else 0,
-            "items": [falla_publica(f) for f in items],
-        })
 
     # ── Detalle ───────────────────────────────────────────────────────────
 
