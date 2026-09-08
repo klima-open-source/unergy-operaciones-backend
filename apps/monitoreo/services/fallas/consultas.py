@@ -108,7 +108,15 @@ def stats_resumen() -> dict:
     corte_alerta = hoy - timedelta(days=7)
 
     def _contar(*filtros):
-        return Falla.objects.filter(*filtros).count()
+        # `deleted_at` va EN EL HELPER, no en cada llamada: los cinco contadores
+        # lo necesitan y olvidarlo en uno era justo el bug. Una falla
+        # soft-borrada seguia contando como activa, en revision y en alerta.
+        #
+        # Es el mismo bug que el KPI del dashboard ya arreglo el 2026-08-19
+        # (api/v1/dashboard/queryset.py:27-32); este resumen quedo fuera. Venia
+        # de FastAPI, donde `_count()` tampoco lo filtraba, asi que no lo
+        # introdujo la migracion — pero tampoco lo arreglo.
+        return Falla.objects.filter(*filtros, deleted_at__isnull=True).count()
 
     abiertas = Q(estado__es_estado_final=False)
     finales = Q(estado__es_estado_final=True)

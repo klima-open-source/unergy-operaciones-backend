@@ -133,6 +133,11 @@ def _falla(datos, **extra):
     from apps.monitoreo import models as mo
 
     campos = {
+        # Dentro de `campos` y no como kwarg fijo del `create`: `codigo_interno`
+        # es UNIQUE, asi que un test que necesite DOS fallas tiene que poder
+        # pasarle otro. Con el kwarg fijo, `_falla(datos, codigo_interno=...)`
+        # reventaba con "got multiple values".
+        "codigo_interno": "FAL-2026-00001",
         "proyecto_id": datos["proyecto"].id,
         "estado_id": datos["abierto"].id,
         "prioridad_id": datos["alta"].id,
@@ -141,7 +146,7 @@ def _falla(datos, **extra):
         "registrado_por_id": datos["usuario"].id,
     }
     campos.update(extra)
-    falla = mo.Falla.objects.create(codigo_interno="FAL-2026-00001", **campos)
+    falla = mo.Falla.objects.create(**campos)
     return falla
 
 
@@ -314,3 +319,63 @@ def test_las_fechas_validas_siguen_filtrando(datos):
                datos, acciones={"get": "list"})
     assert r.status_code == 200, r.data
     assert r.data["total"] == 1
+
+
+# ── P1-8 · `stats/resumen` contaba las fallas borradas ────────────────────────
+#
+# `consultas.stats_resumen` no filtraba `deleted_at__isnull=True` en ninguno de
+# sus cinco contadores, asi que una falla soft-borrada seguia contando como
+# activa, en revision y en alerta. Es el mismo bug que el KPI del dashboard ya
+# arreglo el 2026-08-19; este resumen quedo fuera. Venia de FastAPI --su
+# `_count()` tampoco lo filtraba-- asi que no lo introdujo la migracion, pero
+# tampoco lo arreglo. `sla_dashboard`, `filtrar` y `backfill` SI filtraban.
+
+def test_stats_resumen_no_cuenta_las_fallas_borradas(datos):
+    from datetime import datetime as dt, timezone as tz
+
+    from apps.monitoreo import models as mo
+    from apps.monitoreo.services.fallas import consultas
+
+    # `en_revision` cuenta por el codigo del estado, que el fixture no trae.
+    gestion = mo.FallaCatEstado.objects.create(
+        codigo="en_gestion", etiqueta="En gestion", orden=2, es_estado_final=False
+    )
+
+    # Una viva, en gestion e identificada hace meses: cuenta en los tres.
+    _falla(datos, codigo_interno="FAL-VIVA", estado_id=gestion.id,
+           fecha_identificacion=date(2026, 1, 1))
+    base = consultas.stats_resumen()
+    assert base["total_activas"] == 1, base
+    assert base["en_revision"] == 1, base
+    assert base["alerta_7_dias"] == 1, base
+
+    # Una identica pero soft-borrada: no debe mover ningun contador.
+    _falla(datos, codigo_interno="FAL-BORRADA", estado_id=gestion.id,
+           fecha_identificacion=date(2026, 1, 1),
+           deleted_at=dt(2026, 9, 1, tzinfo=tz.utc))
+
+    despues = consultas.stats_resumen()
+    assert despues["total_activas"] == 1, despues
+    assert despues["en_revision"] == 1, despues
+    assert despues["alerta_7_dias"] == 1, despues
+
+
+def test_stats_resumen_no_cuenta_una_resuelta_borrada(datos):
+    from datetime import datetime as dt, timezone as tz
+
+    from apps.monitoreo.services.fallas import consultas
+    from apps.plataforma.services.fechas import hoy_col
+
+    ahora = dt.now(tz.utc)
+    # Resuelta este mes y con SLA evaluado, pero borrada. `updated_at` es
+    # `auto_now`, asi que cae en el mes actual y entra en la ventana.
+    falla = _falla(datos, codigo_interno="FAL-RES-BORRADA",
+                   estado_id=datos["cerrado"].id, fecha_identificacion=hoy_col(),
+                   fecha_resolucion=ahora, sla_cumplido=True)
+    falla.deleted_at = ahora
+    falla.save(update_fields=["deleted_at"])
+
+    stats = consultas.stats_resumen()
+    assert stats["resueltas_mes"] == 0, stats
+    # Sin base evaluable el porcentaje es None, no 100.
+    assert stats["cumplimiento_sla_pct"] is None, stats
