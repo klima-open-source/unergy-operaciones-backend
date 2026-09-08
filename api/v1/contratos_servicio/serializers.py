@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from apps.contratos import models as ct_models
 from apps.facturacion import models as fa_models
+from apps.proyectos import models as py_models
 
 
 class ContratoSerializer(serializers.ModelSerializer):
@@ -13,18 +14,29 @@ class ContratoSerializer(serializers.ModelSerializer):
     inversionista_id = serializers.IntegerField(allow_null=True)
     portafolio_id = serializers.IntegerField(allow_null=True)
     nombre_proyecto = serializers.SerializerMethodField()
+    # El frontend (ServiciosUnificadoView.vue) decide si mostrar la planta o el
+    # boton "Sin proyecto" mirando este objeto anidado -- `proyecto_id` solo
+    # (arriba) no le alcanza. Sin esto TODO contrato se veia "Sin proyecto",
+    # incluso los que si tenian planta asociada.
+    proyecto = serializers.SerializerMethodField()
     frontera_ids = serializers.SerializerMethodField()
     enlace_drive = serializers.SerializerMethodField()
 
     class Meta:
         model = ct_models.ContratoServicio
-        exclude = [
-            "proyecto", "contratante", "prestador", "inversionista",
-            "portafolio",
-        ]
+        exclude = ["contratante", "prestador", "inversionista", "portafolio"]
 
     def get_nombre_proyecto(self, obj) -> str | None:
         return obj.proyecto.nombre_comercial if obj.proyecto else None
+
+    def get_proyecto(self, obj) -> dict | None:
+        if not obj.proyecto:
+            return None
+        return {
+            "id": obj.proyecto.id,
+            "nombre_comercial": obj.proyecto.nombre_comercial,
+            "tipo_proyecto": obj.proyecto.tipo_proyecto,
+        }
 
     def get_frontera_ids(self, obj) -> list[int]:
         return [
@@ -50,10 +62,19 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
     enlace_drive = serializers.CharField(
         required=False, allow_null=True, allow_blank=True
     )
+    # `fields = "__all__"` generaba el campo relacional bajo la clave "proyecto"
+    # (el nombre del FK), pero el frontend manda "proyecto_id" -- DRF ignora en
+    # silencio una clave que no reconoce, asi que "Asociar a un proyecto"
+    # respondia 200 sin guardar nada. Mismo patron que ya usa
+    # api/v1/verificacion_costos/serializers.py.
+    proyecto_id = serializers.PrimaryKeyRelatedField(
+        source="proyecto", queryset=py_models.Proyecto.objects.all(),
+        allow_null=True, required=False,
+    )
 
     class Meta:
         model = ct_models.ContratoServicio
-        fields = "__all__"
+        exclude = ["proyecto"]
         extra_kwargs = {"servicio_aplica": {"required": False}}
 
 
