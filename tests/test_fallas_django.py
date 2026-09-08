@@ -520,7 +520,7 @@ def test_el_sla_contractual_sin_fecha_no_inventa_dias(datos):
     from apps.monitoreo.services.fallas import sla_contractual
 
     r = sla_contractual.evaluar(mo.Falla(fecha_identificacion=None))
-    assert r["dias"] == 0 and r["cumple"] is True, r
+    assert r["dias"] is None and r["cumple"] is None, r
 
 
 @pytest.mark.parametrize(("categoria", "plazo"), [
@@ -569,12 +569,12 @@ def test_una_abierta_pasada_del_plazo_no_cumple(datos):
     assert (r["dias"], r["cumple"]) == (3, False), r
 
 
-def test_una_cerrada_cumple_siempre_aunque_se_haya_cerrado_tarde(datos):
-    """Regla del contrato, no de implementacion. Fijada para que no se mueva.
+def test_una_cerrada_tarde_NO_cumple(datos):
+    """Decision del 2026-09-08: las cerradas tambien se evaluan.
 
-    El Anexo 4 no reporta incumplimiento en incidentes ya cerrados. Si el negocio
-    decide lo contrario, hay que cambiarlo A PROPOSITO -- y este test es el que
-    va a avisar.
+    Antes `cumple` era True para toda falla en estado final, y el Anexo 4 quedaba
+    incapaz de reportar un incumplimiento. Es al reves: en una cerrada el
+    cumplimiento es un hecho establecido -- se sabe cuanto tardo.
     """
     from datetime import datetime as dt, timezone as tz
 
@@ -582,7 +582,36 @@ def test_una_cerrada_cumple_siempre_aunque_se_haya_cerrado_tarde(datos):
                estado_id=datos["cerrado"].id,
                fecha_resolucion=dt(2026, 6, 1, 12, 0, tzinfo=tz.utc),
                clasificacion={"categoria": "red"})
-    assert r["dias"] > 100 and r["cumple"] is True, r
+    assert r["dias"] > 100, r
+    assert r["cumple"] is False, r
+
+
+def test_una_cerrada_a_tiempo_cumple(datos):
+    from datetime import datetime as dt, timezone as tz
+
+    # `red` da 2 dias de plazo; se cerro al dia siguiente.
+    r = _sla_c(datos, fecha_identificacion=date(2026, 6, 1),
+               estado_id=datos["cerrado"].id,
+               fecha_resolucion=dt(2026, 6, 2, 12, 0, tzinfo=tz.utc),
+               clasificacion={"categoria": "red"})
+    assert (r["dias"], r["cumple"]) == (1, True), r
+
+
+def test_una_cerrada_SIN_fecha_de_resolucion_no_se_juzga(datos):
+    """Dato legacy real: `consultas.py` lo documenta en `activa_en_fecha`.
+
+    `dias_abierta` cae a HOY cuando no hay `fecha_resolucion`, asi que juzgarla
+    daria un incumplimiento enorme e inventado. No sabemos cuando se cerro: se
+    dice que no se sabe. La regla anterior --cerrada = siempre cumple-- tapaba
+    este caso.
+    """
+    r = _sla_c(datos, fecha_identificacion=date(2026, 1, 1),
+               estado_id=datos["cerrado"].id, fecha_resolucion=None,
+               clasificacion={"categoria": "red"})
+    assert r["cumple"] is None, r
+    assert r["dias"] is None, r
+    # El plazo si se sabe: sale de la categoria.
+    assert r["plazo_dias"] == 2, r
 
 
 def test_el_serializer_expone_el_sla_contractual(datos):
