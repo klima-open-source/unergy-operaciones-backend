@@ -12,7 +12,9 @@ no hay nada que comparar.
 
 Un recurso **retirado** es el tercer caso, y no se expresa quitandolo de la lista
 sin mas: eso lo dejaria pareciendo "todavia en FastAPI". Va en
-`PREFIJOS_RETIRADOS`, con su fecha y su razon.
+`PREFIJOS_RETIRADOS` --si se fue el recurso completo-- o en `RUTAS_RETIRADAS`
+--si el recurso sigue vivo y solo se quitaron algunos endpoints--, con su fecha y
+su razon.
 """
 
 import os
@@ -87,6 +89,23 @@ PREFIJOS_PORTADOS = [
 PREFIJOS_RETIRADOS = [
     "/api/v1/mantenimiento-impacto",
 ]
+
+# Rutas SUELTAS retiradas. No van arriba porque su recurso sigue vivo: quitar
+# `/api/v1/fallas` de la vigilancia por tres endpoints dejaria los otros quince
+# sin comparar. Llevan el verbo porque un mismo path puede conservar unos metodos
+# y perder otros.
+#
+#   GET /fallas/sla-dashboard, GET /fallas/stats/resumen, GET /fallas/{}/impacto
+#       2026-09-08  Ninguna pantalla los consumia --no estan en el `RUTAS` de
+#       `features/fallas/services/fallas.ts`-- y el unico integrador externo vivo
+#       (la API Key "Api Fallas", usada el 2026-08-20) solo crea y consulta
+#       fallas. El de impacto ademas ESCRIBIA en un GET, congelando un numero
+#       provisional calculado con `now()` (§5.9 de ARQUITECTURA_MONITOREO.md).
+RUTAS_RETIRADAS = {
+    ("/api/v1/fallas/sla-dashboard", "GET"),
+    ("/api/v1/fallas/stats/resumen", "GET"),
+    ("/api/v1/fallas/{}/impacto", "GET"),
+}
 
 
 # Verbos que DRF agrega por su cuenta y FastAPI nunca declara.
@@ -220,7 +239,9 @@ def _de_los_portados(rutas):
 
     return {
         (ruta, metodo) for ruta, metodo in rutas
-        if cubre(ruta, PREFIJOS_PORTADOS) and not cubre(ruta, PREFIJOS_RETIRADOS)
+        if cubre(ruta, PREFIJOS_PORTADOS)
+        and not cubre(ruta, PREFIJOS_RETIRADOS)
+        and (ruta, metodo) not in RUTAS_RETIRADAS
     }
 
 

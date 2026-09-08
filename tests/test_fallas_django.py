@@ -323,62 +323,10 @@ def test_las_fechas_validas_siguen_filtrando(datos):
 
 # ── P1-8 · `stats/resumen` contaba las fallas borradas ────────────────────────
 #
-# `consultas.stats_resumen` no filtraba `deleted_at__isnull=True` en ninguno de
-# sus cinco contadores, asi que una falla soft-borrada seguia contando como
-# activa, en revision y en alerta. Es el mismo bug que el KPI del dashboard ya
-# arreglo el 2026-08-19; este resumen quedo fuera. Venia de FastAPI --su
-# `_count()` tampoco lo filtraba-- asi que no lo introdujo la migracion, pero
-# tampoco lo arreglo. `sla_dashboard`, `filtrar` y `backfill` SI filtraban.
-
-def test_stats_resumen_no_cuenta_las_fallas_borradas(datos):
-    from datetime import datetime as dt, timezone as tz
-
-    from apps.monitoreo import models as mo
-    from apps.monitoreo.services.fallas import consultas
-
-    # `en_revision` cuenta por el codigo del estado, que el fixture no trae.
-    gestion = mo.FallaCatEstado.objects.create(
-        codigo="en_gestion", etiqueta="En gestion", orden=2, es_estado_final=False
-    )
-
-    # Una viva, en gestion e identificada hace meses: cuenta en los tres.
-    _falla(datos, codigo_interno="FAL-VIVA", estado_id=gestion.id,
-           fecha_identificacion=date(2026, 1, 1))
-    base = consultas.stats_resumen()
-    assert base["total_activas"] == 1, base
-    assert base["en_revision"] == 1, base
-    assert base["alerta_7_dias"] == 1, base
-
-    # Una identica pero soft-borrada: no debe mover ningun contador.
-    _falla(datos, codigo_interno="FAL-BORRADA", estado_id=gestion.id,
-           fecha_identificacion=date(2026, 1, 1),
-           deleted_at=dt(2026, 9, 1, tzinfo=tz.utc))
-
-    despues = consultas.stats_resumen()
-    assert despues["total_activas"] == 1, despues
-    assert despues["en_revision"] == 1, despues
-    assert despues["alerta_7_dias"] == 1, despues
-
-
-def test_stats_resumen_no_cuenta_una_resuelta_borrada(datos):
-    from datetime import datetime as dt, timezone as tz
-
-    from apps.monitoreo.services.fallas import consultas
-    from apps.plataforma.services.fechas import hoy_col
-
-    ahora = dt.now(tz.utc)
-    # Resuelta este mes y con SLA evaluado, pero borrada. `updated_at` es
-    # `auto_now`, asi que cae en el mes actual y entra en la ventana.
-    falla = _falla(datos, codigo_interno="FAL-RES-BORRADA",
-                   estado_id=datos["cerrado"].id, fecha_identificacion=hoy_col(),
-                   fecha_resolucion=ahora, sla_cumplido=True)
-    falla.deleted_at = ahora
-    falla.save(update_fields=["deleted_at"])
-
-    stats = consultas.stats_resumen()
-    assert stats["resueltas_mes"] == 0, stats
-    # Sin base evaluable el porcentaje es None, no 100.
-    assert stats["cumplimiento_sla_pct"] is None, stats
+# El arreglo y sus dos tests se retiraron el 2026-09-08 junto con el endpoint:
+# `stats_resumen` calculaba numeros que ninguna pantalla mostraba, y este bug
+# --contaba las fallas soft-borradas-- fue justo el argumento para retirarlo. Se
+# arreglo un contador que nadie miraba. Ver el commit del retiro.
 
 
 # ── P0-9 · el SLA se anclaba a medianoche e ignoraba la hora ──────────────────
@@ -440,20 +388,6 @@ def test_una_critica_de_la_manana_ya_no_nace_vencida(datos):
     )
     assert respuesta.status_code == 200, respuesta.data
     assert respuesta.data["sla_cumplido"] is True, respuesta.data["sla_cumplido"]
-
-
-def test_el_promedio_del_tablero_arranca_donde_arranca_el_sla(datos):
-    from datetime import datetime as dt, time as _time, timezone as tz
-
-    from apps.monitoreo.services.fallas import consultas
-
-    # Identificada 9:00 COL, resuelta 15:00 COL -> 6 h, no 15 h desde medianoche.
-    _falla(datos, estado_id=datos["cerrado"].id,
-           fecha_identificacion=date(2026, 9, 1), hora_identificacion=_time(9, 0),
-           fecha_resolucion=dt(2026, 9, 1, 20, 0, tzinfo=tz.utc))
-
-    tablero = consultas.sla_dashboard()
-    assert tablero["promedio_tiempo_resolucion_horas"] == 6.0, tablero
 
 
 def test_el_post_acepta_la_hora_como_la_manda_el_movil(datos):

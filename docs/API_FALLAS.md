@@ -493,11 +493,18 @@ Devuelve el mismo objeto que el listado. Incluye `seguimientos[]`, `intervalos[]
 |---|---|
 | `GET /api/v1/fallas/catalogos` | Estados, prioridades, tipos activos y resoluciones |
 | `GET /api/v1/fallas/estructura` | La jerarquía de clasificación (sección 4) |
-| `GET /api/v1/fallas/stats/resumen` | Conteos agregados |
-| `GET /api/v1/fallas/sla-dashboard` | Indicadores de SLA |
-| `GET /api/v1/fallas/{id}/impacto` | Impacto estimado de la falla |
 | `GET /api/v1/fallas/{id}/archivos` | Adjuntos de la falla |
 | `GET /api/v1/fallas/actividad-hoy` | Fallas creadas o modificadas hoy |
+
+> **Retirados el 2026-09-08:** `GET /fallas/stats/resumen`, `GET /fallas/sla-dashboard`
+> y `GET /fallas/{id}/impacto`. Ahora responden **404**. Ninguna pantalla de la plataforma
+> los consumia y confirmamos con los integradores que nadie los llamaba. Si les hacen
+> falta indicadores agregados de SLA, escribannos: el calculo esta en el historial de
+> git y se puede reponer.
+>
+> Lo que **si** sigue: cada falla trae su propio reloj de SLA en el listado y en el
+> detalle -- `sla_limite_horas_efectivo`, `sla_horas_transcurridas` y `sla_pct` (el
+> porcentaje consumido, con tope 110) --, mas `sla_cumplido` cuando ya esta cerrada.
 
 ---
 

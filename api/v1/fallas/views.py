@@ -109,15 +109,19 @@ def _fotos_como_objetos(lista: list) -> list[dict]:
 class FallaViewSet(viewsets.GenericViewSet):
     """Fallas de las plantas: registro, seguimiento y SLA.
 
-    GET  /api/v1/fallas/sla-dashboard · /catalogos · /estructura
-    GET  /api/v1/fallas/stats/resumen · /actividad-hoy
+    GET  /api/v1/fallas/catalogos · /estructura · /actividad-hoy
     GET|POST /api/v1/fallas
     POST /api/v1/fallas/backfill-sla
     GET|PATCH|DELETE /api/v1/fallas/{id}
     POST /api/v1/fallas/{id}/notificar · /{id}/seguimientos
-    GET  /api/v1/fallas/{id}/impacto · /{id}/archivos
+    GET  /api/v1/fallas/{id}/archivos
     POST /api/v1/fallas/{id}/archivos · /{id}/attachments
     DELETE /api/v1/fallas/{id}/archivos/{archivo_id}
+
+    **`/sla-dashboard`, `/stats/resumen` y `/{id}/impacto` se retiraron el
+    2026-09-08**: ninguna pantalla los consumia y el unico integrador externo
+    vivo solo crea y consulta fallas. El reloj de SLA que si se ve en la UI sale
+    de `sla_horas_transcurridas` / `sla_pct` en el serializer.
 
     **Una falla nunca se borra físico**: `deleted_at`. Y no se puede cerrar
     mientras siga pendiente de reclasificar — ver
@@ -154,10 +158,6 @@ class FallaViewSet(viewsets.GenericViewSet):
 
     # ── Tableros y catálogos ──────────────────────────────────────────────
 
-    @action(detail=False, methods=["get"], url_path="sla-dashboard")
-    def sla_dashboard(self, request):
-        return Response(consultas.sla_dashboard())
-
     @action(detail=False, methods=["get"], url_path="catalogos")
     def catalogos(self, request):
         return Response({
@@ -177,10 +177,6 @@ class FallaViewSet(viewsets.GenericViewSet):
         """La jerarquía canónica sistema → opciones/equipos/tipos. Fuente única
         que consumen el formulario web y la app móvil."""
         return Response({"categorias": ESTRUCTURA_FALLAS})
-
-    @action(detail=False, methods=["get"], url_path="stats/resumen")
-    def stats_resumen(self, request):
-        return Response(consultas.stats_resumen())
 
     @action(detail=False, methods=["get"], url_path="actividad-hoy")
     def actividad_hoy(self, request):
@@ -445,49 +441,6 @@ class FallaViewSet(viewsets.GenericViewSet):
             fa_serializers.FallaSeguimientoSerializer(completo).data,
             status=status.HTTP_201_CREATED,
         )
-
-    @action(detail=True, methods=["get"], url_path="impacto")
-    def impacto(self, request, pk=None):
-        """Pérdida de generación e impacto económico estimados a partir de la
-        capacidad de la planta y el tiempo fuera."""
-        falla = (
-            mo_models.Falla.objects
-            .select_related("proyecto")
-            .filter(pk=pk, deleted_at__isnull=True)
-            .first()
-        )
-        if not falla:
-            raise NotFound("Falla no encontrada")
-
-        potencia = float(falla.proyecto.potencia_instalada_kwp or 0)
-        inicio = datetime(
-            falla.fecha_identificacion.year, falla.fecha_identificacion.month,
-            falla.fecha_identificacion.day, tzinfo=dominio._COL_TZ,
-        )
-        if falla.hora_identificacion:
-            inicio = inicio.replace(
-                hour=falla.hora_identificacion.hour,
-                minute=falla.hora_identificacion.minute,
-            )
-        fin = falla.fecha_resolucion or datetime.now(timezone.utc)
-        horas_fuera = max(0, (fin - inicio).total_seconds() / 3600)
-
-        kwh, cop = dominio.estimar_perdida(potencia, horas_fuera)
-        # Se persiste solo si no había estimación: una vez calculada, el número
-        # se congela para que el histórico no cambie al reconsultarlo.
-        if falla.kwh_perdidos_estimado is None:
-            falla.kwh_perdidos_estimado = kwh
-            falla.impacto_economico_cop = cop
-            falla.save(update_fields=["kwh_perdidos_estimado", "impacto_economico_cop"])
-
-        return Response({
-            "falla_id": falla.id,
-            "proyecto_nombre": falla.proyecto.nombre_comercial,
-            "potencia_instalada_kwp": potencia or None,
-            "horas_fuera": round(horas_fuera, 1),
-            "kwh_perdidos_estimado": kwh,
-            "impacto_economico_cop": cop,
-        })
 
     # ── Adjuntos en Google Drive ──────────────────────────────────────────
 

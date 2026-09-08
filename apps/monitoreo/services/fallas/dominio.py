@@ -54,11 +54,6 @@ DEFAULT_SLA_HOURS = {
 BOT_DESCONEXION_CATEGORIA = "red"
 BOT_DESCONEXION_SUBTIPO = "desconexion_sin_identificar"
 
-# Precio medio de la energía y factor de planta solar, para la estimación de
-# impacto económico.
-PRECIO_ENERGIA_COP_KWH = 800.0
-SOLAR_CAPACITY_FACTOR = 0.18
-
 
 def sla_limite_horas_efectivo(falla: Falla) -> int:
     """El límite que realmente aplica: el personalizado o el de su prioridad.
@@ -91,8 +86,8 @@ def inicio_sla(falla: Falla) -> datetime:
     "Cumplido" algo que no lo fue. Hoy la única fuente que no manda la hora es
     la app móvil; cuando la mande, este caso queda solo para datos legacy.
 
-    Único dueño de la regla: lo usan `limite_sla` y el promedio de resolución de
-    `consultas.sla_dashboard`, que antes calculaban la medianoche por separado.
+    Único dueño de la regla: la usan `limite_sla` y `horas_transcurridas_sla`,
+    que es lo que el serializer expone para que las vistas no recalculen nada.
     """
     return datetime.combine(
         falla.fecha_identificacion,
@@ -227,20 +222,6 @@ def tiempo_afectacion_horas(falla: Falla, intervalos=None) -> float | None:
     fin = falla.fecha_resolucion
     inicio, fin = _aware(inicio, fin), _aware(fin, inicio)
     return round(max(0.0, (fin - inicio).total_seconds() / 3600), 2)
-
-
-def estimar_perdida(potencia_kwp, horas_fuera: float) -> tuple[float, float]:
-    """`(kWh perdidos, impacto COP)` de una falla.
-
-    `solar_hours` aproxima las horas productivas como ~50 % del downtime (≈12 h
-    solares por cada 24). Función pura: alimenta el reporte SLA/económico.
-    """
-    solar_hours = min(horas_fuera, (horas_fuera / 24) * 12) if horas_fuera > 0 else 0
-    kwh_perdidos = (
-        round(float(potencia_kwp) * SOLAR_CAPACITY_FACTOR * solar_hours, 3)
-        if potencia_kwp else 0.0
-    )
-    return kwh_perdidos, round(kwh_perdidos * PRECIO_ENERGIA_COP_KWH, 2)
 
 
 # ── Clasificación estructurada ───────────────────────────────────────────────

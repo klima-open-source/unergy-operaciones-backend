@@ -139,14 +139,11 @@ CASOS = [
     ("/api/v1/clientes/7/merge/9", "merge"),
     # `fallas/{id}` contra las seis acciones de lista con nombre literal, y
     # `archivos/{archivo_id}` contra su propio listado.
-    ("/api/v1/fallas/sla-dashboard", "sla_dashboard"),
     ("/api/v1/fallas/catalogos", "catalogos"),
     ("/api/v1/fallas/estructura", "estructura"),
-    ("/api/v1/fallas/stats/resumen", "stats_resumen"),
     ("/api/v1/fallas/actividad-hoy", "actividad_hoy"),
     ("/api/v1/fallas/backfill-sla", "backfill_sla"),
     ("/api/v1/fallas/7", "retrieve"),
-    ("/api/v1/fallas/7/impacto", "impacto"),
     ("/api/v1/fallas/7/seguimientos", "seguimientos"),
     ("/api/v1/fallas/7/archivos", "archivos"),
     ("/api/v1/fallas/7/attachments", "attachments"),

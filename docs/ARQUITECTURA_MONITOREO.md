@@ -280,16 +280,29 @@ No se arregló: se retiró. La tabla tenía **0 filas** y ningún consumidor —
 completo y qué haría falta para reponerlo están en
 `apps/monitoreo/migrations/0005_eliminar_mantenimiento_impacto.py`.
 
-Ojo: **el impacto que la UI muestra hoy no era este**. `fallas.kwh_perdidos_estimado` sale
-de `fallas/dominio.py::estimar_perdida` (placa × 0.18 × horas × 800 COP), una regla de dedo
-que no mira medición real — y se llena a mano desde la edición rápida del detalle.
+Ojo: **el impacto que la UI muestra hoy no era este**. `fallas.kwh_perdidos_estimado` se
+llena **a mano** desde la edición rápida del detalle. Lo calculaba
+`fallas/dominio.py::estimar_perdida` (placa × 0.18 × horas × 800 COP), una regla de dedo
+que no miraba medición real, y que se retiró con `GET /{id}/impacto` el 2026-09-08
+(ver §5.9).
 
-### 5.9 Un GET que escribe y congela un número provisional
+### 5.9 Un GET que escribe y congela un número provisional — **RESUELTO** (2026-09-08)
 
-`GET /fallas/{id}/impacto` calcula la pérdida con `end = fecha_resolucion or now()` y
-la persiste si el campo está vacío (`fallas.py:1124`). Con la falla abierta ese
-`now()` es el instante en que alguien abrió la pantalla, y como después el campo ya
-tiene valor **nunca se recalcula**. También `GET /monitoring` escribe: auto-asigna
+Se retiró `GET /fallas/{id}/impacto`. El diagnóstico era: calculaba la pérdida con
+`end = fecha_resolucion or now()` y la **persistía** si el campo estaba vacío. Con la
+falla abierta ese `now()` es el instante en que alguien abrió la pantalla, y como
+después el campo ya tenía valor **nunca se recalculaba**: un GET dejaba grabado un
+número provisional para siempre.
+
+No se arregló, se retiró: ninguna pantalla lo llamaba y el único integrador externo
+vivo solo crea y consulta fallas. Con él se fue `dominio.estimar_perdida`, la regla de
+dedo de placa × 0.18 × horas × 800 COP.
+
+Las columnas `fallas.kwh_perdidos_estimado` e `impacto_economico_cop` **se quedan**:
+la primera se ve en la UI y se llena a mano desde la edición rápida del detalle. Lo
+que desapareció es el cálculo automático que nadie disparaba.
+
+El otro GET que escribe sigue ahí: `GET /monitoring` auto-asigna
 `project_id_solenium` (`generacion_solar.py:1154`).
 
 ### 5.10 El SLA se ancla a medianoche

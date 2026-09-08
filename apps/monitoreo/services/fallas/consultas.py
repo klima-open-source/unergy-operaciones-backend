@@ -1,7 +1,9 @@
-"""Las consultas agregadas de fallas: SLA, resumen, actividad del día y filtros.
+"""Las consultas de fallas: actividad del día, filtros del listado y backfill.
 
-Puerto de `sla_dashboard`, `stats_resumen`, `actividad_hoy`, el filtrado de
-`GET /fallas` y `backfill_sla_cumplido`.
+`sla_dashboard` y `stats_resumen` vivian aca y **se retiraron el 2026-09-08**:
+calculaban numeros que ninguna pantalla mostraba. El bug 4 de la revision de
+Fallas --contaban las fallas borradas-- estaba en `stats_resumen`, o sea que se
+arreglo un contador que nadie miraba; ese fue el argumento para retirarlos.
 """
 
 from __future__ import annotations
@@ -17,8 +19,8 @@ from apps.plataforma.services.fechas import hoy_col
 from apps.proyectos.models import ProyectoInversionista
 
 from .dominio import (
-    BOT_DESCONEXION_CATEGORIA, BOT_DESCONEXION_SUBTIPO, DEFAULT_SLA_HOURS,
-    _COL_TZ, inicio_sla, limite_sla, sla_limite_horas_efectivo,
+    BOT_DESCONEXION_CATEGORIA, BOT_DESCONEXION_SUBTIPO,
+    _COL_TZ, limite_sla, sla_limite_horas_efectivo,
 )
 
 # Lo que la tabla y el "hero" del drawer muestran de entrada. NO incluye
@@ -48,91 +50,6 @@ def dia_col_en_utc() -> datetime:
     """El inicio del día actual en hora de Colombia, expresado en UTC."""
     ahora_col = datetime.now(_COL_TZ)
     return ahora_col.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
-
-
-def sla_dashboard() -> dict:
-    """Riesgo, vencidos y cumplimiento de SLA."""
-    ahora = datetime.now(timezone.utc)
-
-    abiertas = (
-        Falla.objects
-        .filter(deleted_at__isnull=True, estado__es_estado_final=False)
-        .select_related("prioridad")
-    )
-    en_riesgo = vencido = 0
-    for falla in abiertas:
-        # El nivel sale de la prioridad precargada; mismo cálculo que
-        # `sla_limite_horas_efectivo`.
-        horas = falla.sla_limite_horas or DEFAULT_SLA_HOURS.get(
-            falla.prioridad.nivel if falla.prioridad_id else None, 72
-        )
-        vence = limite_sla(falla, horas)
-        if ahora > vence:
-            vencido += 1
-        elif ahora > vence - timedelta(hours=horas * 0.2):
-            # Dentro del último 20 % de la ventana = en riesgo.
-            en_riesgo += 1
-
-    resueltas = Falla.objects.filter(
-        deleted_at__isnull=True,
-        estado__es_estado_final=True,
-        fecha_resolucion__isnull=False,
-        updated_at__gte=ahora - timedelta(days=90),
-    )
-    total_horas = 0.0
-    n_resueltas = sla_ok = sla_evaluadas = 0
-    for f in resueltas:
-        if f.fecha_resolucion and f.fecha_identificacion:
-            # `inicio_sla` y no una medianoche calculada aparte: este promedio
-            # tiene que arrancar donde arranca el SLA, o el tablero se contradice
-            # consigo mismo. Antes ignoraba `hora_identificacion` y por eso
-            # sobreestimaba el tiempo de resolucion.
-            total_horas += (
-                f.fecha_resolucion - inicio_sla(f)
-            ).total_seconds() / 3600
-            n_resueltas += 1
-        if f.sla_cumplido is not None:
-            sla_evaluadas += 1
-            sla_ok += 1 if f.sla_cumplido else 0
-
-    return {
-        "fallas_en_riesgo_sla": en_riesgo,
-        "fallas_sla_vencido": vencido,
-        "promedio_tiempo_resolucion_horas": round(total_horas / n_resueltas, 1)
-        if n_resueltas else None,
-        "cumplimiento_sla_pct": round(sla_ok / sla_evaluadas * 100, 1)
-        if sla_evaluadas else None,
-    }
-
-
-def stats_resumen() -> dict:
-    hoy = hoy_col()
-    corte_alerta = hoy - timedelta(days=7)
-
-    def _contar(*filtros):
-        # `deleted_at` va EN EL HELPER, no en cada llamada: los cinco contadores
-        # lo necesitan y olvidarlo en uno era justo el bug. Una falla
-        # soft-borrada seguia contando como activa, en revision y en alerta.
-        #
-        # Es el mismo bug que el KPI del dashboard ya arreglo el 2026-08-19
-        # (api/v1/dashboard/queryset.py:27-32); este resumen quedo fuera. Venia
-        # de FastAPI, donde `_count()` tampoco lo filtraba, asi que no lo
-        # introdujo la migracion — pero tampoco lo arreglo.
-        return Falla.objects.filter(*filtros, deleted_at__isnull=True).count()
-
-    abiertas = Q(estado__es_estado_final=False)
-    finales = Q(estado__es_estado_final=True)
-    ultimos_30 = Q(updated_at__gte=hoy - timedelta(days=30))
-
-    sla_base = _contar(finales, ultimos_30, Q(sla_cumplido__isnull=False))
-    sla_ok = _contar(finales, ultimos_30, Q(sla_cumplido=True))
-    return {
-        "total_activas": _contar(abiertas),
-        "en_revision": _contar(Q(estado__codigo="en_gestion")),
-        "resueltas_mes": _contar(finales, Q(updated_at__gte=hoy.replace(day=1))),
-        "cumplimiento_sla_pct": round(sla_ok / sla_base * 100) if sla_base else None,
-        "alerta_7_dias": _contar(abiertas, Q(fecha_identificacion__lte=corte_alerta)),
-    }
 
 
 def actividad_hoy() -> tuple[str, list[Falla], list[dict], dict[int, Falla]]:
