@@ -39,7 +39,7 @@ from . import serializers as py_serializers
 
 # Los seis flags de servicio, por si el listado quiere filtrar por uno.
 SERVICIOS = (
-    "operacion", "representacion", "cgm", "ppa", "promotor", "rec",
+    "operacion", "representacion", "cgm", "ppa", "promotor",
 )
 
 

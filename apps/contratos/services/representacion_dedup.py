@@ -54,7 +54,7 @@ CAMPOS = (
     "indexacion_cgm", "indexacion_representacion",
     "enlace_drive", "estado_pago", "estado",
     "tiene_cgm", "cgm_codigo_sic",
-    "rec_cantidad", "rec_precio_unitario", "rec_vintage", "responsable_iva",
+    "responsable_iva",
 )
 
 # Campos cuyo valor por defecto no es una afirmacion: el seed pone estado

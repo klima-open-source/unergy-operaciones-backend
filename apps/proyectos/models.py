@@ -55,7 +55,6 @@ class Proyecto(Timer):
     srv_cgm = models.BooleanField(default=False)
     srv_ppa = models.BooleanField(default=False)
     srv_promotor = models.BooleanField(default=False)
-    srv_rec = models.BooleanField(default=False)
     p90_mensual_kwh = models.JSONField(null=True, blank=True)
     p50_mensual_kwh = models.JSONField(null=True, blank=True)
     p99_mensual_kwh = models.JSONField(null=True, blank=True)

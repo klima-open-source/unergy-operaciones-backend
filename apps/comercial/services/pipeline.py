@@ -1077,7 +1077,6 @@ def _servicios_planta(proyecto) -> dict:
         "cgm": bool(proyecto.srv_cgm),
         "ppa": bool(proyecto.srv_ppa),
         "promotor": bool(proyecto.srv_promotor),
-        "rec": bool(proyecto.srv_rec),
         # Hasta cuándo la representa Unergy ante el mercado. Va con los
         # servicios y no con las fechas del contrato de energía: son cosas
         # distintas y una planta puede tener representación sin PPA.
