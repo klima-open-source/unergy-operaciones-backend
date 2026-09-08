@@ -7,6 +7,7 @@ nuevo (`ppa_id`, repetible, y `sin_ppa`) sigue el mismo patron de join que ya us
 `app/api/v1/ppa.py::list_contratos` para el filtro inverso (`proyecto_id`).
 """
 import pytest
+from datetime import datetime, timezone
 from sqlalchemy import create_engine, BigInteger
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
@@ -167,6 +168,34 @@ def test_sin_filtro_de_ppa_trae_todos_como_antes(db):
     out = _listar(db)
 
     assert out["total"] == 2
+
+
+# ── Contratos borrados (borrado logico) ──────────────────────────────────────
+# Borrar un contrato PPA solo pone deleted_at (ver ppa.py::delete_contrato); la
+# fila de la tabla puente ppa_contrato_proyectos no se limpia. El resto de las
+# consultas a PPAContrato ya filtran deleted_at.is_(None) (ppa.py) y el propio
+# ProyectoOut.ppa_contratos lo hace vivo (solo_ppas_vivos en schemas/proyectos.py) --
+# este filtro debe tratar igual un contrato borrado: como si no existiera.
+
+def test_ppa_id_ignora_contrato_borrado(db):
+    proyecto = _proyecto(db, nombre_comercial="Vinculado a borrado")
+    contrato = _contrato(db, nombre_interno="Borrado", deleted_at=datetime.now(timezone.utc))
+    _vincular(db, proyecto, contrato)
+
+    out = _listar(db, ppa_id=[contrato.id])
+
+    assert out["total"] == 0
+
+
+def test_sin_ppa_incluye_proyecto_cuyo_unico_contrato_esta_borrado(db):
+    proyecto = _proyecto(db, nombre_comercial="Solo tenia el borrado")
+    contrato = _contrato(db, nombre_interno="Borrado", deleted_at=datetime.now(timezone.utc))
+    _vincular(db, proyecto, contrato)
+
+    out = _listar(db, sin_ppa=True)
+
+    assert out["total"] == 1
+    assert [p.id for p in out["items"]] == [proyecto.id]
 
 
 # ── Enrutamiento HTTP real ────────────────────────────────────────────────────
