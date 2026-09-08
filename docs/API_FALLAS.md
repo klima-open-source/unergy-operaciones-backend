@@ -243,7 +243,6 @@ Solo con `categoria_codigo: "inversores"`. Una entrada por inversor afectado.
 | `impacto_economico_cop` | `float` | — | Impacto en pesos. Numérico con 2 decimales |
 | `causa_raiz` | `string` | — | Texto libre |
 | `acciones_correctivas` | `string` | — | Texto libre |
-| `generar_impacto` | `bool` | — | Default `false`. ⚠️ Si es `true`, además de la falla **crea una fila en `mantenimiento_impacto`** con la energía perdida calculada sobre la ventana `[fecha_ocurrencia, fecha_resolucion]`. Déjenlo en `false` para pruebas |
 
 ### 3.8 Metadatos y trazabilidad
 
@@ -506,7 +505,7 @@ Devuelve el mismo objeto que el listado. Incluye `seguimientos[]`, `intervalos[]
 
 ### `PATCH /api/v1/fallas/{id}` — actualización parcial
 
-Acepta el mismo conjunto de campos que el create (todos opcionales), más `pendiente_reclasificar`. **No** acepta `proyecto_id` ni `generar_impacto`. `sla_cumplido` tampoco se acepta -- es siempre calculado (se sella al pasar a un estado final, comparando `fecha_resolucion` contra `sla_limite_horas`/el default por prioridad).
+Acepta el mismo conjunto de campos que el create (todos opcionales), más `pendiente_reclasificar`. **No** acepta `proyecto_id`. `sla_cumplido` tampoco se acepta -- es siempre calculado (se sella al pasar a un estado final, comparando `fecha_resolucion` contra `sla_limite_horas`/el default por prioridad).
 
 Solo se aplican los campos presentes en el body. Mandar `categoria_codigo` recalcula toda la clasificación y, si el nuevo subtipo no es de los pendientes, limpia `pendiente_reclasificar` — así se reclasifica una desconexión sin identificar:
 
@@ -632,7 +631,6 @@ if __name__ == "__main__":
 - ❌ Llamar `POST /fallas/{id}/notificar` — le manda correo a clientes reales
 - ❌ Hardcodear `estado_id` / `prioridad_id` / `tipo_id` — resuélvanlos desde `/catalogos`
 - ❌ Mandar `tipo_id` junto con `categoria_codigo` — se sobrescribe
-- ❌ Poner `generar_impacto: true` en pruebas — crea registros de mantenimiento
 - ❌ Poner los flags `perdida_comunicacion` en `true` sin querer generar alarmas
 - ❌ Exponer la API Key en un frontend o commitearla
 

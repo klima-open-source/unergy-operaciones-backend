@@ -79,7 +79,11 @@ DOMINIOS: dict[str, list[str]] = {
         "fallas_cat_categorias", "fallas_cat_tipos", "fallas_cat_estados",
         "fallas_cat_prioridades", "fallas_cat_resoluciones", "fallas",
         "fallas_seguimientos", "fallas_intervalos", "falla_inversores", "alertas",
-        "mantenimientos", "mantenimiento_impacto", "starlink_facturas",
+        # `mantenimientos` y `mantenimiento_impacto` salieron de aca el
+        # 2026-09-07: se eliminaron de la base (migraciones 0005 y 0006 de
+        # monitoreo). Si vuelven a la lista, este generador les vuelve a crear
+        # el modelo.
+        "starlink_facturas",
         "starlink_mapeo_sitio", "starlink_factura_linea", "alarmas_monitoreo",
     ],
     "om": [

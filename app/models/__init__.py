@@ -24,7 +24,6 @@ from app.models.liquidaciones import (
 from app.models.promotor import PromoterCatalogoRequisito, PromoterSeguimiento
 from app.models.rec import RecProceso
 from app.models.asic import AsicSolicitud, AsicCambioContrato, GesconDiccionario
-from app.models.mantenimientos import Mantenimiento
 from app.models.generacion import GeneracionDiaria
 from app.models.gestion import GestionRegistro
 from app.models.cumplimiento import CumplimientoMensual
@@ -46,7 +45,6 @@ from app.models.finanzas_mandatos import (
 )
 from app.models.om import IPCTasa, OMSeleccion, OMFacturaMensual, OMDocumentoProyecto
 from app.models.arriendos import ArrProyecto, ArrIPCTasa, ArrSeleccion, ArrDocumento
-from app.models.mantenimiento_impacto import MantenimientoImpacto, TipoMantenimientoImpactoEnum
 from app.models.verificacion_costos import VerificacionCosto
 from app.models.reporte_energia import ReporteEnergiaGeneracion, ReporteEnergiaConsumo
 from app.models.retos import RetoTrimestre, RetoMetrica, RetoValorSemanal
@@ -63,7 +61,6 @@ __all__ = [
     "LiquidacionMandato", "LiquidacionMandatoLinea", "LiquidacionFactura",
     "PromoterCatalogoRequisito", "PromoterSeguimiento",
     "RecProceso", "AsicSolicitud", "AsicCambioContrato", "GesconDiccionario",
-    "Mantenimiento",
     "GeneracionDiaria",
     "GestionRegistro",
     "CumplimientoMensual",
@@ -78,7 +75,6 @@ __all__ = [
     "Mandato", "MandatoInversionista", "EstadoMandatoCostoEnum",
     "IPCTasa", "OMSeleccion", "OMFacturaMensual", "OMDocumentoProyecto",
     "ArrProyecto", "ArrIPCTasa", "ArrSeleccion", "ArrDocumento",
-    "MantenimientoImpacto", "TipoMantenimientoImpactoEnum",
     "VerificacionCosto",
     "ReporteEnergiaGeneracion", "ReporteEnergiaConsumo",
     "RetoTrimestre", "RetoMetrica", "RetoValorSemanal",

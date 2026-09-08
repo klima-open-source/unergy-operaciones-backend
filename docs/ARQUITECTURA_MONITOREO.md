@@ -27,9 +27,9 @@
 
 ## 1. El resumen en diez líneas
 
-- Todo el dominio cuelga de una sola tabla: **`proyectos`** (61 columnas, 39 claves
+- Todo el dominio cuelga de una sola tabla: **`proyectos`** (61 columnas, 38 claves
   foráneas entrantes).
-- Hay **25 tablas** implicadas y **34 claves foráneas reales** entre ellas.
+- Hay **24 tablas** implicadas y **31 claves foráneas reales** entre ellas.
 - Hay **2 relaciones que no son claves foráneas sino comparación de texto**, y son
   justo las que más daño hacen.
 - **No existe una entidad «equipo».** Hay cuatro representaciones parciales del mismo
@@ -59,7 +59,7 @@ Cada «racimo» es una actividad del negocio. Todos cuelgan de `proyectos` por
 
 | Tabla | Col. | Para qué |
 |---|---|---|
-| `fallas` | 38 | El evento. 7 FK salientes, 4 entrantes, 20 índices. |
+| `fallas` | 38 | El evento. 7 FK salientes, 3 entrantes, 20 índices. |
 | `fallas_seguimientos` | 6 | Bitácora y cada cambio de estado. |
 | `fallas_intervalos` | 6 | Tramos de afectación dentro de una falla larga. |
 | `falla_inversores` | 7 | **La única tabla puente entre una falla y un aparato concreto.** |
@@ -68,7 +68,6 @@ Cada «racimo» es una actividad del negocio. Todos cuelgan de `proyectos` por
 | `fallas_cat_estados` | 6 | `es_estado_final` gobierna toda la lógica de «sigue abierta». |
 | `fallas_cat_prioridades` | 5 | `nivel` elige el SLA por defecto. |
 | `fallas_cat_resoluciones` | 3 | Cómo se cerró. |
-| `mantenimiento_impacto` | 14 | Energía perdida e impacto económico. Sale en nulos (ver §5.8). |
 | `proyecto_inversores` | 12 | Los inversores de la planta. **El único registro de activos real.** |
 | `proyecto_inversionistas` | 10 | Vínculo planta ↔ cliente con vigencia. |
 
@@ -129,11 +128,9 @@ ni saliente. Son islas.
 
 ### 3.3 Regla de borrado
 
-De las 34 FK, la mayoría no declara `ON DELETE`, así que la base **impide** borrar el
+De las 31 FK, la mayoría no declara `ON DELETE`, así que la base **impide** borrar el
 padre mientras exista el hijo. Las excepciones:
 
-- `mantenimiento_impacto.falla_id → fallas` — `ON DELETE SET NULL`. Si se borra la
-  falla, el registro de impacto sobrevive apuntando a nada.
 - `generacion_diaria.proyecto_id → proyectos` — `ON DELETE CASCADE`.
 - Las 4 FK de `informes_guardados` hacia `usuarios` — `ON DELETE SET NULL`.
 - `contratos_servicio.contratante_id` / `prestador_id → clientes` — `ON DELETE SET NULL`.
@@ -147,7 +144,7 @@ Es el hallazgo más importante del análisis. **La plataforma no tiene una entid
 
 | # | Dónde | Forma | Qué cubre |
 |---|---|---|---|
-| 1 | `proyecto_inversores` | Tabla real | Solo inversores. Tiene marca, modelo, serie, potencia, `activo`. |
+| 1 | `proyecto_inversores` | Tabla real | Solo inversores, y solo `nombre`, `potencia_nominal_kw`, `orden`, `activo`. **Marca, modelo y numero de serie ya no existen**: los borro la revision 113 de Alembic (2026-08-27) porque estaban en **0 de 675 filas**. No hay serial de ningun equipo en la plataforma. |
 | 2 | `fronteras` | Tabla real | El punto de medida comercial, **no** los aparatos. |
 | 3 | `proyecto_inicio_operacion.checklist` | JSONB | 21 tipos de equipo, como casillas de verificación. |
 | 4 | `ESTRUCTURA_FALLAS` | Lista de Python | Los mismos equipos otra vez, como cadenas de texto. |
@@ -209,6 +206,7 @@ vínculo. Lo mismo con un huracán que golpea ocho plantas: ocho fallas sueltas.
 | Este corte de red, ¿a cuántas plantas afectó? | No — no existe el evento |
 | ¿Qué plantas cuelgan del mismo circuito? | No — solo sabemos el operador |
 | ¿Está en garantía el equipo que falló? | No — no hay fecha de instalación ni garantía |
+| ¿Cuándo se le hizo mantenimiento, y cuándo toca el siguiente? | No — `mantenimientos` se eliminó el 2026-09-07: 0 filas y **ninguna forma de crear un registro** (ver la migración `0006_eliminar_mantenimientos`). Nunca tuvo intervalo ni vínculo con el equipo |
 
 ---
 
@@ -268,13 +266,23 @@ fila, así que la base **no puede representar «este día generó cero»** — j
 que importa para calcular pérdidas. Además el job arma su ventana con `date.today()`
 (UTC del contenedor) mientras el lector consulta con `_hoy_col()` (UTC−5).
 
-### 5.8 La cadena de impacto produce nulos
+### 5.8 La cadena de impacto produce nulos — **RESUELTO** (2026-09-07)
 
-`ImpactCalculator` saca la energía esperada de `generacion_diaria.kwh_p90`, columna
-que **solo escriben un script de importación manual y un endpoint de carga**. Ningún
-job la llena. Y el cálculo corre una sola vez, al **crear** la falla
-(`fallas.py:774`), nunca al resolverla. Resultado: `lost_energy_kwh`,
-`financial_impact_cop` y la bandera de riesgo PPA quedan vacíos para toda falla.
+Se eliminó `mantenimiento_impacto` y todo su código. El diagnóstico era: la energía
+esperada salía de `generacion_diaria.kwh_p90`, que **no la llena ningún job** — solo un
+script manual y un endpoint de carga —, y el cálculo corría una sola vez **al crear** la
+falla, nunca al resolverla. `lost_energy_kwh`, `financial_impact_cop` y la bandera de
+riesgo PPA quedaban vacíos para toda falla.
+
+No se arregló: se retiró. La tabla tenía **0 filas** y ningún consumidor — ni la bandera
+`generar_impacto`, ni los 5 endpoints de `/mantenimiento-impacto`, ni los 4 campos que
+`cumplimiento/resumen.py` derivaba de ahí aparecían en el frontend. El razonamiento
+completo y qué haría falta para reponerlo están en
+`apps/monitoreo/migrations/0005_eliminar_mantenimiento_impacto.py`.
+
+Ojo: **el impacto que la UI muestra hoy no era este**. `fallas.kwh_perdidos_estimado` sale
+de `fallas/dominio.py::estimar_perdida` (placa × 0.18 × horas × 800 COP), una regla de dedo
+que no mira medición real — y se llena a mano desde la edición rápida del detalle.
 
 ### 5.9 Un GET que escribe y congela un número provisional
 
@@ -412,10 +420,10 @@ Vive **fuera de este repo**, en la raíz del workspace de trabajo, en
 - `esquema_produccion.sql` — el DDL completo.
 - `ESQUEMA_BD_PRODUCCION.md`, `DEPURACION.md` — lecturas ya redactadas.
 
-> **Advertencia.** `DEPURACION.md` lista `mantenimiento_impacto.falla_id` entre las
-> FK faltantes. **Es incorrecto**: el DDL la declara
-> (`FOREIGN KEY (falla_id) REFERENCES fallas(id) ON DELETE SET NULL`). Ante la duda,
-> gana `esquema_produccion.sql`.
+> **Advertencia.** Los documentos derivados se equivocan. `DEPURACION.md` listaba
+> `mantenimiento_impacto.falla_id` entre las FK faltantes y **era incorrecto**: el DDL sí
+> la declaraba. Esa tabla se eliminó el 2026-09-07, pero el criterio queda: ante la duda
+> gana `esquema_produccion.sql`, no la prosa.
 
 ### Verificar el código antes de creerle a un documento
 
@@ -451,6 +459,10 @@ Si el segundo número no es 0, el local está atrasado.
 | Anatomía del Inventario | Las cuatro representaciones del equipo y qué preguntas no puede responder el modelo. |
 
 Los enlaces están en la carpeta de artefactos de Claude Code (`/artifacts`).
+
+> Los cuatro son **anteriores al 2026-09-07**, cuando se eliminó `mantenimiento_impacto`
+> (§5.8). Sus conteos —25 tablas, 34 FK— describen el esquema de entonces, y por eso se
+> dejan como estaban: son la leyenda de un diagrama que todavía dice eso.
 
 ---
 

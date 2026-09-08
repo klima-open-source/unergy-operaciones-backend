@@ -35,5 +35,4 @@ class Usuario(Base):
 
     fallas_registradas: Mapped[list["Falla"]] = relationship("Falla", foreign_keys="Falla.registrado_por_id", back_populates="registrado_por")
     seguimientos_falla: Mapped[list["FallaSeguimiento"]] = relationship("FallaSeguimiento", back_populates="usuario")
-    mantenimientos: Mapped[list["Mantenimiento"]] = relationship("Mantenimiento", back_populates="registrado_por")
     liquidaciones: Mapped[list["Liquidacion"]] = relationship("Liquidacion", back_populates="generado_por")

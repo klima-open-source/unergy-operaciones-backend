@@ -17,7 +17,7 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, or_, text
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.api.v1.auth import get_current_user
@@ -706,42 +706,6 @@ def _con_segmento(entry: dict, ini: date | None, fin: date | None,
     return entry
 
 
-# ── Impacto de mantenimiento ──────────────────────────────────────────────────
-
-def _lost_energy_mwh_por_proyecto(db: Session, first_day: date, last_day: date) -> dict[int, float]:
-    """MWh perdidos por mantenimiento por proyecto, para eventos que solapan el
-    período [first_day, last_day]. Fuente: tabla `mantenimiento_impacto`.
-
-    La energía perdida de un mantenimiento representa energía que la planta HABRÍA
-    entregado de no estar en intervención; al descontarla del esperado, la razón
-    de disponibilidad (entregado vs. disponible) deja de penalizar el downtime
-    excusado y refleja el verdadero riesgo de penalización PPA.
-    """
-    from app.models.mantenimiento_impacto import MantenimientoImpacto
-
-    period_start = datetime(first_day.year, first_day.month, first_day.day, 0, 0, 0, tzinfo=_COL_TZ)
-    period_end = datetime(last_day.year, last_day.month, last_day.day, 23, 59, 59, tzinfo=_COL_TZ)
-
-    rows = (
-        db.query(
-            MantenimientoImpacto.proyecto_id,
-            func.sum(MantenimientoImpacto.lost_energy_kwh).label("lost_kwh"),
-        )
-        .filter(
-            MantenimientoImpacto.lost_energy_kwh.isnot(None),
-            MantenimientoImpacto.start_time <= period_end,
-            MantenimientoImpacto.end_time >= period_start,
-        )
-        .group_by(MantenimientoImpacto.proyecto_id)
-        .all()
-    )
-    return {
-        pid: round(float(lost_kwh) / 1000, 3)
-        for pid, lost_kwh in rows
-        if lost_kwh is not None
-    }
-
-
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/ppa")
@@ -792,13 +756,6 @@ def get_resumen(
     es_mes_futuro = (year > today.year) or (year == today.year and month > today.month)
     total_dias = calendar.monthrange(year, month)[1]
     dia_actual = today.day if es_mes_actual else total_dias
-    first_day = date(year, month, 1)
-    last_day = date(year, month, total_dias)
-
-    # Energía perdida por mantenimiento (MWh) por proyecto en el período: se
-    # descuenta del esperado para no penalizar el downtime excusado (ver
-    # _lost_energy_mwh_por_proyecto).
-    lost_map = _lost_energy_mwh_por_proyecto(db, first_day, last_day)
 
     # ── 1. Contratos y compromisos ────────────────────────────────────────────
     contratos = _contratos_vigentes(db, year, month, solo_relevantes=not incluir_todos)
@@ -936,17 +893,6 @@ def get_resumen(
         total_gen += gen_total_c
         total_proy += gen_proy_c
 
-        # Energía perdida por mantenimiento atribuible a las plantas del contrato.
-        # Se descuenta del esperado (mínimo PPA) al medir disponibilidad, para no
-        # penalizar el downtime excusado y así reflejar el riesgo real de penalización.
-        pids_c = {asic.proyecto_id for asic in assignments if asic.proyecto_id}
-        perdida_mant_c = round(sum(lost_map.get(pid, 0.0) for pid in pids_c), 3)
-        gen_disponible_c = round(val_b + perdida_mant_c, 3)
-        if min_mwh is not None:
-            compras_ajustada_c = round(max(0.0, min_mwh - gen_disponible_c), 3)
-        else:
-            compras_ajustada_c = None
-
         contratos_result.append({
             "id": c.id,
             "nombre_interno": c.nombre_interno,
@@ -960,11 +906,6 @@ def get_resumen(
             "estado": estado_c,
             "compras_bolsa_mwh": compras_c,
             "excedentes_bolsa_mwh": excedentes_c,
-            # Impacto de mantenimiento (excusa el downtime programado/no programado).
-            "energia_perdida_mantenimiento_mwh": perdida_mant_c if perdida_mant_c > 0 else None,
-            "gen_disponible_mwh": gen_disponible_c,
-            "compras_bolsa_ajustada_mwh": compras_ajustada_c,
-            "riesgo_penalizacion_mantenimiento": perdida_mant_c > 0,
             "exposicion_bolsa_duplicados_mwh": bolsa_dup_c if bolsa_dup_c > 0 else None,
             "uso_recurso_mwh": ur_c if ur_c > 0 else None,
             "n_plantas_activas": len(assignments),

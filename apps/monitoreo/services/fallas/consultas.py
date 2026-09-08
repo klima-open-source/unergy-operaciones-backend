@@ -18,7 +18,7 @@ from apps.proyectos.models import ProyectoInversionista
 
 from .dominio import (
     BOT_DESCONEXION_CATEGORIA, BOT_DESCONEXION_SUBTIPO, DEFAULT_SLA_HOURS,
-    _COL_TZ, limite_sla, sla_limite_horas_efectivo,
+    _COL_TZ, inicio_sla, limite_sla, sla_limite_horas_efectivo,
 )
 
 # Lo que la tabla y el "hero" del drawer muestran de entrada. NO incluye
@@ -83,11 +83,13 @@ def sla_dashboard() -> dict:
     n_resueltas = sla_ok = sla_evaluadas = 0
     for f in resueltas:
         if f.fecha_resolucion and f.fecha_identificacion:
-            inicio = datetime(
-                f.fecha_identificacion.year, f.fecha_identificacion.month,
-                f.fecha_identificacion.day, tzinfo=_COL_TZ,
-            )
-            total_horas += (f.fecha_resolucion - inicio).total_seconds() / 3600
+            # `inicio_sla` y no una medianoche calculada aparte: este promedio
+            # tiene que arrancar donde arranca el SLA, o el tablero se contradice
+            # consigo mismo. Antes ignoraba `hora_identificacion` y por eso
+            # sobreestimaba el tiempo de resolucion.
+            total_horas += (
+                f.fecha_resolucion - inicio_sla(f)
+            ).total_seconds() / 3600
             n_resueltas += 1
         if f.sla_cumplido is not None:
             sla_evaluadas += 1
@@ -108,7 +110,15 @@ def stats_resumen() -> dict:
     corte_alerta = hoy - timedelta(days=7)
 
     def _contar(*filtros):
-        return Falla.objects.filter(*filtros).count()
+        # `deleted_at` va EN EL HELPER, no en cada llamada: los cinco contadores
+        # lo necesitan y olvidarlo en uno era justo el bug. Una falla
+        # soft-borrada seguia contando como activa, en revision y en alerta.
+        #
+        # Es el mismo bug que el KPI del dashboard ya arreglo el 2026-08-19
+        # (api/v1/dashboard/queryset.py:27-32); este resumen quedo fuera. Venia
+        # de FastAPI, donde `_count()` tampoco lo filtraba, asi que no lo
+        # introdujo la migracion — pero tampoco lo arreglo.
+        return Falla.objects.filter(*filtros, deleted_at__isnull=True).count()
 
     abiertas = Q(estado__es_estado_final=False)
     finales = Q(estado__es_estado_final=True)

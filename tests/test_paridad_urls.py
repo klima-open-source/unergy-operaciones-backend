@@ -9,6 +9,10 @@ La prueba compara las dos tablas de rutas para los prefijos ya portados. Al
 portar un modulo se agrega su prefijo a `PREFIJOS_PORTADOS` y esta prueba pasa a
 vigilarlo; mientras no este en la lista, el prefijo lo sigue sirviendo FastAPI y
 no hay nada que comparar.
+
+Un recurso **retirado** es el tercer caso, y no se expresa quitandolo de la lista
+sin mas: eso lo dejaria pareciendo "todavia en FastAPI". Va en
+`PREFIJOS_RETIRADOS`, con su fecha y su razon.
 """
 
 import os
@@ -47,7 +51,6 @@ PREFIJOS_PORTADOS = [
     "/api/v1/liquidaciones-api",
     "/api/v1/mandato-inversionistas",
     "/api/v1/mandatos",
-    "/api/v1/mantenimiento-impacto",
     "/api/v1/mapa",
     "/api/v1/monitoreo",
     "/api/v1/notificaciones",
@@ -69,6 +72,22 @@ PREFIJOS_PORTADOS = [
     "/api/v1/starlink",
     "/api/v1/verificacion-costos",
 ]
+
+# Recursos que ya NO existen en ninguno de los dos arboles. No van en
+# `PREFIJOS_PORTADOS` porque no hay Django que comparar, pero tampoco es que
+# "los siga sirviendo FastAPI": se eliminaron. El modulo de `app/` sigue en la
+# imagen (ese arbol esta apagado, ver CLAUDE.md) y por eso el lado FastAPI de
+# esta prueba todavia los enumera; sin esta lista, el test los reportaria como
+# rutas perdidas.
+#
+#   /api/v1/mantenimiento-impacto  2026-09-07  tabla en 0 filas y ningun
+#       consumidor: ni la bandera `generar_impacto`, ni los 5 endpoints, ni los
+#       4 campos que derivaba `cumplimiento/resumen.py` aparecian en el
+#       frontend. Ver apps/monitoreo/migrations/0005_eliminar_mantenimiento_impacto.py
+PREFIJOS_RETIRADOS = [
+    "/api/v1/mantenimiento-impacto",
+]
+
 
 # Verbos que DRF agrega por su cuenta y FastAPI nunca declara.
 VERBOS_IGNORADOS = {"HEAD", "OPTIONS", "TRACE"}
@@ -196,9 +215,12 @@ def _rutas_django() -> set[tuple[str, str]]:
 
 
 def _de_los_portados(rutas):
+    def cubre(ruta, prefijos):
+        return any(ruta == p or ruta.startswith(p + "/") for p in prefijos)
+
     return {
         (ruta, metodo) for ruta, metodo in rutas
-        if any(ruta == p or ruta.startswith(p + "/") for p in PREFIJOS_PORTADOS)
+        if cubre(ruta, PREFIJOS_PORTADOS) and not cubre(ruta, PREFIJOS_RETIRADOS)
     }
 
 

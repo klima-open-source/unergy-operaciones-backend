@@ -723,7 +723,7 @@ def vincular_sunfactory(
 
 
 # Tablas hacia proyectos que NO tienen relationship en el modelo Proyecto (a
-# diferencia de fallas/mantenimientos/etc, que sí lo tienen y ya se chequean
+# diferencia de fallas/liquidaciones/etc, que sí lo tienen y ya se chequean
 # abajo vía el ORM) -- hallazgo de la auditoría de Proyectos 2026-08-27: el
 # guard de delete_proyecto() solo cubría 11 relaciones. Las primeras 6 tienen
 # FK ON DELETE CASCADE, así que Postgres las borraba en cascada sin ningún
@@ -772,7 +772,7 @@ def delete_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_curren
 
     # Verificar si hay registros de negocio que impiden la eliminación
     business_records = (
-        p.fallas or p.mantenimientos or p.liquidaciones
+        p.fallas or p.liquidaciones
         or p.asic_solicitudes or p.rec_procesos or p.promotor_seguimientos
         or p.contratos_servicio or p.ppa_contratos
         or p.fronteras or p.generaciones
@@ -782,7 +782,7 @@ def delete_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_curren
         raise HTTPException(
             409,
             "No se puede eliminar el proyecto porque tiene registros operativos asociados "
-            "(fallas, mantenimientos, liquidaciones, contratos, etc.). "
+            "(fallas, liquidaciones, contratos, etc.). "
             "Elimine primero esos registros."
         )
 
@@ -810,7 +810,7 @@ def delete_proyecto(id: int, db: Session = Depends(get_db), _=Depends(get_curren
 # vacíos (liberándolos primero del perdedor para no chocar con el UNIQUE).
 _MERGE_SIMPLE = [
     "proyecto_inversores",
-    "proyecto_inversionistas", "fronteras", "fallas", "mantenimientos",
+    "proyecto_inversionistas", "fronteras", "fallas",
     "contratos_servicio", "asic_solicitudes",
     "rec_procesos", "costos_variables",
     "gestion_registros", "cumplimiento_mensual",

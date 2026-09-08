@@ -27,7 +27,6 @@ from apps.proyectos.models import (
 # Relaciones que el ORM sí conoce y que bloquean el borrado.
 RELACIONES_BLOQUEANTES = [
     ("fallas", "fallas_por_proyecto_id"),
-    ("mantenimientos", "mantenimientos_por_proyecto_id"),
     ("liquidaciones", "liquidaciones_por_proyecto_id"),
     ("asic_solicitudes", "asic_solicitudes_por_proyecto_id"),
     ("rec_procesos", "rec_procesos_por_proyecto_id"),
@@ -65,7 +64,7 @@ TABLAS_CASCADE_SIN_RELACION = [
 #                      descarta la del perdedor.
 MERGE_SIMPLE = [
     "proyecto_inversores", "proyecto_inversionistas", "fronteras", "fallas",
-    "mantenimientos", "contratos_servicio", "asic_solicitudes", "rec_procesos",
+    "contratos_servicio", "asic_solicitudes", "rec_procesos",
     "costos_variables", "gestion_registros", "cumplimiento_mensual",
 ]
 MERGE_COMPUESTO = [

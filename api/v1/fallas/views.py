@@ -15,7 +15,7 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime, time, timezone
+from datetime import datetime, timezone
 
 from django.db import IntegrityError, transaction
 from rest_framework import status, viewsets
@@ -216,9 +216,14 @@ class FallaViewSet(viewsets.GenericViewSet):
             "cliente_id": par.entero(request, "cliente_id"),
             "solo_alerta": par.bandera(request, "solo_alerta"),
             "solo_activas": par.bandera(request, "solo_activas"),
-            "activa_en_fecha": request.query_params.get("activa_en_fecha"),
-            "fecha_programada_desde": request.query_params.get("fecha_programada_desde"),
-            "fecha_programada_hasta": request.query_params.get("fecha_programada_hasta"),
+            # `par.fecha` y no `query_params.get`: la cadena cruda llegaba al
+            # ORM y una fecha mal formada salia como 500 (un
+            # `django.core.exceptions.ValidationError`, que el EXCEPTION_HANDLER
+            # de DRF no traduce). FastAPI las declaraba `date | None` y devolvia
+            # 422.
+            "activa_en_fecha": par.fecha(request, "activa_en_fecha"),
+            "fecha_programada_desde": par.fecha(request, "fecha_programada_desde"),
+            "fecha_programada_hasta": par.fecha(request, "fecha_programada_hasta"),
             "con_fecha_programada": par.bandera(request, "con_fecha_programada"),
             "pendiente_reclasificar": (
                 None if request.query_params.get("pendiente_reclasificar") is None
@@ -241,7 +246,6 @@ class FallaViewSet(viewsets.GenericViewSet):
         datos = dict(entrada.validated_data)
         intervalos = datos.pop("intervalos", None)
         inversores = datos.pop("inversores", None)
-        generar_impacto = datos.pop("generar_impacto", False)
         fotos = datos.pop("fotos_urls", None)
 
         # Camino estructurado: validar ANTES de crear nada.
@@ -269,8 +273,6 @@ class FallaViewSet(viewsets.GenericViewSet):
 
         self._notificar_coordinadores(falla)
         self._alarmas_post_guardado(falla.id)
-        if generar_impacto:
-            self._generar_impacto(falla, request.user)
 
         return Response(
             fa_serializers.FallaSerializer(self._falla(falla.id)).data,
@@ -303,51 +305,6 @@ class FallaViewSet(viewsets.GenericViewSet):
                 evaluar_alarmas_falla(falla)
         except Exception:
             logger.exception("evaluar_alarmas_falla falló (no bloqueante)")
-
-    def _generar_impacto(self, falla, usuario) -> None:
-        """Crea un `MantenimientoImpacto` ligado a la falla usando su ventana.
-
-        Silenciosa ante errores: nunca debe tumbar la creación de la falla.
-        """
-        try:
-            from apps.monitoreo.services.impacto import calcular
-
-            inicio = falla.fecha_ocurrencia
-            if inicio is None and falla.fecha_identificacion:
-                inicio = datetime.combine(
-                    falla.fecha_identificacion,
-                    falla.hora_identificacion or time(0, 0),
-                    tzinfo=dominio._COL_TZ,
-                )
-            if inicio is None:
-                return
-            fin = falla.fecha_resolucion or datetime.now(dominio._COL_TZ)
-            if inicio.tzinfo is None:
-                inicio = inicio.replace(tzinfo=dominio._COL_TZ)
-            if fin.tzinfo is None:
-                fin = fin.replace(tzinfo=dominio._COL_TZ)
-            fin = max(fin, inicio)
-
-            metricas = calcular(falla.proyecto_id, inicio, fin)
-            # `metricas` trae también `precio_cop_kwh`, que no es columna.
-            columnas = (
-                "expected_generation_kwh", "actual_generation_kwh",
-                "lost_energy_kwh", "financial_impact_cop", "ppa_penalty_risk_flag",
-            )
-            mo_models.MantenimientoImpacto.objects.create(
-                proyecto_id=falla.proyecto_id,
-                falla_id=falla.id,
-                maintenance_type="unscheduled",  # nace de una falla → no programado
-                start_time=inicio,
-                end_time=fin,
-                created_by=getattr(usuario, "id", None),
-                **{c: metricas[c] for c in columnas},
-            )
-        except Exception:
-            logger.warning(
-                "No se pudo generar impacto de mantenimiento para falla %s",
-                falla.id, exc_info=True,
-            )
 
     @action(detail=False, methods=["post"], url_path="backfill-sla")
     def backfill_sla(self, request):
@@ -447,8 +404,13 @@ class FallaViewSet(viewsets.GenericViewSet):
 
         falla = self._falla(pk)
         accion = "cerrada" if falla.estado and falla.estado.es_estado_final else "creada"
+        # `request.user.usuario.nombre`, no `request.user.nombre`:
+        # `UsuarioAutenticado` no es el modelo, solo expone `id`, `roles` y
+        # `usuario` (ver api/authentication.py). El `getattr(..., "")` que habia
+        # aca no fallaba, devolvia "" — asi que el correo al cliente salia SIN
+        # quien registro la falla, y el log tambien.
         return Response(enviar_notificacion(
-            falla, accion=accion, usuario_nombre=getattr(request.user, "nombre", ""),
+            falla, accion=accion, usuario_nombre=request.user.usuario.nombre,
         ))
 
     @action(detail=True, methods=["post"], url_path="seguimientos")

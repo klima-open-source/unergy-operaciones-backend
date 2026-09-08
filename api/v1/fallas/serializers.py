@@ -205,7 +205,7 @@ _COLUMNAS_ACTUALIZAR = [c for c in _COLUMNAS_ENTRADA if c != "alarma_monitoreo_i
 
 
 class FallaCrearSerializer(serializers.ModelSerializer):
-    """POST. `intervalos`, `inversores` y `generar_impacto` NO son columnas."""
+    """POST. `intervalos` e `inversores` NO son columnas."""
 
     proyecto_id = serializers.IntegerField()
     estado_id = serializers.IntegerField()
@@ -219,11 +219,10 @@ class FallaCrearSerializer(serializers.ModelSerializer):
     # ausencia (`datos.pop("intervalos", None)`).
     intervalos = FallaIntervaloEntradaSerializer(many=True, required=False, allow_null=True)
     inversores = FallaInversorEntradaSerializer(many=True, required=False, allow_null=True)
-    generar_impacto = serializers.BooleanField(required=False, default=False)
 
     class Meta:
         model = mo_models.Falla
-        fields = ["proyecto_id", *_COLUMNAS_ENTRADA, "intervalos", "inversores", "generar_impacto"]
+        fields = ["proyecto_id", *_COLUMNAS_ENTRADA, "intervalos", "inversores"]
         extra_kwargs = {
             c: {"required": False} for c in _COLUMNAS_ENTRADA
             if c not in ("descripcion", "fecha_identificacion")

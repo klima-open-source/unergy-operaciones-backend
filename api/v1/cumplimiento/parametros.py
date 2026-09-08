@@ -6,6 +6,8 @@ llegaría hasta la consulta y devolvería una lista vacía con 200, que es peor 
 un error — parece un mes sin datos.
 """
 
+from datetime import date
+
 from api.exceptions import NoProcesable
 
 
@@ -32,6 +34,28 @@ def bandera(request, nombre, defecto=False):
     if crudo is None:
         return defecto
     return crudo.strip().lower() in ("1", "true", "yes", "on", "t", "y")
+
+
+def fecha(request, nombre, defecto=None, requerido=False):
+    """`?activa_en_fecha=2026-09-01`. FastAPI lo declaraba `date | None` y
+    devolvia 422 solo con verlo en la firma.
+
+    Sin esto la cadena cruda llega hasta el ORM y Django levanta un
+    `django.core.exceptions.ValidationError`, que **no** es de DRF: su
+    `EXCEPTION_HANDLER` no lo traduce y sale un **500**. Es peor que un error de
+    validacion, porque parece una caida del servidor.
+    """
+    crudo = request.query_params.get(nombre)
+    if crudo in (None, ""):
+        if requerido:
+            raise NoProcesable(f"Falta el parámetro obligatorio '{nombre}'")
+        return defecto
+    try:
+        return date.fromisoformat(crudo)
+    except (TypeError, ValueError):
+        raise NoProcesable(
+            f"'{nombre}' no es una fecha válida ('{crudo}'). Usá el formato YYYY-MM-DD."
+        )
 
 
 def anio(request, requerido=True, defecto=None):
