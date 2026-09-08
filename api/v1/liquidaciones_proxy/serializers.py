@@ -13,13 +13,23 @@ VERSIONES = ("txf", "txr", "tx2", "tx3", "tx4", "tx5", "tx6", "tx7", "tx8")
 
 
 class ProyectoUpdateSerializer(serializers.Serializer):
-    """Los campos de configuración que la API externa acepta actualizar."""
+    """Los campos de configuración que la API externa acepta actualizar.
 
-    codigo_sic = serializers.CharField(required=False, allow_null=True)
-    codigo_frt = serializers.CharField(required=False, allow_null=True)
+    Los nombres son los de la API, no traducciones: el cliente filtra por
+    `api_externa.CAMPOS_PROYECTO` antes de mandar el PATCH, así que un campo
+    bautizado distinto acá se descarta entre las dos capas sin avisar. Lo
+    vigila `tests/test_proxy_liquidaciones_campos_escritura.py`.
+
+    Hay un campo por frontera: `_gen` es la generadora y `_con` la de consumo.
+    """
+
+    sic_gen = serializers.CharField(required=False, allow_null=True)
+    sic_con = serializers.CharField(required=False, allow_null=True)
+    frt_gen = serializers.CharField(required=False, allow_null=True)
+    frt_con = serializers.CharField(required=False, allow_null=True)
     ac_power = serializers.FloatField(required=False, allow_null=True)
-    es_generador = serializers.BooleanField(required=False)
-    es_comercializador = serializers.BooleanField(required=False)
+    from_generator = serializers.BooleanField(required=False)
+    from_commercializer = serializers.BooleanField(required=False)
 
 
 class SubproyectoUpdateSerializer(serializers.Serializer):
@@ -27,10 +37,12 @@ class SubproyectoUpdateSerializer(serializers.Serializer):
 
     Se manda solo lo que venga (`partial`): en esta API enviar `null` **borra**
     el id, así que un campo omitido y uno vacío NO significan lo mismo.
+
+    Igual que arriba, los nombres son los de la API (`CAMPOS_QUOIA`).
     """
 
-    quoia_report_id = serializers.CharField(required=False, allow_null=True)
-    quoia_report_id_2 = serializers.CharField(required=False, allow_null=True)
+    quoia_report_gen_id = serializers.CharField(required=False, allow_null=True)
+    quoia_report_con_id = serializers.CharField(required=False, allow_null=True)
     quoia_node_id = serializers.CharField(required=False, allow_null=True)
 
 
