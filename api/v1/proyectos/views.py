@@ -15,6 +15,7 @@ conserva por consistencia y porque el router las resuelve primero igual.
 from datetime import datetime, timezone
 
 from django.db import IntegrityError, transaction
+from django.db.models import Exists, OuterRef, Q
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, ValidationError
@@ -27,6 +28,7 @@ from api.permissions import RolePermission
 from api.v1.cumplimiento import parametros as par
 from apps.clientes.models import Cliente, ProyectoAreaContacto
 from apps.fronteras.models import Frontera
+from apps.ppa.models import PpaContratoProyecto
 from apps.proyectos import models as py_models
 from apps.proyectos.services import gen_promedio, gestion, pendientes as pendientes_svc
 from apps.proyectos.services.operador_red import sincronizar_operador_red
@@ -131,6 +133,30 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         servicio = request.query_params.get("servicio")
         if servicio in SERVICIOS:
             qs = qs.filter(**{f"srv_{servicio}": True})
+
+        ppa_ids = par.entero_lista(request, "ppa_id")
+        sin_ppa = par.bandera(request, "sin_ppa")
+        if ppa_ids or sin_ppa:
+            # "tiene alguno de estos contratos" y/o "no tiene ningun contrato" --
+            # se combinan con OR (mismo criterio que el filtro de PPA del
+            # frontend), con el mismo patron Q(Exists(...)) que ya usa
+            # `apps/contabilidad/services/panel.py::representamos` -- sin
+            # annotate() de por medio, que dejaria una columna extra en el
+            # SELECT y evaluaria la subconsulta correlacionada dos veces.
+            #
+            # `contrato__deleted_at__isnull=True` es obligatorio: borrar un
+            # contrato PPA (ppa/views.py::destroy) solo pone deleted_at, nunca
+            # limpia la fila de ppa_contrato_proyectos -- sin este filtro, un
+            # contrato borrado seguia contando como vinculo vivo.
+            vinculo_vivo = PpaContratoProyecto.objects.filter(
+                proyecto_id=OuterRef("pk"), contrato__deleted_at__isnull=True,
+            )
+            condiciones = Q()
+            if ppa_ids:
+                condiciones |= Q(Exists(vinculo_vivo.filter(contrato_id__in=ppa_ids)))
+            if sin_ppa:
+                condiciones |= Q(~Exists(vinculo_vivo))
+            qs = qs.filter(condiciones)
 
         pagina = self.paginate_queryset(qs.order_by("nombre_comercial"))
         return self.get_paginated_response(

@@ -275,7 +275,7 @@ devuelve los candidatos para que pidas el detalle por `id`:
 }
 ```
 
-**422 — falta el parámetro `nombre`** o vino vacío. Lo valida FastAPI.
+**422 — falta el parámetro `nombre`** o vino vacío.
 
 ---
 
