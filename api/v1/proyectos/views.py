@@ -134,28 +134,28 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         if servicio in SERVICIOS:
             qs = qs.filter(**{f"srv_{servicio}": True})
 
-        ppa_ids = [int(v) for v in request.query_params.getlist("ppa_id")] or None
+        ppa_ids = par.entero_lista(request, "ppa_id")
         sin_ppa = par.bandera(request, "sin_ppa")
         if ppa_ids or sin_ppa:
             # "tiene alguno de estos contratos" y/o "no tiene ningun contrato" --
             # se combinan con OR (mismo criterio que el filtro de PPA del
-            # frontend). `contrato__deleted_at__isnull=True` es obligatorio:
-            # borrar un contrato PPA (ppa/views.py::destroy) solo pone
-            # deleted_at, nunca limpia la fila de ppa_contrato_proyectos --
-            # sin este filtro, un contrato borrado seguia contando como
-            # vinculo vivo.
+            # frontend), con el mismo patron Q(Exists(...)) que ya usa
+            # `apps/contabilidad/services/panel.py::representamos` -- sin
+            # annotate() de por medio, que dejaria una columna extra en el
+            # SELECT y evaluaria la subconsulta correlacionada dos veces.
+            #
+            # `contrato__deleted_at__isnull=True` es obligatorio: borrar un
+            # contrato PPA (ppa/views.py::destroy) solo pone deleted_at, nunca
+            # limpia la fila de ppa_contrato_proyectos -- sin este filtro, un
+            # contrato borrado seguia contando como vinculo vivo.
             vinculo_vivo = PpaContratoProyecto.objects.filter(
                 proyecto_id=OuterRef("pk"), contrato__deleted_at__isnull=True,
             )
             condiciones = Q()
             if ppa_ids:
-                qs = qs.annotate(
-                    _tiene_ppa_seleccionado=Exists(vinculo_vivo.filter(contrato_id__in=ppa_ids))
-                )
-                condiciones |= Q(_tiene_ppa_seleccionado=True)
+                condiciones |= Q(Exists(vinculo_vivo.filter(contrato_id__in=ppa_ids)))
             if sin_ppa:
-                qs = qs.annotate(_sin_ppa=~Exists(vinculo_vivo))
-                condiciones |= Q(_sin_ppa=True)
+                condiciones |= Q(~Exists(vinculo_vivo))
             qs = qs.filter(condiciones)
 
         pagina = self.paginate_queryset(qs.order_by("nombre_comercial"))

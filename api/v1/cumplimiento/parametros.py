@@ -26,6 +26,18 @@ def entero(request, nombre, defecto=None, minimo=None, maximo=None, requerido=Fa
     return valor
 
 
+def entero_lista(request, nombre):
+    """`?ppa_id=1&ppa_id=2` -> `[1, 2]`. Igual que `entero`, para query params
+    repetidos: un valor no numérico da 422 en vez de un ValueError sin capturar."""
+    valores = []
+    for crudo in request.query_params.getlist(nombre):
+        try:
+            valores.append(int(crudo))
+        except (TypeError, ValueError):
+            raise NoProcesable(f"'{nombre}' debe ser un número entero")
+    return valores or None
+
+
 def bandera(request, nombre, defecto=False):
     """`?incluir_todos=true`. FastAPI acepta true/false/1/0/yes/on."""
     crudo = request.query_params.get(nombre)

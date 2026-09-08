@@ -217,3 +217,11 @@ def test_sin_ppa_incluye_proyecto_cuyo_unico_contrato_esta_borrado(datos):
     assert respuesta.status_code == 200, respuesta.data
     assert respuesta.data["total"] == 1
     assert [p["id"] for p in respuesta.data["items"]] == [proyecto.id]
+
+
+def test_ppa_id_no_numerico_da_422_no_500(datos):
+    """`portafolio_id` usa `par.entero` y ya daba 422 ante un valor invalido;
+    `ppa_id` debe comportarse igual, no reventar con un ValueError sin capturar."""
+    respuesta = _listar(datos, "?ppa_id=abc")
+
+    assert respuesta.status_code == 422, respuesta.data
