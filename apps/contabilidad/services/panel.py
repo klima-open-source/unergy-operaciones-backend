@@ -651,7 +651,7 @@ def _serializar_panel(p: PanelContable, nombres: dict, sop_map: dict | None = No
         return sop_map.get((p.proyecto_id, grupo, concepto))
     # Agrupar líneas por inversionista.
     inv_map: dict = {}
-    for ln in sorted(p.lineas, key=lambda x: x.orden):
+    for ln in sorted(p.lineas.all(), key=lambda x: x.orden):
         key = ln.proyecto_inversionista_id or f"_{ln.inversionista_nombre}"
         if key not in inv_map:
             consec = consec_map.get(
