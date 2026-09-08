@@ -268,3 +268,49 @@ def test_notificar_manda_el_nombre_de_quien_registro(datos, monkeypatch):
     assert respuesta.data["ok"] is True
     # Lo que iba vacio.
     assert capturado["registrado_por"] == "QA", capturado.get("registrado_por")
+
+
+# ── P1-7 · `GET /fallas` respondia 500 con una fecha mal formada ──────────────
+#
+# Los tres parametros de fecha del listado iban CRUDOS del query string al ORM.
+# Django levanta ahi un `django.core.exceptions.ValidationError`, que no es de
+# DRF: su `EXCEPTION_HANDLER` no lo traduce y sale un 500 -- peor que un error de
+# validacion, porque parece una caida del servidor. FastAPI los declaraba
+# `date | None` y devolvia 422 solo con verlos en la firma. Ahora pasan por
+# `par.fecha`. Los enteros ya estaban cubiertos por `par.entero`.
+
+@pytest.mark.parametrize("parametro", [
+    "activa_en_fecha", "fecha_programada_desde", "fecha_programada_hasta",
+])
+@pytest.mark.parametrize("valor", ["basura", "2026-13-45", "01/09/2026"])
+def test_una_fecha_mal_formada_da_422_y_no_500(datos, parametro, valor):
+    _falla(datos)
+    respuesta = _pedir(
+        "get", f"/api/v1/fallas?{parametro}={valor}", datos, acciones={"get": "list"},
+    )
+    assert respuesta.status_code == 422, respuesta.data
+
+
+def test_las_fechas_validas_siguen_filtrando(datos):
+    from datetime import date as _date
+
+    # Identificada el 1 de septiembre, programada para el 10.
+    _falla(datos, fecha_programada=_date(2026, 9, 10))
+
+    # Dentro del rango programado.
+    r = _pedir("get", "/api/v1/fallas?fecha_programada_desde=2026-09-01"
+               "&fecha_programada_hasta=2026-09-30", datos, acciones={"get": "list"})
+    assert r.status_code == 200, r.data
+    assert r.data["total"] == 1
+
+    # Fuera del rango.
+    r = _pedir("get", "/api/v1/fallas?fecha_programada_desde=2026-10-01",
+               datos, acciones={"get": "list"})
+    assert r.status_code == 200, r.data
+    assert r.data["total"] == 0
+
+    # `activa_en_fecha`: abierta desde el 1, asi que el 5 seguia activa.
+    r = _pedir("get", "/api/v1/fallas?activa_en_fecha=2026-09-05",
+               datos, acciones={"get": "list"})
+    assert r.status_code == 200, r.data
+    assert r.data["total"] == 1

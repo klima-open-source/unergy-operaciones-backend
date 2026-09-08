@@ -216,9 +216,14 @@ class FallaViewSet(viewsets.GenericViewSet):
             "cliente_id": par.entero(request, "cliente_id"),
             "solo_alerta": par.bandera(request, "solo_alerta"),
             "solo_activas": par.bandera(request, "solo_activas"),
-            "activa_en_fecha": request.query_params.get("activa_en_fecha"),
-            "fecha_programada_desde": request.query_params.get("fecha_programada_desde"),
-            "fecha_programada_hasta": request.query_params.get("fecha_programada_hasta"),
+            # `par.fecha` y no `query_params.get`: la cadena cruda llegaba al
+            # ORM y una fecha mal formada salia como 500 (un
+            # `django.core.exceptions.ValidationError`, que el EXCEPTION_HANDLER
+            # de DRF no traduce). FastAPI las declaraba `date | None` y devolvia
+            # 422.
+            "activa_en_fecha": par.fecha(request, "activa_en_fecha"),
+            "fecha_programada_desde": par.fecha(request, "fecha_programada_desde"),
+            "fecha_programada_hasta": par.fecha(request, "fecha_programada_hasta"),
             "con_fecha_programada": par.bandera(request, "con_fecha_programada"),
             "pendiente_reclasificar": (
                 None if request.query_params.get("pendiente_reclasificar") is None
