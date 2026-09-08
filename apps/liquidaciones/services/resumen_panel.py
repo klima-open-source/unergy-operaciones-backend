@@ -31,7 +31,7 @@ def construir(paneles, periodo_norm, tipo, nombres, tipos,
 
     for panel in paneles:
         inv_map: dict = {}
-        for ln in sorted(panel.lineas, key=lambda x: x.orden):
+        for ln in sorted(panel.lineas.all(), key=lambda x: x.orden):
             key = ln.proyecto_inversionista_id or f"_{ln.inversionista_nombre}"
             if key not in inv_map:
                 cli = cliente_por_pi.get(ln.proyecto_inversionista_id) or {}
