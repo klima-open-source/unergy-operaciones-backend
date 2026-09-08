@@ -18,7 +18,7 @@ from apps.proyectos.models import ProyectoInversionista
 
 from .dominio import (
     BOT_DESCONEXION_CATEGORIA, BOT_DESCONEXION_SUBTIPO, DEFAULT_SLA_HOURS,
-    _COL_TZ, limite_sla, sla_limite_horas_efectivo,
+    _COL_TZ, inicio_sla, limite_sla, sla_limite_horas_efectivo,
 )
 
 # Lo que la tabla y el "hero" del drawer muestran de entrada. NO incluye
@@ -83,11 +83,13 @@ def sla_dashboard() -> dict:
     n_resueltas = sla_ok = sla_evaluadas = 0
     for f in resueltas:
         if f.fecha_resolucion and f.fecha_identificacion:
-            inicio = datetime(
-                f.fecha_identificacion.year, f.fecha_identificacion.month,
-                f.fecha_identificacion.day, tzinfo=_COL_TZ,
-            )
-            total_horas += (f.fecha_resolucion - inicio).total_seconds() / 3600
+            # `inicio_sla` y no una medianoche calculada aparte: este promedio
+            # tiene que arrancar donde arranca el SLA, o el tablero se contradice
+            # consigo mismo. Antes ignoraba `hora_identificacion` y por eso
+            # sobreestimaba el tiempo de resolucion.
+            total_horas += (
+                f.fecha_resolucion - inicio_sla(f)
+            ).total_seconds() / 3600
             n_resueltas += 1
         if f.sla_cumplido is not None:
             sla_evaluadas += 1

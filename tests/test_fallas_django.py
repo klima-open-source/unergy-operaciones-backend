@@ -379,3 +379,104 @@ def test_stats_resumen_no_cuenta_una_resuelta_borrada(datos):
     assert stats["resueltas_mes"] == 0, stats
     # Sin base evaluable el porcentaje es None, no 100.
     assert stats["cumplimiento_sla_pct"] is None, stats
+
+
+# ── P0-9 · el SLA se anclaba a medianoche e ignoraba la hora ──────────────────
+#
+# `limite_sla` armaba el vencimiento desde `fecha_identificacion` a las 00:00 y
+# NO sumaba `hora_identificacion`, que si se captura y si se guarda. Una critica
+# (SLA 8 h) identificada a las 9:00 a.m. vencia a las 8:00 a.m. del MISMO dia --
+# nacia vencida. De `limite_sla` salen el `sla_cumplido` que se sella al cerrar,
+# el "en riesgo"/"vencido" del tablero y el badge "Cumplido/Incumplido" del
+# detalle, asi que los cuatro estaban mal a la vez.
+#
+# La regla vive ahora en `dominio.inicio_sla`, que tambien usa el promedio de
+# resolucion del tablero -- antes calculaba su propia medianoche aparte.
+
+def test_inicio_sla_suma_la_hora_de_identificacion(datos):
+    from datetime import time as _time
+
+    from apps.monitoreo.services.fallas import dominio
+
+    falla = _falla(datos, fecha_identificacion=date(2026, 9, 1),
+                   hora_identificacion=_time(9, 30))
+    inicio = dominio.inicio_sla(falla)
+    assert (inicio.hour, inicio.minute) == (9, 30), inicio
+    # Prioridad nivel 1 = 8 h -> vence 17:30 del mismo dia, no 08:00.
+    limite = dominio.limite_sla(falla)
+    assert (limite.hour, limite.minute) == (17, 30), limite
+
+
+def test_sin_hora_de_identificacion_se_ancla_a_medianoche(datos):
+    from apps.monitoreo.services.fallas import dominio
+
+    # Se conserva el comportamiento anterior a proposito: caer a `created_at`
+    # haria que una falla vieja cargada meses despues arrancara su SLA en la
+    # fecha de carga. Hoy la unica fuente sin hora es la app movil.
+    falla = _falla(datos, fecha_identificacion=date(2026, 9, 1),
+                   hora_identificacion=None)
+    inicio = dominio.inicio_sla(falla)
+    assert (inicio.hour, inicio.minute) == (0, 0), inicio
+
+
+def test_una_critica_de_la_manana_ya_no_nace_vencida(datos):
+    """El efecto visible: el badge Cumplido/Incumplido del detalle."""
+    from datetime import datetime as dt, time as _time, timezone as tz
+
+    falla = _falla(datos, fecha_identificacion=date(2026, 9, 1),
+                   hora_identificacion=_time(9, 0))
+
+    # Resuelta a las 15:00 de Colombia (20:00 UTC) del mismo dia. Con SLA de 8 h
+    # desde las 9:00, el limite son las 17:00 COL: cumplio. Con el ancla a
+    # medianoche el limite eran las 08:00 COL y salia INCUMPLIDO.
+    respuesta = _pedir(
+        "patch", f"/api/v1/fallas/{falla.id}",
+        datos,
+        {
+            "estado_id": datos["cerrado"].id,
+            "fecha_resolucion": dt(2026, 9, 1, 20, 0, tzinfo=tz.utc).isoformat(),
+        },
+        acciones={"patch": "partial_update"}, pk=falla.id,
+    )
+    assert respuesta.status_code == 200, respuesta.data
+    assert respuesta.data["sla_cumplido"] is True, respuesta.data["sla_cumplido"]
+
+
+def test_el_promedio_del_tablero_arranca_donde_arranca_el_sla(datos):
+    from datetime import datetime as dt, time as _time, timezone as tz
+
+    from apps.monitoreo.services.fallas import consultas
+
+    # Identificada 9:00 COL, resuelta 15:00 COL -> 6 h, no 15 h desde medianoche.
+    _falla(datos, estado_id=datos["cerrado"].id,
+           fecha_identificacion=date(2026, 9, 1), hora_identificacion=_time(9, 0),
+           fecha_resolucion=dt(2026, 9, 1, 20, 0, tzinfo=tz.utc))
+
+    tablero = consultas.sla_dashboard()
+    assert tablero["promedio_tiempo_resolucion_horas"] == 6.0, tablero
+
+
+def test_el_post_acepta_la_hora_como_la_manda_el_movil(datos):
+    """Cierra el ciclo movil -> backend: `<input type="time">` manda "HH:MM"."""
+    respuesta = _pedir(
+        "post", "/api/v1/fallas",
+        datos,
+        {
+            "proyecto_id": datos["proyecto"].id,
+            "estado_id": datos["abierto"].id,
+            "prioridad_id": datos["alta"].id,
+            "descripcion": "inversor caido",
+            "fecha_identificacion": "2026-09-01",
+            "hora_identificacion": "09:30",
+        },
+        acciones={"post": "create"},
+    )
+    assert respuesta.status_code == 201, respuesta.data
+    assert str(respuesta.data["hora_identificacion"]).startswith("09:30")
+
+    # Y que de verdad mueva el reloj del SLA, no solo que se guarde.
+    from apps.monitoreo.models import Falla
+    from apps.monitoreo.services.fallas import dominio
+
+    limite = dominio.limite_sla(Falla.objects.get(pk=respuesta.data["id"]))
+    assert (limite.hour, limite.minute) == (17, 30), limite

@@ -71,16 +71,40 @@ def sla_limite_horas_efectivo(falla: Falla) -> int:
     return falla.sla_limite_horas or DEFAULT_SLA_HOURS.get(nivel, 72)
 
 
-def limite_sla(falla: Falla, sla_hours: int | None = None) -> datetime:
-    """El instante en que vence el SLA, contado desde el inicio del día de
-    identificación EN HORA COLOMBIA (no UTC)."""
-    horas = sla_hours if sla_hours is not None else sla_limite_horas_efectivo(falla)
-    return datetime(
-        falla.fecha_identificacion.year,
-        falla.fecha_identificacion.month,
-        falla.fecha_identificacion.day,
+def inicio_sla(falla: Falla) -> datetime:
+    """El instante en que ARRANCA el reloj del SLA, en hora Colombia.
+
+    Suma `hora_identificacion`, que se captura y se guarda pero que el cálculo
+    ignoraba: el límite se anclaba a las 00:00 del día. Efecto real —una crítica
+    (SLA 8 h) identificada a las 9:00 a.m. vencía a las 8:00 a.m. del mismo día,
+    o sea **nacía vencida**; una grave (24 h) detectada a las 18:00 tenía seis
+    horas reales en vez de veinticuatro. Y como de acá salen el `sla_cumplido`
+    que se sella al cerrar, el "en riesgo"/"vencido" del tablero y el badge
+    "Cumplido/Incumplido" del detalle, los cuatro estaban mal a la vez.
+
+    Es el mismo patrón que `tiempo_afectacion_horas` ya usaba 80 líneas más
+    abajo: el código tenía la forma correcta y esta función no la aplicaba.
+
+    **Sin `hora_identificacion` se ancla a las 00:00**, que es lo que hacía
+    antes. Se descartó caer a `created_at` como proxy: una falla vieja cargada
+    meses después arrancaría su SLA en la fecha de carga y podría voltear a
+    "Cumplido" algo que no lo fue. Hoy la única fuente que no manda la hora es
+    la app móvil; cuando la mande, este caso queda solo para datos legacy.
+
+    Único dueño de la regla: lo usan `limite_sla` y el promedio de resolución de
+    `consultas.sla_dashboard`, que antes calculaban la medianoche por separado.
+    """
+    return datetime.combine(
+        falla.fecha_identificacion,
+        falla.hora_identificacion or time(0, 0),
         tzinfo=_COL_TZ,
-    ) + timedelta(hours=horas)
+    )
+
+
+def limite_sla(falla: Falla, sla_hours: int | None = None) -> datetime:
+    """El instante en que vence el SLA, en hora Colombia (no UTC)."""
+    horas = sla_hours if sla_hours is not None else sla_limite_horas_efectivo(falla)
+    return inicio_sla(falla) + timedelta(hours=horas)
 
 
 def fotos_lista(falla: Falla) -> list:
