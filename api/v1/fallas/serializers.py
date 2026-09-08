@@ -115,6 +115,13 @@ class FallaListaSerializer(serializers.ModelSerializer):
     registrado_por = UsuarioResumenSerializer(read_only=True)
     sla_limite_horas_efectivo = serializers.SerializerMethodField()
     sla_limite_dias = serializers.SerializerMethodField()
+    # El reloj del SLA lo calcula el backend, no cada vista. Las tres pantallas
+    # del frontend tenian su propia copia de este calculo, las tres anclada a
+    # `fecha_identificacion + 'T00:00:00'` -- el mismo bug de la medianoche que
+    # se arreglo en `limite_sla`, pero del lado del cliente y para las fallas
+    # ABIERTAS, que son las que la gente mira.
+    sla_horas_transcurridas = serializers.SerializerMethodField()
+    sla_pct = serializers.SerializerMethodField()
     dias_abierta = serializers.SerializerMethodField()
     tiempo_afectacion_horas = serializers.SerializerMethodField()
     tiene_fotos = serializers.SerializerMethodField()
@@ -131,6 +138,7 @@ class FallaListaSerializer(serializers.ModelSerializer):
             "alarma_monitoreo_id", "kwh_perdidos_estimado", "impacto_economico_cop",
             "causa_raiz", "acciones_correctivas", "fecha_programada",
             "dias_abierta", "tiempo_afectacion_horas", "sla_limite_dias",
+            "sla_horas_transcurridas", "sla_pct",
             "categoria_codigo", "subtipo_codigo", "subtipo_detalle", "clasificacion",
             "pendiente_reclasificar", "frontera_afecta_medicion",
             "frontera_perdida_comunicacion", "inversores_perdida_comunicacion",
@@ -142,6 +150,12 @@ class FallaListaSerializer(serializers.ModelSerializer):
 
     def get_sla_limite_dias(self, obj) -> int:
         return dominio.sla_limite_dias(obj)
+
+    def get_sla_horas_transcurridas(self, obj):
+        return dominio.horas_transcurridas_sla(obj)
+
+    def get_sla_pct(self, obj):
+        return dominio.sla_pct(obj)
 
     def get_dias_abierta(self, obj):
         return dominio.dias_abierta(obj)

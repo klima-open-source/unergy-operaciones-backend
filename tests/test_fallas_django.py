@@ -480,3 +480,73 @@ def test_el_post_acepta_la_hora_como_la_manda_el_movil(datos):
 
     limite = dominio.limite_sla(Falla.objects.get(pk=respuesta.data["id"]))
     assert (limite.hour, limite.minute) == (17, 30), limite
+
+
+# ── P0-10 · el reloj del SLA vivia copiado en cuatro vistas del frontend ──────
+#
+# `limite_sla` ya usa la hora, pero el porcentaje que se ve en las fallas
+# ABIERTAS lo calculaba el navegador, y las cuatro copias anclaban a
+# `fecha_identificacion + 'T00:00:00'`. Peor: contaban desde `fecha_ocurrencia`
+# mientras el limite salia de la identificacion, o sea que numerador y
+# denominador median desde puntos distintos. Ahora el backend expone
+# `sla_horas_transcurridas` y `sla_pct`, y las vistas los LEEN.
+
+def test_las_horas_del_sla_cuentan_desde_la_identificacion_con_hora(datos):
+    from datetime import datetime as dt, time as _time, timezone as tz
+
+    from apps.monitoreo.services.fallas import dominio
+
+    # Identificada 9:00 COL, resuelta 15:00 COL -> 6 h, no 15 desde medianoche.
+    falla = _falla(datos, fecha_identificacion=date(2026, 9, 1),
+                   hora_identificacion=_time(9, 0),
+                   fecha_resolucion=dt(2026, 9, 1, 20, 0, tzinfo=tz.utc))
+    assert dominio.horas_transcurridas_sla(falla) == 6.0
+    # Prioridad nivel 1 = 8 h -> 6/8 = 75 %.
+    assert dominio.sla_pct(falla) == 75
+
+
+def test_el_reloj_del_sla_ignora_fecha_ocurrencia(datos):
+    """El SLA es un compromiso de ATENCION: no corre antes de identificar."""
+    from datetime import datetime as dt, time as _time, timezone as tz
+
+    from apps.monitoreo.services.fallas import dominio
+
+    falla = _falla(datos, fecha_identificacion=date(2026, 9, 1),
+                   hora_identificacion=_time(9, 0),
+                   # Ocurrio tres dias antes: no debe sumar al reloj.
+                   fecha_ocurrencia=dt(2026, 8, 29, 12, 0, tzinfo=tz.utc),
+                   fecha_resolucion=dt(2026, 9, 1, 20, 0, tzinfo=tz.utc))
+    assert dominio.horas_transcurridas_sla(falla) == 6.0
+
+
+def test_el_pct_del_sla_tiene_tope_110(datos):
+    from datetime import datetime as dt, timezone as tz
+
+    from apps.monitoreo.services.fallas import dominio
+
+    # Resuelta un mes despues con SLA de 8 h: sin tope daria miles por ciento.
+    falla = _falla(datos, fecha_identificacion=date(2026, 9, 1),
+                   fecha_resolucion=dt(2026, 10, 1, 12, 0, tzinfo=tz.utc))
+    assert dominio.sla_pct(falla) == 110
+
+
+def test_el_serializer_expone_el_reloj_del_sla(datos):
+    """Lo que las cuatro vistas leen en vez de recalcular."""
+    from datetime import time as _time
+
+    falla = _falla(datos, fecha_identificacion=date(2026, 9, 1),
+                   hora_identificacion=_time(9, 0))
+    respuesta = _pedir(
+        "get", f"/api/v1/fallas/{falla.id}", datos,
+        acciones={"get": "retrieve"}, pk=falla.id,
+    )
+    assert respuesta.status_code == 200, respuesta.data
+    assert "sla_horas_transcurridas" in respuesta.data
+    assert "sla_pct" in respuesta.data
+    # Abierta: el reloj corre, asi que hay numero (no None).
+    assert respuesta.data["sla_horas_transcurridas"] is not None
+
+    # Y tambien en el listado, que es de donde salen los drawers.
+    lista = _pedir("get", "/api/v1/fallas", datos, acciones={"get": "list"})
+    assert lista.status_code == 200, lista.data
+    assert "sla_pct" in lista.data["items"][0]

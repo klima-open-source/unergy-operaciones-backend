@@ -107,6 +107,46 @@ def limite_sla(falla: Falla, sla_hours: int | None = None) -> datetime:
     return inicio_sla(falla) + timedelta(hours=horas)
 
 
+def horas_transcurridas_sla(falla: Falla) -> float | None:
+    """Horas de reloj de SLA consumidas: de `inicio_sla` a la solución o a ahora.
+
+    Es el numerador de `sla_pct`, y **arranca donde arranca el límite**. Suena
+    obvio y no lo era: las tres vistas del frontend contaban desde
+    `fecha_ocurrencia` cuando existía, mientras el límite se calculaba desde la
+    identificación. Numerador y denominador medían desde puntos distintos, así
+    que el porcentaje no correspondía con el badge de la misma pantalla.
+
+    Se cuenta desde que SE IDENTIFICÓ y no desde que ocurrió a propósito: el SLA
+    es un compromiso de atención, y el reloj no puede correr antes de que
+    supiéramos que había algo que atender.
+
+    No se confunde con `tiempo_afectacion_horas`, que mide otra cosa —cuánto
+    estuvo afectada la planta, sumando los intervalos de disparo— y que sí debe
+    partir de la ocurrencia.
+    """
+    if not falla.fecha_identificacion:
+        return None
+    fin = falla.fecha_resolucion or datetime.now(_COL_TZ)
+    if fin.tzinfo is None:
+        fin = fin.replace(tzinfo=_COL_TZ)
+    return round(max(0.0, (fin - inicio_sla(falla)).total_seconds() / 3600), 2)
+
+
+# El frontend recortaba la barra en 110 % para que una falla muy vencida no
+# rompiera el ancho del contenedor. Se conserva el tope acá para que el numero
+# que sale por la API sea el mismo que se dibuja.
+SLA_PCT_TOPE = 110
+
+
+def sla_pct(falla: Falla) -> int | None:
+    """Porcentaje del SLA consumido, tope 110. `None` si no hay con qué."""
+    horas = horas_transcurridas_sla(falla)
+    limite = sla_limite_horas_efectivo(falla)
+    if horas is None or not limite:
+        return None
+    return min(round(horas / limite * 100), SLA_PCT_TOPE)
+
+
 def fotos_lista(falla: Falla) -> list:
     """`fotos_urls` como lista, tolerando el formato legado.
 
