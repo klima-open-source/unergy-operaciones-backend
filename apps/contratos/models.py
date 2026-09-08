@@ -26,7 +26,6 @@ class ContratoServicio(Timer):
     contratante = models.ForeignKey("clientes.Cliente", on_delete=models.SET_NULL, db_column="contratante_id", null=True, blank=True, related_name="contratos_servicio_por_contratante_id")
     prestador = models.ForeignKey("clientes.Cliente", on_delete=models.SET_NULL, db_column="prestador_id", null=True, blank=True, related_name="contratos_servicio_por_prestador_id")
     inversionista = models.ForeignKey("clientes.Cliente", on_delete=models.SET_NULL, db_column="inversionista_id", null=True, blank=True, related_name="contratos_servicio_por_inversionista_id")
-    tiene_cgm = models.BooleanField(default=False)
     cgm_codigo_sic = models.CharField(max_length=20, null=True, blank=True)
     fecha_inicio = models.DateField(null=True, blank=True)
     fecha_fin = models.DateField(null=True, blank=True)
