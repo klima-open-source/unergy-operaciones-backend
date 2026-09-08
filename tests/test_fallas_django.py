@@ -626,3 +626,56 @@ def test_el_serializer_expone_el_sla_contractual(datos):
     assert set(contractual) == {"dias", "plazo_dias", "etiqueta", "cumple"}, contractual
     assert contractual["plazo_dias"] == 3, contractual
     assert contractual["etiqueta"] == "Grave (66-90%)", contractual
+
+
+# ── P1-12 · la paginacion recortaba callado y `updated_at` se quedaba atras ──
+
+@pytest.mark.parametrize("consulta", [
+    "?size=99999",       # sobre el tope de 5000
+    "?size=0",           # bajo el minimo
+    "?size=abc",         # no es entero
+    "?page_size=99999",  # el alias tiene el mismo tope
+    "?page=0",           # FastAPI declaraba ge=1
+])
+def test_una_paginacion_fuera_de_rango_da_422(datos, consulta):
+    """FastAPI devolvia 422; DRF recortaba callado y el cliente no se enteraba."""
+    _falla(datos)
+    respuesta = _pedir(
+        "get", f"/api/v1/fallas{consulta}", datos, acciones={"get": "list"},
+    )
+    assert respuesta.status_code == 422, respuesta.data
+
+
+def test_el_tope_valido_sigue_pasando(datos):
+    """El limite exacto no se rechaza: `le=5000` es inclusivo."""
+    _falla(datos)
+    respuesta = _pedir(
+        "get", "/api/v1/fallas?size=5000", datos, acciones={"get": "list"},
+    )
+    assert respuesta.status_code == 200, respuesta.data
+    assert respuesta.data["size"] == 5000
+
+
+def test_el_borrado_logico_mueve_updated_at(datos):
+    """`auto_now` NO se escribe si el campo no esta en `update_fields`.
+
+    Se atrasa `updated_at` con `queryset.update()`, que NO dispara `auto_now`, en
+    vez de comparar contra el instante de creacion: en Windows el reloj puede dar
+    el mismo valor para dos llamadas seguidas y la comparacion salia flaky.
+    """
+    from datetime import datetime as dt, timezone as tz
+
+    from apps.monitoreo.models import Falla
+
+    falla = _falla(datos)
+    viejo = dt(2020, 1, 1, tzinfo=tz.utc)
+    Falla.objects.filter(pk=falla.id).update(updated_at=viejo)
+    assert Falla.objects.get(pk=falla.id).updated_at == viejo, "el atraso no quedo"
+
+    respuesta = _pedir("delete", f"/api/v1/fallas/{falla.id}", datos,
+                       acciones={"delete": "destroy"}, pk=falla.id)
+    assert respuesta.status_code == 204
+
+    despues = Falla.objects.get(pk=falla.id)
+    assert despues.deleted_at is not None
+    assert despues.updated_at > viejo, despues.updated_at
