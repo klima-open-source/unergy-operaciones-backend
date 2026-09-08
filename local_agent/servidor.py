@@ -15,6 +15,7 @@ mientras se usa la pestaña, cerrar cuando se termine.
 """
 import io
 import logging
+import os
 import sys
 import threading
 from pathlib import Path
@@ -42,17 +43,27 @@ app = FastAPI(title="Agente local — Descarga de XM")
 
 # Solo estos orígenes pueden llamar al agente — restringe qué páginas web
 # pueden hacerle pedir a tu computador que se conecte a XM.
+#
+# El front desplegado cambia de dirección (Vercel → Cloudflare Workers, y antes
+# de eso Railway) y cada vez que cambia, el agente deja de responderle con un
+# 400 "Disallowed CORS origin" que en la pestaña se ve igual que si el .bat
+# estuviera cerrado. Por eso la dirección del front desplegado se pone en
+# `XM_ORIGENES_EXTRA` (en `local_agent/.env`, separadas por coma) en vez de
+# quedar clavada aquí.
 ORIGENES_PERMITIDOS = [
     "https://frontend-taupe-six-252g9aw47x.vercel.app",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:4173",
-    "http://127.0.0.1:4173",
+    *[o.strip() for o in os.getenv("XM_ORIGENES_EXTRA", "").split(",") if o.strip()],
 ]
+
+# Cualquier puerto de localhost: el front legacy corre en 5173 (Vite), el v2 en
+# 3000 (Nuxt) y las builds de previsualización en 4173. Enumerarlos uno por uno
+# ya costó una pestaña rota cuando el front se migró a Nuxt.
+REGEX_LOCALHOST = r"http://(localhost|127\.0\.0\.1):\d+"
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ORIGENES_PERMITIDOS,
+    allow_origin_regex=REGEX_LOCALHOST,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
@@ -154,6 +165,10 @@ if __name__ == "__main__":
 
     print("Agente local de Descarga de XM — escuchando en http://127.0.0.1:8420")
     print("Deja esta ventana abierta mientras usas la pestaña 'Descarga de XM'.")
+    # Si la pestaña dice "No se pudo conectar", lo primero que hay que mirar es
+    # si la dirección del front está en esta lista: un origen no permitido se ve
+    # exactamente igual que el agente apagado.
+    print(f"Páginas permitidas: {', '.join(ORIGENES_PERMITIDOS)} + cualquier localhost")
     config = uvicorn.Config(app, host="127.0.0.1", port=8420)
     server = uvicorn.Server(config)
     loop.run_until_complete(server.serve())
