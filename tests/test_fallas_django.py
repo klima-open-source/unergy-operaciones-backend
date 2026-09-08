@@ -484,3 +484,116 @@ def test_el_serializer_expone_el_reloj_del_sla(datos):
     lista = _pedir("get", "/api/v1/fallas", datos, acciones={"get": "list"})
     assert lista.status_code == 200, lista.data
     assert "sla_pct" in lista.data["items"][0]
+
+
+# ── P1-11 · el SLA contractual del Anexo 4 se calculaba en el navegador ──────
+#
+# `calcSLA` vivia en `InformesMensualesPanel.vue`. Es OTRO SLA, no el operativo:
+# va en DIAS y su umbral sale de la CATEGORIA de la falla, no de su prioridad.
+# Se movio a `sla_contractual.py` el 2026-09-08 -- un calculo que decide lo que
+# ve el cliente no debe estar en una vista, donde nadie lo cubre.
+#
+# Su bug era la columna "DIAS ABIERTA": contaba hasta HOY con `Date.now()`, sin
+# mirar `fecha_resolucion`, asi que una falla cerrada en un dia pero identificada
+# tres meses atras imprimia "90d" en el informe del cliente.
+
+def _sla_c(datos, **extra):
+    from apps.monitoreo.services.fallas import sla_contractual
+    return sla_contractual.evaluar(_falla(datos, **extra))
+
+
+def test_el_sla_contractual_cuenta_los_dias_que_estuvo_abierta(datos):
+    from datetime import datetime as dt, timezone as tz
+
+    # Identificada el 1 de junio, cerrada el 2: un dia, no los ~100 hasta hoy.
+    r = _sla_c(datos, fecha_identificacion=date(2026, 6, 1),
+               estado_id=datos["cerrado"].id,
+               fecha_resolucion=dt(2026, 6, 2, 12, 0, tzinfo=tz.utc),
+               clasificacion={"categoria": "red"})
+    assert r["dias"] == 1, r
+
+
+def test_el_sla_contractual_sin_fecha_no_inventa_dias(datos):
+    """La guarda es defensiva: en la base `fecha_identificacion` es NOT NULL, asi
+    que solo se puede llegar ahi con una instancia sin persistir."""
+    from apps.monitoreo import models as mo
+    from apps.monitoreo.services.fallas import sla_contractual
+
+    r = sla_contractual.evaluar(mo.Falla(fecha_identificacion=None))
+    assert r["dias"] == 0 and r["cumple"] is True, r
+
+
+@pytest.mark.parametrize(("categoria", "plazo"), [
+    ("red", 2),
+    ("frontera", 3),
+    ("inversores", 3),
+    ("generando_sin_datos", 3),
+    ("eventos_adversos", 4),
+    ("una_categoria_nueva", 2),   # default: el plazo mas corto
+])
+def test_el_plazo_contractual_sale_de_la_categoria(datos, categoria, plazo):
+    r = _sla_c(datos, clasificacion={"categoria": categoria})
+    assert r["plazo_dias"] == plazo, r
+
+
+@pytest.mark.parametrize(("codigo", "plazo"), [
+    ("1.2", 3), ("4.1", 4), ("5.9", 4), ("2.7", 2),
+])
+def test_sin_clasificacion_cae_al_prefijo_del_tipo(datos, codigo, plazo):
+    """Fallas legacy, anteriores al reporte estructurado."""
+    from apps.monitoreo import models as mo
+
+    tipo = mo.FallaCatTipo.objects.create(
+        categoria=mo.FallaCatCategoria.objects.create(codigo=f"c{codigo}", etiqueta="X"),
+        codigo=codigo, etiqueta="Tipo legacy",
+    )
+    r = _sla_c(datos, clasificacion=None, tipo_id=tipo.id)
+    assert r["plazo_dias"] == plazo, r
+
+
+def test_una_abierta_dentro_del_plazo_cumple(datos):
+    from apps.plataforma.services.fechas import hoy_col
+    from datetime import timedelta as td
+
+    r = _sla_c(datos, fecha_identificacion=hoy_col() - td(days=2),
+               clasificacion={"categoria": "red"})
+    assert (r["dias"], r["cumple"]) == (2, True), r
+
+
+def test_una_abierta_pasada_del_plazo_no_cumple(datos):
+    from apps.plataforma.services.fechas import hoy_col
+    from datetime import timedelta as td
+
+    r = _sla_c(datos, fecha_identificacion=hoy_col() - td(days=3),
+               clasificacion={"categoria": "red"})
+    assert (r["dias"], r["cumple"]) == (3, False), r
+
+
+def test_una_cerrada_cumple_siempre_aunque_se_haya_cerrado_tarde(datos):
+    """Regla del contrato, no de implementacion. Fijada para que no se mueva.
+
+    El Anexo 4 no reporta incumplimiento en incidentes ya cerrados. Si el negocio
+    decide lo contrario, hay que cambiarlo A PROPOSITO -- y este test es el que
+    va a avisar.
+    """
+    from datetime import datetime as dt, timezone as tz
+
+    r = _sla_c(datos, fecha_identificacion=date(2026, 1, 1),
+               estado_id=datos["cerrado"].id,
+               fecha_resolucion=dt(2026, 6, 1, 12, 0, tzinfo=tz.utc),
+               clasificacion={"categoria": "red"})
+    assert r["dias"] > 100 and r["cumple"] is True, r
+
+
+def test_el_serializer_expone_el_sla_contractual(datos):
+    """Lo que el informe FMO lee en vez de recalcular."""
+    falla = _falla(datos, clasificacion={"categoria": "frontera"})
+    respuesta = _pedir(
+        "get", f"/api/v1/fallas/{falla.id}", datos,
+        acciones={"get": "retrieve"}, pk=falla.id,
+    )
+    assert respuesta.status_code == 200, respuesta.data
+    contractual = respuesta.data["sla_contractual"]
+    assert set(contractual) == {"dias", "plazo_dias", "etiqueta", "cumple"}, contractual
+    assert contractual["plazo_dias"] == 3, contractual
+    assert contractual["etiqueta"] == "Grave (66-90%)", contractual

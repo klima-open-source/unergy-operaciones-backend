@@ -13,7 +13,7 @@ leen.
 from rest_framework import serializers
 
 from apps.monitoreo import models as mo_models
-from apps.monitoreo.services.fallas import dominio
+from apps.monitoreo.services.fallas import dominio, sla_contractual
 
 
 class FallaCatEstadoSerializer(serializers.ModelSerializer):
@@ -122,6 +122,10 @@ class FallaListaSerializer(serializers.ModelSerializer):
     # ABIERTAS, que son las que la gente mira.
     sla_horas_transcurridas = serializers.SerializerMethodField()
     sla_pct = serializers.SerializerMethodField()
+    # El SLA **contractual** del Anexo 4, que es OTRO: va en dias y su umbral
+    # sale de la categoria, no de la prioridad. Va anidado justo para que no se
+    # confunda con los campos `sla_*` de arriba, que son el operativo.
+    sla_contractual = serializers.SerializerMethodField()
     dias_abierta = serializers.SerializerMethodField()
     tiempo_afectacion_horas = serializers.SerializerMethodField()
     tiene_fotos = serializers.SerializerMethodField()
@@ -138,7 +142,7 @@ class FallaListaSerializer(serializers.ModelSerializer):
             "alarma_monitoreo_id", "kwh_perdidos_estimado", "impacto_economico_cop",
             "causa_raiz", "acciones_correctivas", "fecha_programada",
             "dias_abierta", "tiempo_afectacion_horas", "sla_limite_dias",
-            "sla_horas_transcurridas", "sla_pct",
+            "sla_horas_transcurridas", "sla_pct", "sla_contractual",
             "categoria_codigo", "subtipo_codigo", "subtipo_detalle", "clasificacion",
             "pendiente_reclasificar", "frontera_afecta_medicion",
             "frontera_perdida_comunicacion", "inversores_perdida_comunicacion",
@@ -156,6 +160,9 @@ class FallaListaSerializer(serializers.ModelSerializer):
 
     def get_sla_pct(self, obj):
         return dominio.sla_pct(obj)
+
+    def get_sla_contractual(self, obj) -> dict:
+        return sla_contractual.evaluar(obj)
 
     def get_dias_abierta(self, obj):
         return dominio.dias_abierta(obj)
