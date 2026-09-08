@@ -234,3 +234,37 @@ def test_paginacion_igual_a_fastapi(datos, consulta, esperado):
     )
     assert respuesta.status_code == 200, respuesta.data
     assert respuesta.data["size"] == esperado
+
+
+# ── P1-6 · el correo al cliente salia sin quien registro la falla ─────────────
+#
+# `POST /fallas/{id}/notificar` pasaba `getattr(request.user, "nombre", "")`, y
+# `UsuarioAutenticado` NO tiene `.nombre` -- solo `id`, `roles` y `usuario` (ver
+# api/authentication.py). El `getattr` con default no fallaba: devolvia "", asi
+# que el campo "registrado por" del correo que ve el cliente iba vacio, y la
+# linea de log tambien. El idioma del repo es `request.user.usuario.nombre`.
+
+def test_notificar_manda_el_nombre_de_quien_registro(datos, monkeypatch):
+    from apps.monitoreo.services.fallas import notificacion
+
+    capturado = {}
+
+    def _falso_envio(**kwargs):
+        capturado.update(kwargs)
+        return {"ok": True, "enviados": ["cliente@ejemplo.com"], "errores": []}
+
+    # Sin correos operacionales el servicio corta antes de armar el mensaje.
+    monkeypatch.setattr(notificacion, "correos_de",
+                        lambda *a, **k: ["cliente@ejemplo.com"])
+    import app.services.email_service as email_service
+    monkeypatch.setattr(email_service, "send_falla_notification_email", _falso_envio)
+
+    falla = _falla(datos)
+    respuesta = _pedir(
+        "post", f"/api/v1/fallas/{falla.id}/notificar", datos, {},
+        acciones={"post": "notificar"}, pk=falla.id,
+    )
+    assert respuesta.status_code == 200, respuesta.data
+    assert respuesta.data["ok"] is True
+    # Lo que iba vacio.
+    assert capturado["registrado_por"] == "QA", capturado.get("registrado_por")

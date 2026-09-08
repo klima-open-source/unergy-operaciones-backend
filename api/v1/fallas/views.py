@@ -399,8 +399,13 @@ class FallaViewSet(viewsets.GenericViewSet):
 
         falla = self._falla(pk)
         accion = "cerrada" if falla.estado and falla.estado.es_estado_final else "creada"
+        # `request.user.usuario.nombre`, no `request.user.nombre`:
+        # `UsuarioAutenticado` no es el modelo, solo expone `id`, `roles` y
+        # `usuario` (ver api/authentication.py). El `getattr(..., "")` que habia
+        # aca no fallaba, devolvia "" — asi que el correo al cliente salia SIN
+        # quien registro la falla, y el log tambien.
         return Response(enviar_notificacion(
-            falla, accion=accion, usuario_nombre=getattr(request.user, "nombre", ""),
+            falla, accion=accion, usuario_nombre=request.user.usuario.nombre,
         ))
 
     @action(detail=True, methods=["post"], url_path="seguimientos")
