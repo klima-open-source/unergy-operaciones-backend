@@ -9,7 +9,9 @@ from rest_framework import serializers
 # Las fuentes que una persona puede confirmar a mano. `matriz_ceros` NO está:
 # no es una fuente real, es un valor de reemplazo — cae al genérico
 # "editado_manualmente" y por eso tampoco toca `caso`.
-FUENTES_MANUALES = ["principal", "respaldo", "inversores", "historico", "reconectador"]
+# 'cgm' es distinta de las demás: no aporta otra curva para la matriz, decide
+# que NO se manda matriz porque Quoia ya reportó bien (ver editar_curva).
+FUENTES_MANUALES = ["principal", "respaldo", "inversores", "historico", "reconectador", "cgm"]
 
 
 class _Curva24(serializers.ListField):

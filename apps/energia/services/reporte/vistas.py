@@ -429,6 +429,16 @@ def _construir_detalle(frontera_id: int, fecha: date) -> dict:
     )
 
     curva_medidor_ppal_viva = curva_medidor_resp_viva = None
+    # La curva del reporte CGM de Quoia -- las 24 horas que Quoia ya tiene en su
+    # sistema. NO está persistida en ninguna de las dos tablas (solo su total,
+    # `energia_cgm_kwh`): el clasificador la pide, decide con ella y la
+    # descarta. Se trae en vivo acá para que 'Reportar con otra fuente' pueda
+    # ofrecerla -- sin curva de 24 horas no hay nada que cargar en el editor, y
+    # por eso esa opción no existía (Paso Norte Consumo 2026-09-07: reporte
+    # automático válido en Quoia, nuestra clasificación cayó a 'Histórico' +
+    # revisar, y no había forma de adoptar el CGM: validar tal cual mandaba la
+    # matriz encima del reporte oficial, y no validar bloqueaba el día entero).
+    curva_cgm_viva = None
     try:
         gaia = GaiaClient()
         # Cacheados (ver curvas._CACHE_TTL) -- esta vista se abre repetidas
@@ -458,6 +468,24 @@ def _construir_detalle(frontera_id: int, fecha: date) -> dict:
             )
             curva_medidor_ppal_viva = curva_a_lista(curva_p)
             curva_medidor_resp_viva = curva_a_lista(curva_r)
+
+            # Mismo origen que usa el clasificador (ver clasificador_consumo:
+            # `reporte["reported_data_main"]`), en su propio try: si esta
+            # llamada falla, las curvas de medidor que ya se resolvieron arriba
+            # no se pierden -- solo queda sin ofrecerse la opción de CGM.
+            try:
+                border_id = meta.get("border_id")
+                reporte = (
+                    gaia.get_border_report_status(int(border_id), str(fecha))
+                    if border_id else None
+                )
+                if reporte and reporte.get("reported_data_main"):
+                    crudo = list(reporte["reported_data_main"])[:24]
+                    curva_cgm_viva = [
+                        None if v is None else round(float(v), 4) for v in crudo
+                    ] + [None] * (24 - len(crudo))
+            except Exception:
+                pass
     except Exception:
         pass  # las curvas de referencia son informativas -- si fallan, se muestra igual el resultado ya guardado
 
@@ -552,6 +580,10 @@ def _construir_detalle(frontera_id: int, fecha: date) -> dict:
         "enviado_quoia_error": rep.enviado_quoia_error,
         "curva_medidor_principal": curva_medidor_ppal,
         "curva_medidor_respaldo": curva_medidor_resp,
+        # En vivo, no persistida (ver el bloque de arriba). None si Quoia no
+        # respondió o si ese día no hubo reporte -- ahí la opción de reportar
+        # con CGM queda deshabilitada en el front.
+        "curva_cgm": curva_cgm_viva,
         "curva_solenium": curva_sol,
         "curva_reconectador": curva_reconectador,
         "principal_actualizado_en_quoia": principal_actualizado_en_quoia,

@@ -132,6 +132,11 @@ def editar_curva(frontera_id: int, fecha: date, datos: dict) -> dict:
     para la mediana de días futuros mientras `caso` siguiera en lo que decidió el
     clasificador. 'Inversores × FP', 'Histórico propio' y 'Matriz de ceros' NO lo
     tocan: son estimaciones, no lectura real.
+
+    **Adoptar 'cgm' significa NO enviar matriz.** Es la única fuente que no
+    aporta un número para reportar, sino la decisión de dejar en pie el reporte
+    que Quoia ya tiene. Fija `caso` y `medidor_usado` juntos porque
+    `_reporte_ya_valido()` mira uno u otro según el tipo.
     """
     front, rep, Modelo = _fila_por_id(frontera_id, fecha)
     es_generacion = Modelo is ReporteEnergiaGeneracion
@@ -164,7 +169,7 @@ def editar_curva(frontera_id: int, fecha: date, datos: dict) -> dict:
     # edición celda por celda sin pasar por ahí, o si se usó 'Matriz de
     # ceros' (no es una fuente real, solo un valor de reemplazo), queda el
     # genérico "Editado manualmente".
-    FUENTES_MANUALES_VALIDAS = {"principal", "respaldo", "inversores", "historico", "reconectador"}
+    FUENTES_MANUALES_VALIDAS = {"principal", "respaldo", "inversores", "historico", "reconectador", "cgm"}
     fuente = datos.get("fuente")
     rep.medidor_usado = fuente if fuente in FUENTES_MANUALES_VALIDAS else "editado_manualmente"
     # Si la fuente elegida es un medidor, lo que se acaba de guardar pasa a
@@ -203,6 +208,28 @@ def editar_curva(frontera_id: int, fecha: date, datos: dict) -> dict:
     # el reconectador es de /relay/ de Solenium y Consumo no tiene.
     if fuente in ("principal", "respaldo", "reconectador"):
         rep.caso = "Medidor" if Modelo is ReporteEnergiaConsumo else 5
+    # Adoptar el CGM no es "otra fuente para la matriz": es decidir que NO se
+    # manda matriz, porque Quoia ya tiene el dato bueno en su sistema. Quien
+    # se salta la fila es `_reporte_ya_valido()` (envio.py), y mira campos
+    # DISTINTOS según el tipo -- `medidor_usado` en Generación, `caso` en
+    # Consumo -- así que los dos tienen que quedar coherentes o el envío le
+    # pisa a Quoia su propio reporte con una copia nuestra. Es exactamente lo
+    # que deja el clasificador cuando decide CGM solo (clasificador_consumo
+    # pone `caso: "CGM"` y `medidor_usado: "cgm"` juntos).
+    #
+    # Sin esto no había salida para una fila que Quoia reportó bien y nuestra
+    # clasificación mandó a 'Histórico' + revisar (Paso Norte Consumo
+    # 2026-09-07, una frontera con historia de CGM doblado): validarla enviaba
+    # la estimación ENCIMA del reporte oficial, y no validarla bloqueaba
+    # /enviar para el día completo. Las dos salidas malas.
+    #
+    # En Generación queda Caso 1, cuya descripción literal es "CGM válido y
+    # coincide con los inversores" -- aproximada cuando se adopta el CGM en un
+    # día donde no coincidieron. Decidido así con Sara (2026-09-09): es el
+    # valor que hace que el envío se salte la fila, y que fue una decisión
+    # manual queda registrado en `editado_manualmente`.
+    elif fuente == "cgm":
+        rep.caso = "CGM" if Modelo is ReporteEnergiaConsumo else 1
     # curva_final/medidor_usado (y, para 'principal', curva_medidor_principal)
     # ya quedaron fijados arriba con lo que la persona acaba de confirmar --
     # recalcular acá lo que se va a reportar como Backup, para que quede
