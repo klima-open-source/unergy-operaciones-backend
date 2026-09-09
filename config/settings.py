@@ -96,6 +96,19 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
+    # Sin esto el API manda JSON crudo: `/api/v1/fallas?size=500` son varios MB
+    # y el Worker de Cloudflare que sirve operaciones.unergy.io moria con un
+    # 1102 (exceeded resource limits). No hay proxy delante de gunicorn que
+    # comprima por nosotros: el compose publica gunicorn directo.
+    #
+    # La advertencia de BREACH de la doc de Django NO aplica aca: exige que la
+    # respuesta comprimida lleve un secreto (token CSRF) junto con datos que
+    # controle el atacante. Este API autentica con `Bearer`, no con cookie de
+    # sesion + CSRF. No lo revuelvas por reflejo.
+    #
+    # Va antes de CommonMiddleware porque gzip debe ir arriba de cualquier
+    # middleware que lea o modifique el cuerpo.
+    "django.middleware.gzip.GZipMiddleware",
     "django.middleware.common.CommonMiddleware",
 ]
 
