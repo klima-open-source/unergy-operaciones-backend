@@ -241,6 +241,43 @@ def test_paginacion_igual_a_fastapi(datos, consulta, esperado):
     assert respuesta.data["size"] == esperado
 
 
+def test_el_listado_no_hace_una_query_por_fila(datos):
+    """El conteo de queries del listado no crece con el número de fallas.
+
+    `FallaListaSerializer.tiempo_afectacion_horas` lee `falla.intervalos`, que
+    sin `prefetch_related` es un SELECT por fila: con `?size=5000` eran 5001
+    queries en una request. Si alguien quita el prefetch de `base_lista`, este
+    test lo ve.
+    """
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from apps.monitoreo import models as mo
+
+    def _con_intervalo(n):
+        falla = _falla(datos, codigo_interno=f"FAL-2026-{n:05d}")
+        mo.FallaIntervalo.objects.create(falla=falla, inicio=falla.created_at)
+
+    def _queries_del_listado():
+        with CaptureQueriesContext(connection) as capturadas:
+            respuesta = _pedir(
+                "get", "/api/v1/fallas", datos, acciones={"get": "list"},
+            )
+            assert respuesta.status_code == 200, respuesta.data
+            respuesta.render()  # el serializer corre al renderizar, no antes
+        return len(capturadas)
+
+    for n in range(1, 4):
+        _con_intervalo(n)
+    con_tres = _queries_del_listado()
+
+    for n in range(4, 7):
+        _con_intervalo(n)
+    con_seis = _queries_del_listado()
+
+    assert con_tres == con_seis, f"{con_tres} -> {con_seis} queries al doblar las filas"
+
+
 # ── P1-6 · el correo al cliente salia sin quien registro la falla ─────────────
 #
 # `POST /fallas/{id}/notificar` pasaba `getattr(request.user, "nombre", "")`, y
