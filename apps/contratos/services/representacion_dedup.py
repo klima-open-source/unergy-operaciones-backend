@@ -53,15 +53,15 @@ CAMPOS = (
     "tarifa_admin", "tarifa_cgm", "tarifa_representacion",
     "indexacion_cgm", "indexacion_representacion",
     "enlace_drive", "estado_pago", "estado",
-    "tiene_cgm", "cgm_codigo_sic",
-    "rec_cantidad", "rec_precio_unitario", "rec_vintage", "responsable_iva",
+    "cgm_codigo_sic",
+    "responsable_iva",
 )
 
 # Campos cuyo valor por defecto no es una afirmacion: el seed pone estado
 # 'vigente' y los booleanos en False sin que nadie lo haya decidido, asi que una
 # diferencia ahi no es un conflicto real que deba bloquear la fusion.
 CAMPOS_BLANDOS = frozenset({
-    "estado", "tiene_cgm", "responsable_iva",
+    "estado", "responsable_iva",
 })
 
 

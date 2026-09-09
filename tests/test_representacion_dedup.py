@@ -22,8 +22,7 @@ def reg(id, inv=None, pid=None, ref=None, sf=None, numero=None, **kw):
         tarifa_admin=None, tarifa_cgm=None, tarifa_representacion=None,
         indexacion_cgm=None, indexacion_representacion=None,
         enlace_drive=None, estado_pago=None, estado="vigente",
-        tiene_cgm=False, cgm_codigo_sic=None,
-        rec_cantidad=None, rec_precio_unitario=None, rec_vintage=None,
+        cgm_codigo_sic=None,
         responsable_iva=False,
     )
     base.update(kw)
