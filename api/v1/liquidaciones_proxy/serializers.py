@@ -64,11 +64,29 @@ class DiagnosticoSerializer(PeriodoSerializer):
     project = serializers.CharField()
 
 
+HORAS_DEL_DIA = 24
+
+
+def _curva_horaria(**extra):
+    """Las 24 horas de un piso o un techo, en kWh (§3.5 de la guía).
+
+    Iba como `FloatField` —un número suelto— y el formulario manda la curva
+    entera, así que crear un PLC con sus pisos y techos respondía 400 y era
+    imposible. Se exige el largo exacto: 23 valores producirían una liquidación
+    mal calculada sin que nadie se entere.
+    """
+    return serializers.ListField(
+        child=serializers.FloatField(),
+        min_length=HORAS_DEL_DIA, max_length=HORAS_DEL_DIA,
+        **extra,
+    )
+
+
 class ProyectoDeContratoSerializer(serializers.Serializer):
     project = serializers.CharField()
     energy_price = serializers.IntegerField(required=False, allow_null=True)
-    floor = serializers.FloatField(required=False, allow_null=True)
-    roof = serializers.FloatField(required=False, allow_null=True)
+    floor = _curva_horaria(required=False, allow_null=True)
+    roof = _curva_horaria(required=False, allow_null=True)
 
 
 class ContratoEnergiaSerializer(serializers.Serializer):
@@ -93,3 +111,43 @@ class ContratoEnergiaSerializer(serializers.Serializer):
     percentage = serializers.FloatField(required=False, allow_null=True)
     company = serializers.IntegerField(required=False, allow_null=True)
     proyectos = ProyectoDeContratoSerializer(many=True, default=list)
+
+
+class ProyectoDeContratoUpdateSerializer(serializers.Serializer):
+    """Un proyecto dentro de la edición de un contrato.
+
+    Con `id` es un vínculo que ya existe y se hace PATCH; sin `id` es uno nuevo
+    y se crea, y entonces el `project` es obligatorio. Los pisos y techos van
+    igual: con `piso_id`/`techo_id` se corrigen, sin ellos se crean.
+
+    **Quitar un proyecto no se puede**: la API no expone `DELETE` en ninguno de
+    los tres recursos.
+    """
+
+    id = serializers.IntegerField(required=False)
+    project = serializers.CharField(required=False)
+    energy_price = serializers.IntegerField(required=False, allow_null=True)
+    piso_id = serializers.IntegerField(required=False)
+    techo_id = serializers.IntegerField(required=False)
+    floor = _curva_horaria(required=False, allow_null=True)
+    roof = _curva_horaria(required=False, allow_null=True)
+
+    def validate(self, datos):
+        if not datos.get("id") and not datos.get("project"):
+            raise serializers.ValidationError(
+                "Cada proyecto necesita su `id` de vínculo, o el `project` si es nuevo."
+            )
+        return datos
+
+
+class ContratoEnergiaUpdateSerializer(serializers.Serializer):
+    """Edición de un contrato: PATCH de verdad, lo que no se manda no se toca."""
+
+    date_from = serializers.DateField(required=False)
+    date_to = serializers.DateField(required=False)
+    code = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    contract_type = serializers.CharField(required=False)
+    tariff_price_type = serializers.CharField(required=False, allow_null=True)
+    percentage = serializers.FloatField(required=False, allow_null=True)
+    company = serializers.IntegerField(required=False, allow_null=True)
+    proyectos = ProyectoDeContratoUpdateSerializer(many=True, required=False)

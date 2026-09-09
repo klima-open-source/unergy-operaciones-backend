@@ -108,6 +108,20 @@ RUTAS_RETIRADAS = {
 }
 
 
+# Funcionalidad NUEVA, que nunca existio en FastAPI. Es el cuarto caso: no es una
+# ruta portada, ni retirada, ni un `url_path` mal escrito. Se declara aqui a
+# proposito --con fecha y razon-- para que agregar una siga siendo una decision
+# consciente y no algo que se cuela sin que nadie lo note.
+#
+#   2026-09-09  PATCH del contrato de energia. La plataforma solo sabia crear
+#               contratos; corregir uno obligaba a entrar al Django de
+#               Liquidaciones. La API externa si lo permite (`OPTIONS` sobre el
+#               detalle responde GET, PUT, PATCH), solo faltaba exponerlo.
+RUTAS_NUEVAS = {
+    ("/api/v1/liquidaciones-api/contratos-energia/{}", "PATCH"),
+}
+
+
 # Verbos que DRF agrega por su cuenta y FastAPI nunca declara.
 VERBOS_IGNORADOS = {"HEAD", "OPTIONS", "TRACE"}
 
@@ -280,7 +294,7 @@ def test_las_rutas_portadas_coinciden_con_las_de_fastapi():
     )
 
     faltan = fastapi - django_
-    sobran = django_ - fastapi
+    sobran = django_ - fastapi - RUTAS_NUEVAS
 
     assert not faltan, (
         "Django no expone rutas que FastAPI sí sirve — el frontend recibiría 404:\n  "

@@ -524,6 +524,89 @@ class LiquidacionesApiViewSet(viewsets.GenericViewSet):
             "proyectos": creados,
         }, status=201)
 
+    @action(
+        detail=False, methods=["patch"],
+        url_path=r"contratos-energia/(?P<contrato_id>[0-9]+)",
+    )
+    @log_endpoint(name="Operaciones | Liquidaciones | Editar contrato de energía")
+    def contrato_energia(self, request, contrato_id=None):
+        """Edita un contrato, sus vínculos con proyectos y sus pisos y techos.
+
+        Es un PATCH de verdad: lo que no venga en el cuerpo no se toca. Cada
+        entrada de `proyectos` con `id` es un vínculo que ya existe y se
+        corrige; sin `id` es uno nuevo y se crea. Igual con `piso_id`/`techo_id`.
+
+        **Desvincular un proyecto no se puede**: la API externa no expone
+        `DELETE` en ninguno de los tres recursos.
+
+        Como tampoco hay transacción, si un paso falla se responde diciendo qué
+        alcanzó a cambiarse, en vez de dejar a quien edita sin saber en qué
+        estado quedó el contrato.
+        """
+        entrada = liq_serializers.ContratoEnergiaUpdateSerializer(
+            data=request.data, partial=True
+        )
+        entrada.is_valid(raise_exception=True)
+        datos = dict(entrada.validated_data)
+        proyectos = datos.pop("proyectos", None)
+
+        hechos = []
+        try:
+            if datos:
+                api.actualizar_contrato(contrato_id, datos)
+                hechos.append("los datos del contrato")
+
+            for proyecto in proyectos or []:
+                vinculo_id = proyecto.get("id")
+                if vinculo_id is None:
+                    creado = api.vincular_contrato_proyecto({
+                        "contract_energy": int(contrato_id),
+                        "project": proyecto["project"],
+                        **({"energy_price": proyecto["energy_price"]}
+                           if proyecto.get("energy_price") is not None else {}),
+                    })
+                    vinculo_id = creado.get("id")
+                    if vinculo_id is None:
+                        raise api.LiquidacionesAPIError(
+                            "la API no devolvió el id del vínculo creado"
+                        )
+                    hechos.append(f'se vinculó «{proyecto["project"]}»')
+                else:
+                    cambios = {
+                        k: proyecto[k] for k in ("project", "energy_price")
+                        if k in proyecto
+                    }
+                    if cambios:
+                        api.actualizar_contrato_proyecto(vinculo_id, cambios)
+                        hechos.append(f"se actualizó el vínculo {vinculo_id}")
+
+                for concepto, clave_id, clave_horas in (
+                    ("floor", "piso_id", "floor"),
+                    ("roof", "techo_id", "roof"),
+                ):
+                    horas = proyecto.get(clave_horas)
+                    if not horas:
+                        continue
+                    curva_id = proyecto.get(clave_id)
+                    if curva_id is None:
+                        api.crear_cantidades({
+                            "contract_energy_project": vinculo_id,
+                            "concept_type": concepto, "hours": horas,
+                        })
+                        hechos.append(f"se creó el {concepto}")
+                    else:
+                        api.actualizar_cantidades(curva_id, {"hours": horas})
+                        hechos.append(f"se actualizó el {concepto}")
+        except Exception as exc:
+            if not isinstance(exc, api.LiquidacionesAPIError):
+                logger.exception("Fallo inesperado editando el contrato %s", contrato_id)
+            return Response({"detail": (
+                f"No se pudo terminar de editar el contrato {contrato_id}: {exc}. "
+                f"Sí alcanzó a aplicarse: {', '.join(hechos) or 'nada'}."
+            )}, status=HTTP_API_EXTERNA)
+
+        return Response({"id": int(contrato_id), "aplicado": hechos})
+
     @action(detail=False, methods=["post"], url_path="costos/excel")
     @log_endpoint(name="Operaciones | Liquidaciones | Excel de costos")
     def costos_excel(self, request):

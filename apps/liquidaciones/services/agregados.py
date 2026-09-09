@@ -245,25 +245,31 @@ def build_contratos_energia(
     empresas = {e["id"]: e.get("nombre_empresa") for e in catalogos["empresas"]}
     precios = {p["id"]: p.get("name") for p in catalogos["precios_energia"]}
 
-    conceptos: dict[int, set[str]] = {}
+    # Las curvas enteras, no solo si existen: para poder EDITARLAS hace falta el
+    # id de cada una y sus 24 horas. `tiene_piso`/`tiene_techo` se conservan
+    # porque es lo que pinta la tabla.
+    curvas: dict[int, dict[str, dict]] = {}
     for cantidad in cantidades:
-        conceptos.setdefault(
-            cantidad.get("contract_energy_project"), set()
-        ).add(cantidad.get("concept_type"))
+        curvas.setdefault(cantidad.get("contract_energy_project"), {})[
+            cantidad.get("concept_type")
+        ] = {"id": cantidad.get("id"), "hours": cantidad.get("hours")}
 
     por_contrato: dict[int, list[dict]] = {}
     for vinculo in vinculos:
-        tipos = conceptos.get(vinculo.get("id"), set())
+        propias = curvas.get(vinculo.get("id"), {})
+        topico = vinculo.get("project")
         por_contrato.setdefault(vinculo.get("contract_energy"), []).append({
             "id": vinculo.get("id"),
-            "proyecto": (
-                nombres.get(vinculo.get("project") or "")
-                or vinculo.get("project")
-            ),
+            # El tópico ademas del nombre: es la clave que usa la API y con la
+            # que el formulario de edición precarga el desplegable.
+            "topico": topico,
+            "proyecto": nombres.get(topico or "") or topico,
             "precio_energia_id": vinculo.get("energy_price"),
             "precio_energia": precios.get(vinculo.get("energy_price")),
-            "tiene_piso": "floor" in tipos,
-            "tiene_techo": "roof" in tipos,
+            "piso": propias.get("floor"),
+            "techo": propias.get("roof"),
+            "tiene_piso": "floor" in propias,
+            "tiene_techo": "roof" in propias,
         })
 
     return [

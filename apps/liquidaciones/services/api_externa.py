@@ -69,6 +69,12 @@ PATH_CONTRATOS_DESPACHADOS = "/api/liquidaciones/disp_contracts_ftp_xm/"
 
 # Datos maestros (3 de la guia).
 PATH_CONTRATOS = "/api/liquidaciones/contract_energies/"
+# Detalle de los tres recursos del contrato. `OPTIONS` sobre ellos responde
+# `GET, PUT, PATCH`: se pueden editar. Ninguno expone DELETE, así que no hay
+# forma de desvincular un proyecto ni de borrar un contrato.
+PATH_CONTRATO = "/api/liquidaciones/contract_energies/{id}/"
+PATH_CONTRATO_PROYECTO = "/api/liquidaciones/contract_energy_projects/{id}/"
+PATH_CANTIDAD = "/api/liquidaciones/energy_contract_quantities/{id}/"
 PATH_CONTRATO_PROYECTOS = "/api/liquidaciones/contract_energy_projects/"
 PATH_CANTIDADES = "/api/liquidaciones/energy_contract_quantities/"
 PATH_COSTOS = "/api/liquidaciones/revenue_and_costs/"
@@ -668,6 +674,24 @@ def crear_cantidades(datos: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise LiquidacionesAPIError("La API no devolvió las cantidades creadas")
     return data
+
+
+def actualizar_contrato(contrato_id: int, cambios: dict[str, Any]) -> dict[str, Any]:
+    """PATCH parcial del contrato de energía: lo que no se manda no se toca."""
+    data = _request("PATCH", PATH_CONTRATO.format(id=contrato_id), json=cambios)
+    return data if isinstance(data, dict) else {}
+
+
+def actualizar_contrato_proyecto(vinculo_id: int, cambios: dict[str, Any]) -> dict[str, Any]:
+    """PATCH del vínculo contrato-proyecto (el `energy_price`, sobre todo)."""
+    data = _request("PATCH", PATH_CONTRATO_PROYECTO.format(id=vinculo_id), json=cambios)
+    return data if isinstance(data, dict) else {}
+
+
+def actualizar_cantidades(cantidad_id: int, cambios: dict[str, Any]) -> dict[str, Any]:
+    """PATCH de un piso o un techo ya creado: sus 24 horas."""
+    data = _request("PATCH", PATH_CANTIDAD.format(id=cantidad_id), json=cambios)
+    return data if isinstance(data, dict) else {}
 
 
 # ── Ciclo mensual ────────────────────────────────────────────────────────────
