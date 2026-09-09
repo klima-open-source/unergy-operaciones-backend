@@ -10,6 +10,7 @@ from rest_framework.response import Response
 
 from api.exceptions import Conflict
 from api.logging import class_logger_wrapper, log_endpoint
+from api.pagination import recortar
 from api.permissions import RolePermission
 from apps.fronteras import models as fr_models
 from apps.fronteras.services import duplicados as duplicados_service
@@ -94,7 +95,7 @@ class FronteraViewSet(viewsets.GenericViewSet):
                 consulta = consulta.filter(**{parametro: valor})
 
         salto = self._entero(request, "skip", 0, 0, 10**6)
-        limite = self._entero(request, "limit", 100, 1, 500)
+        limite = recortar(self._entero(request, "limit", 100, 1, 10**6))
         fronteras = list(
             consulta.order_by("codigo_frontera")[salto:salto + limite]
         )

@@ -6,6 +6,7 @@ from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 
 from api.logging import class_logger_wrapper, log_endpoint
+from api.pagination import recortar
 from apps.plataforma import models as pl_models
 
 from . import serializers as notif_serializers
@@ -57,9 +58,10 @@ class NotificacionViewSet(viewsets.GenericViewSet):
             tamano = int(request.query_params.get("size", 20))
         except ValueError:
             raise ValidationError("`page` y `size` deben ser enteros.")
-        if pagina < 1 or not 1 <= tamano <= 100:
-            raise ValidationError("`page` >= 1 y `size` entre 1 y 100.")
-        return pagina, tamano
+        if pagina < 1 or tamano < 1:
+            raise ValidationError("`page` >= 1 y `size` >= 1.")
+        # Pedir mas del tope recorta, no falla. Ver `api.pagination.recortar`.
+        return pagina, recortar(tamano)
 
     @action(detail=False, methods=["get"], url_path="count")
     def count(self, request):

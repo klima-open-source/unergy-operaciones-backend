@@ -12,6 +12,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
 from api.logging import class_logger_wrapper, log_endpoint
+from api.pagination import recortar
 from api.permissions import RolePermission
 from apps.liquidaciones.services import agregados
 from apps.liquidaciones.services import api_externa as api
@@ -401,7 +402,7 @@ class LiquidacionesApiViewSet(viewsets.GenericViewSet):
             anio=_entero(request, "anio", 2020, 2100),
             solo_con_valor=solo_con_valor,
             page=_entero(request, "page", 1, 10**6, 1),
-            size=_entero(request, "size", 1, 5000, 100),
+            size=recortar(_entero(request, "size", 1, 10**6, 100)),
         ))
 
     @action(detail=False, methods=["get"], url_path="catalogos")
