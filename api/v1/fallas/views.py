@@ -1,13 +1,22 @@
-"""ViewSet de Fallas — 19 rutas.
+"""ViewSet de Fallas — 15 rutas.
 
 El módulo original tenía las 1 457 líneas de lógica dentro de los endpoints. Acá
-la vista valida, llama al servicio y responde; las reglas (SLA, clasificación
-estructurada, bloqueo de cierre) viven en
-`apps/monitoreo/services/fallas/dominio.py`, que es su único dueño.
+la vista valida, llama al servicio y responde; las reglas viven en servicios que
+son sus únicos dueños:
 
-`/fallas/por-proyecto` es la puerta para integradores externos con API Key: usa
-las tres cubetas (`vigente` / `programado` / `terminado`) en vez de los seis
-estados internos, y resuelve la planta por id, `sub_project` o nombre exacto.
+- `fallas/dominio.py` — SLA operativo (horas por prioridad), clasificación
+  estructurada y bloqueo de cierre.
+- `fallas/sla_contractual.py` — SLA del Anexo 4 (días por categoría). Es OTRO
+  compromiso, y está aparte para que no se confunda con el operativo.
+- `fallas/consultas.py` — el filtrado del listado, la actividad del día y el
+  backfill de SLA.
+
+Cuatro rutas se retiraron y no van a volver por descuido: `/por-proyecto` y
+`consulta_publica` el 2026-09-07 (sin consumidor ni evidencia de integración), y
+`/sla-dashboard`, `/stats/resumen` y `/{id}/impacto` el 2026-09-08 (tampoco los
+consumía nadie; el de impacto además ESCRIBÍA en un GET).
+`tests/test_paridad_urls.py` las tiene listadas para que su ausencia no se lea
+como una ruta perdida.
 """
 
 import io
@@ -226,6 +235,15 @@ class FallaViewSet(viewsets.GenericViewSet):
                 else par.bandera(request, "pendiente_reclasificar")
             ),
         }
+        # FastAPI declaraba `page`, `size` y `page_size` con `ge=`/`le=`, asi que
+        # un valor fuera de rango devolvia 422. DRF los recorta CALLADO, que es
+        # peor: el cliente pide 99 999 filas, recibe 5 000 y no se entera de que
+        # le faltan. Se validan aca sin usar el resultado -- `par.entero` lanza.
+        tope = self.pagination_class.max_page_size
+        par.entero(request, "page", minimo=1)
+        par.entero(request, "size", minimo=1, maximo=tope)
+        par.entero(request, "page_size", minimo=1, maximo=tope)
+
         # `page_size` es un alias histórico de `size` solo en este listado.
         alias = request.query_params.get("page_size")
         if alias and not request.query_params.get("size"):
@@ -390,7 +408,10 @@ class FallaViewSet(viewsets.GenericViewSet):
     def destroy(self, request, pk=None):
         falla = self._falla_simple(pk)
         falla.deleted_at = datetime.now(timezone.utc)
-        falla.save(update_fields=["deleted_at"])
+        # `updated_at` va explicito: es `auto_now`, y Django solo lo escribe si el
+        # campo esta EN `update_fields`. Sin el, la fila cambiaba y su marca de
+        # tiempo se quedaba atras -- SQLAlchemy la movia por `onupdate`.
+        falla.save(update_fields=["deleted_at", "updated_at"])
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["post"], url_path="notificar")
@@ -514,7 +535,7 @@ class FallaViewSet(viewsets.GenericViewSet):
         items = _fotos_como_objetos(dominio.fotos_lista(falla))
         items.append(nuevo)
         falla.fotos_urls = items
-        falla.save(update_fields=["fotos_urls"])
+        falla.save(update_fields=["fotos_urls", "updated_at"])
         return Response(nuevo)
 
     @action(
@@ -540,5 +561,5 @@ class FallaViewSet(viewsets.GenericViewSet):
             )
 
         falla.fotos_urls = restantes or None
-        falla.save(update_fields=["fotos_urls"])
+        falla.save(update_fields=["fotos_urls", "updated_at"])
         return Response({"status": "ok"})

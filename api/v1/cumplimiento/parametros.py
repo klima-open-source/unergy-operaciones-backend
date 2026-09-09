@@ -28,12 +28,37 @@ def entero(request, nombre, defecto=None, minimo=None, maximo=None, requerido=Fa
     return valor
 
 
+_VERDADEROS = frozenset({"1", "true", "yes", "on", "t", "y"})
+_FALSOS = frozenset({"0", "false", "no", "off", "f", "n"})
+
+
 def bandera(request, nombre, defecto=False):
-    """`?incluir_todos=true`. FastAPI acepta true/false/1/0/yes/on."""
+    """`?incluir_todos=true`. El mismo juego de valores que aceptaba FastAPI.
+
+    **Un valor que no sea booleano da 422, no `False`.** Antes cualquier cosa
+    fuera de la lista de verdaderos caía a `False` en silencio, así que un
+    `?solo_activas=activas` o un typo devolvía el listado completo con 200 y sin
+    una sola señal de que el filtro nunca se aplicó. FastAPI lo rechazaba por la
+    firma del endpoint.
+
+    **La cadena vacía cuenta como ausente** y devuelve el default, igual que
+    `entero` y `fecha`. Antes `?dry_run=` daba `False`: el backfill de SLA, cuyo
+    default es `True` justamente para no escribir sin que se lo pidan, corría en
+    firme. Ahora respeta su default.
+    """
     crudo = request.query_params.get(nombre)
-    if crudo is None:
+    if crudo in (None, ""):
         return defecto
-    return crudo.strip().lower() in ("1", "true", "yes", "on", "t", "y")
+
+    valor = crudo.strip().lower()
+    if valor in _VERDADEROS:
+        return True
+    if valor in _FALSOS:
+        return False
+    raise NoProcesable(
+        f"'{nombre}' debe ser un booleano ('{crudo}' no lo es). "
+        f"Valores válidos: {', '.join(sorted(_VERDADEROS | _FALSOS))}."
+    )
 
 
 def fecha(request, nombre, defecto=None, requerido=False):

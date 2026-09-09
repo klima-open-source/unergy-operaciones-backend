@@ -241,6 +241,43 @@ def test_paginacion_igual_a_fastapi(datos, consulta, esperado):
     assert respuesta.data["size"] == esperado
 
 
+def test_el_listado_no_hace_una_query_por_fila(datos):
+    """El conteo de queries del listado no crece con el número de fallas.
+
+    `FallaListaSerializer.tiempo_afectacion_horas` lee `falla.intervalos`, que
+    sin `prefetch_related` es un SELECT por fila: con `?size=5000` eran 5001
+    queries en una request. Si alguien quita el prefetch de `base_lista`, este
+    test lo ve.
+    """
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from apps.monitoreo import models as mo
+
+    def _con_intervalo(n):
+        falla = _falla(datos, codigo_interno=f"FAL-2026-{n:05d}")
+        mo.FallaIntervalo.objects.create(falla=falla, inicio=falla.created_at)
+
+    def _queries_del_listado():
+        with CaptureQueriesContext(connection) as capturadas:
+            respuesta = _pedir(
+                "get", "/api/v1/fallas", datos, acciones={"get": "list"},
+            )
+            assert respuesta.status_code == 200, respuesta.data
+            respuesta.render()  # el serializer corre al renderizar, no antes
+        return len(capturadas)
+
+    for n in range(1, 4):
+        _con_intervalo(n)
+    con_tres = _queries_del_listado()
+
+    for n in range(4, 7):
+        _con_intervalo(n)
+    con_seis = _queries_del_listado()
+
+    assert con_tres == con_seis, f"{con_tres} -> {con_seis} queries al doblar las filas"
+
+
 # ── P1-6 · el correo al cliente salia sin quien registro la falla ─────────────
 #
 # `POST /fallas/{id}/notificar` pasaba `getattr(request.user, "nombre", "")`, y
@@ -520,7 +557,7 @@ def test_el_sla_contractual_sin_fecha_no_inventa_dias(datos):
     from apps.monitoreo.services.fallas import sla_contractual
 
     r = sla_contractual.evaluar(mo.Falla(fecha_identificacion=None))
-    assert r["dias"] == 0 and r["cumple"] is True, r
+    assert r["dias"] is None and r["cumple"] is None, r
 
 
 @pytest.mark.parametrize(("categoria", "plazo"), [
@@ -569,12 +606,12 @@ def test_una_abierta_pasada_del_plazo_no_cumple(datos):
     assert (r["dias"], r["cumple"]) == (3, False), r
 
 
-def test_una_cerrada_cumple_siempre_aunque_se_haya_cerrado_tarde(datos):
-    """Regla del contrato, no de implementacion. Fijada para que no se mueva.
+def test_una_cerrada_tarde_NO_cumple(datos):
+    """Decision del 2026-09-08: las cerradas tambien se evaluan.
 
-    El Anexo 4 no reporta incumplimiento en incidentes ya cerrados. Si el negocio
-    decide lo contrario, hay que cambiarlo A PROPOSITO -- y este test es el que
-    va a avisar.
+    Antes `cumple` era True para toda falla en estado final, y el Anexo 4 quedaba
+    incapaz de reportar un incumplimiento. Es al reves: en una cerrada el
+    cumplimiento es un hecho establecido -- se sabe cuanto tardo.
     """
     from datetime import datetime as dt, timezone as tz
 
@@ -582,7 +619,36 @@ def test_una_cerrada_cumple_siempre_aunque_se_haya_cerrado_tarde(datos):
                estado_id=datos["cerrado"].id,
                fecha_resolucion=dt(2026, 6, 1, 12, 0, tzinfo=tz.utc),
                clasificacion={"categoria": "red"})
-    assert r["dias"] > 100 and r["cumple"] is True, r
+    assert r["dias"] > 100, r
+    assert r["cumple"] is False, r
+
+
+def test_una_cerrada_a_tiempo_cumple(datos):
+    from datetime import datetime as dt, timezone as tz
+
+    # `red` da 2 dias de plazo; se cerro al dia siguiente.
+    r = _sla_c(datos, fecha_identificacion=date(2026, 6, 1),
+               estado_id=datos["cerrado"].id,
+               fecha_resolucion=dt(2026, 6, 2, 12, 0, tzinfo=tz.utc),
+               clasificacion={"categoria": "red"})
+    assert (r["dias"], r["cumple"]) == (1, True), r
+
+
+def test_una_cerrada_SIN_fecha_de_resolucion_no_se_juzga(datos):
+    """Dato legacy real: `consultas.py` lo documenta en `activa_en_fecha`.
+
+    `dias_abierta` cae a HOY cuando no hay `fecha_resolucion`, asi que juzgarla
+    daria un incumplimiento enorme e inventado. No sabemos cuando se cerro: se
+    dice que no se sabe. La regla anterior --cerrada = siempre cumple-- tapaba
+    este caso.
+    """
+    r = _sla_c(datos, fecha_identificacion=date(2026, 1, 1),
+               estado_id=datos["cerrado"].id, fecha_resolucion=None,
+               clasificacion={"categoria": "red"})
+    assert r["cumple"] is None, r
+    assert r["dias"] is None, r
+    # El plazo si se sabe: sale de la categoria.
+    assert r["plazo_dias"] == 2, r
 
 
 def test_el_serializer_expone_el_sla_contractual(datos):
@@ -597,3 +663,56 @@ def test_el_serializer_expone_el_sla_contractual(datos):
     assert set(contractual) == {"dias", "plazo_dias", "etiqueta", "cumple"}, contractual
     assert contractual["plazo_dias"] == 3, contractual
     assert contractual["etiqueta"] == "Grave (66-90%)", contractual
+
+
+# ── P1-12 · la paginacion recortaba callado y `updated_at` se quedaba atras ──
+
+@pytest.mark.parametrize("consulta", [
+    "?size=99999",       # sobre el tope de 5000
+    "?size=0",           # bajo el minimo
+    "?size=abc",         # no es entero
+    "?page_size=99999",  # el alias tiene el mismo tope
+    "?page=0",           # FastAPI declaraba ge=1
+])
+def test_una_paginacion_fuera_de_rango_da_422(datos, consulta):
+    """FastAPI devolvia 422; DRF recortaba callado y el cliente no se enteraba."""
+    _falla(datos)
+    respuesta = _pedir(
+        "get", f"/api/v1/fallas{consulta}", datos, acciones={"get": "list"},
+    )
+    assert respuesta.status_code == 422, respuesta.data
+
+
+def test_el_tope_valido_sigue_pasando(datos):
+    """El limite exacto no se rechaza: `le=5000` es inclusivo."""
+    _falla(datos)
+    respuesta = _pedir(
+        "get", "/api/v1/fallas?size=5000", datos, acciones={"get": "list"},
+    )
+    assert respuesta.status_code == 200, respuesta.data
+    assert respuesta.data["size"] == 5000
+
+
+def test_el_borrado_logico_mueve_updated_at(datos):
+    """`auto_now` NO se escribe si el campo no esta en `update_fields`.
+
+    Se atrasa `updated_at` con `queryset.update()`, que NO dispara `auto_now`, en
+    vez de comparar contra el instante de creacion: en Windows el reloj puede dar
+    el mismo valor para dos llamadas seguidas y la comparacion salia flaky.
+    """
+    from datetime import datetime as dt, timezone as tz
+
+    from apps.monitoreo.models import Falla
+
+    falla = _falla(datos)
+    viejo = dt(2020, 1, 1, tzinfo=tz.utc)
+    Falla.objects.filter(pk=falla.id).update(updated_at=viejo)
+    assert Falla.objects.get(pk=falla.id).updated_at == viejo, "el atraso no quedo"
+
+    respuesta = _pedir("delete", f"/api/v1/fallas/{falla.id}", datos,
+                       acciones={"delete": "destroy"}, pk=falla.id)
+    assert respuesta.status_code == 204
+
+    despues = Falla.objects.get(pk=falla.id)
+    assert despues.deleted_at is not None
+    assert despues.updated_at > viejo, despues.updated_at

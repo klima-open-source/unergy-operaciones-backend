@@ -58,29 +58,37 @@ def evaluar(falla: Falla) -> dict:
     un día pero identificada tres meses atrás imprimía "90d" en la columna
     "DÍAS ABIERTA" del informe que se le manda al cliente.
 
-    **`cumple` es `True` para toda falla en estado final**, aunque se haya
-    cerrado tarde. Se conserva la regla que venía del informe: significa que el
-    Anexo 4 no reporta incumplimiento en incidentes ya cerrados. Es una regla del
-    contrato y cambiarla es una decisión de negocio, no de implementación.
+    **Las fallas cerradas TAMBIÉN se evalúan** (decisión del 2026-09-08). Antes
+    `cumple` era `True` para toda falla en estado final, aunque se hubiera
+    cerrado tarde, y el Anexo 4 quedaba estructuralmente incapaz de reportar un
+    incumplimiento. Y es al revés: en una falla cerrada el cumplimiento es un
+    hecho **establecido** —se sabe cuánto tardó—, mientras que en una abierta
+    todavía es provisional. Ojo con eso al leer `cumple`: en una falla abierta
+    significa "por ahora va dentro del plazo", no "cumplió".
 
-    Sí se corrigió CÓMO se decide que está cerrada: el frontend comparaba
-    `estado.codigo === 'cerrada'` y acá se usa `estado.es_estado_final`, que es
-    el criterio del resto del código. Un estado final que no se llame
-    literalmente "cerrada" antes contaba como abierta.
+    **`cumple` es `None` cuando no se puede juzgar**, y hay un caso real: una
+    falla en estado final **sin `fecha_resolucion`**. Es dato legacy que existe
+    en producción (lo documenta `consultas.py` en el filtro `activa_en_fecha`), y
+    para esas `dias_abierta` cae a HOY, así que darían un incumplimiento enorme e
+    inventado. No sabemos cuándo se cerraron: se dice que no se sabe. La regla
+    anterior tapaba este caso; al evaluar las cerradas queda a la vista.
     """
     plazo_dias, etiqueta = plazo(falla)
+    sin_juicio = {
+        "dias": None, "plazo_dias": plazo_dias, "etiqueta": etiqueta, "cumple": None,
+    }
 
     if not falla.fecha_identificacion:
-        return {
-            "dias": 0, "plazo_dias": CRITICO[0],
-            "etiqueta": CRITICO[1], "cumple": True,
-        }
+        return sin_juicio
+
+    es_final = bool(falla.estado_id and falla.estado.es_estado_final)
+    if es_final and not falla.fecha_resolucion:
+        return sin_juicio
 
     dias = dominio.dias_abierta(falla) or 0
-    es_final = bool(falla.estado_id and falla.estado.es_estado_final)
     return {
         "dias": dias,
         "plazo_dias": plazo_dias,
         "etiqueta": etiqueta,
-        "cumple": True if es_final else dias <= plazo_dias,
+        "cumple": dias <= plazo_dias,
     }

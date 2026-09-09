@@ -24,13 +24,13 @@ from .dominio import (
 )
 
 # Lo que la tabla y el "hero" del drawer muestran de entrada. NO incluye
-# seguimientos, intervalos ni inversores: eso solo hace falta al abrir el detalle
-# de UNA falla, no en cada fila de un listado de cientos.
+# seguimientos ni inversores: eso solo hace falta al abrir el detalle de UNA
+# falla, no en cada fila de un listado de cientos.
 RELACIONES_LISTA = (
     "proyecto", "tipo__categoria", "estado", "prioridad", "resolucion",
     "registrado_por",
 )
-RELACIONES_DETALLE = ("intervalos", "inversores_afectados",
+RELACIONES_DETALLE = ("inversores_afectados",
                       "seguimientos__usuario", "seguimientos__estado_nuevo")
 
 
@@ -39,6 +39,9 @@ def base_lista():
         Falla.objects
         .filter(deleted_at__isnull=True)
         .select_related(*RELACIONES_LISTA)
+        # `tiempo_afectacion_horas` del serializer de LISTA lee
+        # `falla.intervalos`: sin esto era una query por fila (hasta 5000).
+        .prefetch_related("intervalos")
     )
 
 
