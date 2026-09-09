@@ -1,9 +1,14 @@
 """Crear un contrato nunca puede terminar en un 500 mudo.
 
-Bug real (2026-09-09): `POST /liquidaciones-api/contratos-energia` devolvía un
-500 con la página HTML de Django. La usuaria lo vio dos veces y no tenía forma
-de saber qué había pasado — y lo peor: **el contrato ya estaba creado**. El 130,
-con sus tres proyectos vinculados. Reintentar habría creado un duplicado.
+Endurecimiento a raíz del 500 del 2026-09-09. Ese 500 concreto resultó ser otra
+cosa —httpx no serializaba las fechas, ver `test_api_externa_json_serializable`—
+y de hecho no llegaba a crear nada. El contrato 130 que hizo sospechar lo
+contrario se había creado a mano en el Django de Liquidaciones, no por aquí.
+
+Pero el riesgo que destapó es real y sigue vivo: la API externa **no ofrece
+transacción**. Si un paso falla después de haber creado el contrato, este queda,
+y quien reintente termina con un duplicado en producción. Un 500 mudo ahí es lo
+peor posible, porque no dice que ya hay algo creado.
 
 La API externa no ofrece transacción, así que el orden es crear → vincular →
 cantidades, y cada paso necesita el id del anterior. El código ya contemplaba
