@@ -13,6 +13,7 @@ from apps.facturacion import models as fa_models
 from apps.facturacion.services import ajustes, calculo, cumplimiento, despacho
 from apps.facturacion.services import despacho_xm
 from apps.mercado_xm import models as mx_models
+from apps.mercado_xm.services import simem
 
 from . import serializers as fa_serializers
 
@@ -130,8 +131,13 @@ class FacturacionViewSet(viewsets.GenericViewSet):
     @action(detail=False, methods=["get"], url_path="cumplimiento")
     def cumplimiento(self, request):
         periodo = _periodo(request)
+        anio, mes = int(periodo[:4]), int(periodo[5:7])
+        # Precio de bolsa del mes (COP/kWh) para valorar la energía incumplida,
+        # TECHADO por el PTB de SIMEM (dataset 709b84) día a día: nuestro precio de
+        # bolsa se recorta a min(bolsa, PTB) y se promedia el mes.
+        precio_bolsa = simem.precio_bolsa_techado(anio, mes)["precio_bolsa"]
         return Response(cumplimiento.build(
-            calculo.periodo(periodo), int(periodo[:4]), int(periodo[5:7])
+            calculo.periodo(periodo), anio, mes, precio_bolsa=precio_bolsa,
         ))
 
     # ── Ajustes manuales ──────────────────────────────────────────────────
