@@ -191,7 +191,17 @@ def editar_curva(frontera_id: int, fecha: date, datos: dict) -> dict:
     # valor de reemplazo, no una lectura real del medidor (mismo criterio
     # que ya excluye el Caso 3 -- Inversores × FP automático -- de
     # CASOS_CONFIABLES_GENERACION).
-    if fuente in ("principal", "respaldo"):
+    #
+    # El RECONECTADOR entra acá por la misma razón que los medidores, no por
+    # excepción: es la lectura de un dispositivo físico, no una estimación, y
+    # el clasificador que lo elige solo ya guarda Caso 5 o 7 -- los dos
+    # confiables. Sin esto, confirmarlo a mano valía MENOS que dejarlo
+    # automático: el 'caso' se quedaba en el de la rama anterior (ej. 3,
+    # inversores parciales × FP, que no es confiable) y ese día no alimentaba
+    # la mediana, aunque el número reportado fuera el mismo dato del mismo
+    # dispositivo (Cumbia Generación 2026-09-09). Solo Generación lo alcanza:
+    # el reconectador es de /relay/ de Solenium y Consumo no tiene.
+    if fuente in ("principal", "respaldo", "reconectador"):
         rep.caso = "Medidor" if Modelo is ReporteEnergiaConsumo else 5
     # curva_final/medidor_usado (y, para 'principal', curva_medidor_principal)
     # ya quedaron fijados arriba con lo que la persona acaba de confirmar --
