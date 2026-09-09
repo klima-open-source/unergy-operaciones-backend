@@ -38,6 +38,14 @@ def reporte_diario() -> str:
 
     `ejecutar_dia_background` maneja su propia sesión, su logging y su registro
     de últimas corridas — el mismo mecanismo que usa `POST /reporte-energia/ejecutar`.
+
+    **Sin `cancelable`, a propósito.** Esta corrida no consulta la bandera de
+    "Detener" en ninguna de sus ~100 iteraciones: nada externo la puede parar,
+    igual que cuando ese estado era un diccionario en la memoria de este mismo
+    proceso. Lo que sí comparte con la manual es el registro del resultado, que
+    va a la caché — es lo que permite que la pantalla muestre en la mañana si
+    esta corrida terminó con fronteras fallidas, en vez de que quede solo en
+    estos logs. Para pararla: `docker compose restart worker`.
     """
     from apps.energia.services.reporte.orquestador import ejecutar_dia_background
 

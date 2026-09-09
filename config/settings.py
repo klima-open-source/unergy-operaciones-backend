@@ -174,6 +174,39 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
+# Cache compartida entre procesos -- el MISMO Redis que ya usa Celery. No esta
+# aca para acelerar consultas: es donde vive el estado que dos procesos
+# distintos tienen que VER (el resultado de la ultima corrida del reporte de
+# energia y la bandera de "Detener", ver orquestador.py). Sin esto Django usa
+# LocMemCache, que es memoria por proceso: con `--workers 3` cada gunicorn
+# tendria su propia copia y el clic de "Detener" caeria en el worker
+# equivocado, respondiendo OK sin detener nada.
+#
+# Sin dependencia nueva: `celery[redis]` ya trae `redis` y el backend viene con
+# Django.
+#
+# **Base 1, NUNCA la 0.** El broker de Celery vive en la 0 y un `cache.clear()`
+# hace FLUSHDB: se llevaria la cola de tareas por delante. La 1 se deriva de la
+# URL del broker para no tener que configurar dos variables que siempre apuntan
+# al mismo Redis; `REDIS_CACHE_URL` la pisa si algun dia hace falta separarlos.
+#
+# **Lo que se guarde aca no es durable.** El Redis del compose corre con
+# `--save "" --appendonly no`, o sea sin persistencia: un reinicio lo vacia.
+# Sirve para estado efimero (que es lo que era antes: memoria de un proceso).
+# Nada que haya que poder leer con certeza manana va aca -- eso es una tabla.
+_cache_url = os.getenv("REDIS_CACHE_URL")
+if not _cache_url:
+    _base, _, _db = CELERY_BROKER_URL.rpartition("/")
+    _cache_url = f"{_base}/1" if _db.isdigit() else f"{CELERY_BROKER_URL.rstrip('/')}/1"
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": _cache_url,
+        "KEY_PREFIX": "operaciones",
+    }
+}
+
 # Los cron de las tareas estan en hora de Bogota, no en la del contenedor (UTC),
 # igual que en el BackgroundScheduler de FastAPI. Sin esto la clasificacion de
 # las 3:30am correria a las 10:30pm del dia anterior.

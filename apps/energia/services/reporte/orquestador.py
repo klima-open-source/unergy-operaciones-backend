@@ -18,6 +18,14 @@ sigue con la siguiente.
 **Un registro `editado_manualmente` no se pisa** con el resultado automático de
 una re-ejecución: el reporte semiautomático depende de eso.
 
+**El estado de la corrida es compartido, la cancelación no.** El resultado de
+la última corrida y la bandera de "Detener" viven en la caché (el Redis de
+Celery), no en la memoria del proceso: con `--workers 3` el clic de "Detener"
+caía en cualquiera de los tres y respondía OK sin detener nada. Pero **solo las
+corridas manuales consultan la bandera**: la de Celery corre con
+`cancelable=False` y no la lee ni una vez, así que sigue siendo tan intocable
+como cuando el estado era un diccionario en su propia memoria.
+
 Cada fila se guarda en cuanto se calcula (`fila.save()`), así que el avance ya es
 visible en /fronteras mientras el resto sigue corriendo — el original hacía
 `commit()` cada 5 fronteras para lo mismo.
@@ -28,6 +36,7 @@ from __future__ import annotations
 import traceback
 from datetime import date, datetime, timezone
 
+from django.core.cache import cache
 from django.db.models import Q
 
 from apps.energia.models import (
@@ -47,24 +56,82 @@ TIPOS_GENERACION = {"generacion"}
 TIPOS_CONSUMO = {"consumo", "consumo_auxiliar", "consumo_propio"}
 
 # Resultado de la última corrida por fecha (en memoria -- se pierde si el
-# proceso reinicia, o no se ve entre workers si hubiera más de uno; suficiente
-# hoy porque el resto de este pipeline ya asume un solo proceso, ver el print()
-# de ejecutar_dia_background). Lo consulta GET /reporte-energia/ejecutar/estado
-# para poder avisar en el frontend si la corrida terminó con fallidas.
-_ULTIMAS_CORRIDAS: dict[str, dict] = {}
+# proceso reinicia, o no se ve entre workers si hubiera más de uno) y por eso
+# ahora vive en la caché compartida (el Redis de Celery, ver CACHES en
+# settings.py). Tres claves, todas por fecha:
+#
+#   · ultima_corrida -- cómo terminó. La ESCRIBEN las dos corridas (la manual
+#     y la de Celery de las 3:30) y la lee GET /reporte-energia/ejecutar/estado.
+#     Antes, la de Celery guardaba su resultado en la memoria de OTRO
+#     contenedor, así que ese endpoint no podía saber nada de ella ni por
+#     casualidad: si la corrida automática terminaba con fronteras fallidas,
+#     eso solo existía en los logs.
+#   · cancelar -- la bandera cooperativa de "Detener": el loop la revisa entre
+#     frontera y frontera (no corta a medio proceso de una, solo entre una y
+#     la siguiente).
+#   · en_curso -- para que dos corridas de la misma fecha no se pisen.
+#
+# **Solo las corridas CANCELABLES leen la bandera** (ver ejecutar_dia). La de
+# Celery corre con cancelable=False y no la mira ni una vez: conserva la
+# propiedad que tenía cuando el estado era un dict en su propia memoria --
+# nada externo la puede detener. Mover esa lectura al bucle automático habría
+# sido cambiar un `dict.get()` infalible por ~100 consultas a Redis por
+# corrida, y le habría dado a un clic el poder de matar la corrida de la
+# madrugada. El "Detener" que sí hacía falta arreglar es el de las manuales.
+#
+# La caché NO es durable (Redis del compose sin persistencia): un reinicio
+# borra las tres. Es el mismo alcance efímero que tenían como diccionarios,
+# solo que ahora compartido. Nada de esto es dato de negocio.
+_TTL_ULTIMA_CORRIDA = 60 * 60 * 48   # 48h: el reporte del día se revisa a la mañana siguiente
+_TTL_CANCELAR = 60 * 60 * 2          # 2h: una corrida tarda 23-50 min; más que eso es basura vieja
+_TTL_EN_CURSO = 60 * 60 * 2          # igual, y se libera en el finally
 
-# Bandera cooperativa para "Detener" -- el loop de ejecutar_dia() la revisa
-# entre frontera y frontera (no corta a medio proceso de una, solo entre
-# una y la siguiente). Mismo alcance en memoria que _ULTIMAS_CORRIDAS.
-_CANCELAR: dict[str, bool] = {}
+
+def _clave(nombre: str, fecha: date) -> str:
+    return f"reporte_energia:{nombre}:{fecha}"
+
+
+def _cache_leer(nombre: str, fecha: date):
+    """Lectura que NUNCA lanza: si Redis no responde, es como si no hubiera
+    nada guardado. Es lo que mantiene la corrida a salvo -- una lectura que
+    propague la excepción mataría el bucle a media lista de fronteras, y la
+    caída de Redis no tiene nada que ver con la clasificación."""
+    try:
+        return cache.get(_clave(nombre, fecha))
+    except Exception as exc:
+        print(f"[reporte_energia] cache no disponible al leer {nombre} fecha={fecha}: {exc}")
+        return None
+
+
+def _cache_escribir(nombre: str, fecha: date, valor, ttl: int) -> None:
+    """Escritura que NUNCA lanza -- mismo criterio que _cache_leer()."""
+    try:
+        cache.set(_clave(nombre, fecha), valor, ttl)
+    except Exception as exc:
+        print(f"[reporte_energia] cache no disponible al escribir {nombre} fecha={fecha}: {exc}")
+
+
+def _cache_borrar(nombre: str, fecha: date) -> None:
+    try:
+        cache.delete(_clave(nombre, fecha))
+    except Exception as exc:
+        print(f"[reporte_energia] cache no disponible al borrar {nombre} fecha={fecha}: {exc}")
 
 
 def ultima_corrida(fecha: date) -> dict | None:
-    return _ULTIMAS_CORRIDAS.get(str(fecha))
+    return _cache_leer("ultima_corrida", fecha)
 
 
 def cancelar_corrida(fecha: date) -> None:
-    _CANCELAR[str(fecha)] = True
+    _cache_escribir("cancelar", fecha, True, _TTL_CANCELAR)
+
+
+def corrida_en_curso(fecha: date) -> dict | None:
+    """Quién está corriendo esa fecha ahora mismo, si alguien -- {'origen',
+    'desde'}. Lo consulta el endpoint /ejecutar ANTES de lanzar el hilo, para
+    poder responder con un mensaje en vez de arrancar una segunda corrida que
+    escribiría las mismas filas en paralelo."""
+    return _cache_leer("en_curso", fecha)
 
 
 def _fronteras_con_reporte(codigos_quoia: set[str]) -> list[tuple[Frontera, str | None, float | None]]:
@@ -255,12 +322,19 @@ def _marcar_error_consumo(frontera_id: int, fecha: date, error_msg: str) -> None
     )
 
 
-def ejecutar_dia(fecha: date) -> dict:
+def ejecutar_dia(fecha: date, cancelable: bool = False) -> dict:
     """Corre la clasificación de Generación y Consumo para todas las
     fronteras activas, para una fecha dada, y guarda el resultado.
 
     Retorna un resumen {'generacion': {...}, 'consumo': {...}} con conteos
     por caso, para log/depuración -- el detalle real vive en la BD.
+
+    `cancelable`: si "Detener" puede pararla. True solo para las corridas que
+    lanza una persona desde POST /ejecutar. La de Celery de las 3:30 usa el
+    default y **no consulta la bandera en ninguna iteración** -- ni gasta
+    ~100 lecturas de Redis por corrida, ni le da a un clic la posibilidad de
+    matar la clasificación de la madrugada. Para pararla sigue estando
+    `docker compose restart worker`, igual que siempre.
     """
     gaia = GaiaClient()
     sv = SolarViewClient()
@@ -276,11 +350,16 @@ def ejecutar_dia(fecha: date) -> dict:
     fronteras = _fronteras_con_reporte(set(bordes.keys()))
     print(f"[reporte_energia] ejecutar_dia fecha={fecha}: {len(fronteras)} fronteras activas")
 
-    _CANCELAR[str(fecha)] = False  # limpia cualquier cancelación pendiente de una corrida anterior
+    # Limpia cualquier cancelación pendiente de una corrida anterior -- sin
+    # esto, un "Detener" que quedara guardado mataría la siguiente corrida de
+    # esa fecha después de la primera frontera. Solo aplica a las cancelables:
+    # la automática no lee la bandera, así que tampoco tiene nada que limpiar.
+    if cancelable:
+        _cache_borrar("cancelar", fecha)
     cancelado = False
 
     for i, (frontera, project_id_solarview, potencia_instalada_kwp) in enumerate(fronteras, start=1):
-        if _CANCELAR.get(str(fecha)):
+        if cancelable and _cache_leer("cancelar", fecha):
             print(f"[reporte_energia] ejecutar_dia fecha={fecha}: detenido manualmente en {i}/{len(fronteras)}")
             cancelado = True
             break
@@ -367,7 +446,8 @@ def ejecutar_dia(fecha: date) -> dict:
 
         print(f"[reporte_energia]   ({i}/{len(fronteras)}) {frt_code} -> caso {clave}")
 
-    _CANCELAR.pop(str(fecha), None)
+    if cancelable:
+        _cache_borrar("cancelar", fecha)
     return {
         "generacion": resumen_gen, "consumo": resumen_con,
         "omitidas": omitidas, "fallidas": fallidas, "fecha": str(fecha),
@@ -375,7 +455,34 @@ def ejecutar_dia(fecha: date) -> dict:
     }
 
 
-def ejecutar_dia_background(fecha: date) -> None:
+def _tomar_en_curso(fecha: date, origen: str, exclusivo: bool) -> bool:
+    """Marca la fecha como "hay una corrida andando", y con `exclusivo` se
+    niega si ya había otra. Retorna si se puede seguir.
+
+    `exclusivo` es True solo para las corridas manuales: **la automática nunca
+    cede el paso**, es la que tiene el horario. Si a las 3:30 había una manual
+    en curso, la automática pisa la marca y arranca igual (que es lo que pasa
+    hoy, sin marca de ninguna clase).
+
+    Falla hacia "seguir": si Redis no responde no se sabe si hay otra corrida,
+    y entre no clasificar el día y arriesgar dos corridas simultáneas -- lo
+    que ya pasa hoy -- lo segundo es mucho menos grave.
+
+    `cache.add` es SETNX en Redis: la comprobación y la escritura son una sola
+    operación atómica, así que dos clics simultáneos no pueden pasar los dos.
+    """
+    valor = {"origen": origen, "desde": datetime.now(timezone.utc).isoformat()}
+    try:
+        if exclusivo:
+            return bool(cache.add(_clave("en_curso", fecha), valor, _TTL_EN_CURSO))
+        cache.set(_clave("en_curso", fecha), valor, _TTL_EN_CURSO)
+        return True
+    except Exception as exc:
+        print(f"[reporte_energia] cache no disponible al marcar en_curso fecha={fecha}: {exc}")
+        return True
+
+
+def ejecutar_dia_background(fecha: date, cancelable: bool = False) -> None:
     """Igual que ejecutar_dia(), pero abre su propia sesión de BD y corre en
     un hilo aparte -- pensada para que el endpoint /ejecutar responda de
     inmediato en vez de bloquear el request.
@@ -384,15 +491,29 @@ def ejecutar_dia_background(fecha: date) -> None:
     90s de recuperación activa por medidor incompleto) una corrida completa
     puede tardar varios minutos -- más que el timeout fijo del proxy externo
     de Vercel (~30s), así que no puede devolverse en el mismo request.
+
+    `cancelable`: lo pasa el endpoint (True) y no la tarea de Celery (False,
+    el default) -- ver ejecutar_dia(). Decide también quién cede el paso si
+    ya hay una corrida de esa fecha andando: la manual se retira, la
+    automática nunca.
     """
     from django.db import close_old_connections
 
-    print(f"[reporte_energia] ejecutar_dia_background fecha={fecha} ARRANCÓ")
+    origen = "manual" if cancelable else "automatica"
+    if not _tomar_en_curso(fecha, origen, exclusivo=cancelable):
+        otra = corrida_en_curso(fecha) or {}
+        print(
+            f"[reporte_energia] ejecutar_dia_background fecha={fecha} NO ARRANCA: "
+            f"ya hay una corrida {otra.get('origen', 'desconocida')} desde {otra.get('desde', '?')}"
+        )
+        return
+
+    print(f"[reporte_energia] ejecutar_dia_background fecha={fecha} origen={origen} ARRANCÓ")
     # Hilo propio: la conexión de este hilo puede venir muerta de una corrida
     # anterior y Django no la recicla solo fuera del ciclo de request.
     close_old_connections()
     try:
-        resultado = ejecutar_dia(fecha)
+        resultado = ejecutar_dia(fecha, cancelable=cancelable)
         # print() en vez de logging -- en este contenedor los logs de nivel
         # INFO del módulo logging no se están capturando (solo llega un
         # WARNING+ vía el handler de último recurso), igual que el patrón
@@ -403,19 +524,27 @@ def ejecutar_dia_background(fecha: date) -> None:
             f"omitidas={len(resultado['omitidas'])} fallidas={resultado['fallidas']} "
             f"cancelado={resultado['cancelado']}"
         )
-        _ULTIMAS_CORRIDAS[str(fecha)] = {
+        _cache_escribir("ultima_corrida", fecha, {
             "terminado_en": datetime.now(timezone.utc).isoformat(),
+            "origen": origen,
             "fallidas": resultado["fallidas"],
             "omitidas": resultado["omitidas"],
             "cancelado": resultado["cancelado"],
-        }
+        }, _TTL_ULTIMA_CORRIDA)
     except Exception:
         print(f"[reporte_energia] ejecutar_dia_background fecha={fecha} FALLÓ:")
         print(traceback.format_exc())
-        _ULTIMAS_CORRIDAS[str(fecha)] = {
+        _cache_escribir("ultima_corrida", fecha, {
             "terminado_en": datetime.now(timezone.utc).isoformat(),
+            "origen": origen,
             "fallidas": [], "omitidas": [],
             "error_general": "La corrida se interrumpió por completo -- ver logs.",
-        }
+        }, _TTL_ULTIMA_CORRIDA)
     finally:
+        # Se libera sin preguntar de quién era. Si una manual y la automática
+        # se solaparon (la automática pisa la marca, ver _tomar_en_curso), la
+        # primera en terminar la borra y la otra queda sin marca -- o sea, el
+        # comportamiento de hoy, donde no hay marca en absoluto. El TTL de 2h
+        # es la red por si el proceso muere sin pasar por acá.
+        _cache_borrar("en_curso", fecha)
         close_old_connections()

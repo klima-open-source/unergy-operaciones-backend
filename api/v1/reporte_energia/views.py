@@ -239,18 +239,40 @@ class ReporteEnergiaViewSet(viewsets.GenericViewSet):
     def ejecutar(self, request):
         """Dispara la clasificación del día en un hilo aparte y responde de
         inmediato: con ~50 fronteras la corrida tarda varios minutos, más que el
-        timeout del proxy que usa el frontend."""
+        timeout del proxy que usa el frontend.
+
+        El rechazo por "ya hay una corrida en curso" se comprueba ACÁ, antes de
+        lanzar el hilo: adentro nadie lo vería, porque la respuesta ya se fue
+        con "iniciado". `cancelable=True` -- las que lanza una persona sí se
+        pueden detener; la de Celery no (ver orquestador.ejecutar_dia).
+        """
         fecha = _fecha(request)
+        en_curso = orquestador.corrida_en_curso(fecha)
+        if en_curso:
+            cual = "automática de la madrugada" if en_curso.get("origen") == "automatica" else "manual"
+            raise NoProcesable(
+                f"Ya hay una corrida {cual} en curso para esa fecha (desde "
+                f"{en_curso.get('desde', '?')}). Espera a que termine para no "
+                f"escribir las mismas filas dos veces."
+            )
         threading.Thread(
-            target=orquestador.ejecutar_dia_background, args=(fecha,), daemon=True,
+            target=orquestador.ejecutar_dia_background, args=(fecha,),
+            kwargs={"cancelable": True}, daemon=True,
         ).start()
         return Response({"fecha": fecha, "status": "iniciado"})
 
     @action(detail=False, methods=["get"], url_path="ejecutar/estado")
     def ejecutar_estado(self, request):
+        """`fallidas`/`omitidas` van siempre, incluso sin corrida registrada:
+        el frontend hace `data.fallidas.length` para decidir si avisa, y una
+        respuesta sin la clave le tiraba un TypeError que se comía un catch
+        silencioso -- el mismo silencio que este endpoint existe para romper.
+        """
         fecha = _fecha(request)
         resultado = orquestador.ultima_corrida(fecha)
-        return Response({"fecha": fecha, **(resultado or {})})
+        return Response({
+            "fecha": fecha, "fallidas": [], "omitidas": [], **(resultado or {}),
+        })
 
     @action(detail=False, methods=["post"], url_path="ejecutar/cancelar")
     def ejecutar_cancelar(self, request):
