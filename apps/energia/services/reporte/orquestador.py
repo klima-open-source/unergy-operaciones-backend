@@ -236,6 +236,7 @@ def _upsert_generacion(frontera_id: int, fecha: date, resultado: dict) -> None:
     # ningún aviso que lo explicara).
     fila.curva_medidor_principal = resultado.get("curva_medidor_principal")
     fila.curva_medidor_respaldo = resultado.get("curva_medidor_respaldo")
+    fila.curva_cgm_referencia = resultado.get("curva_cgm_referencia")
     fila.curva_solenium_referencia = resultado.get("curva_solenium_referencia")
     # Solo se pone si el reconectador SÍ se llegó a consultar ese día
     # (medidor+inversores ya dejaron huecos) -- a diferencia de medidor/
@@ -278,6 +279,7 @@ def _upsert_consumo(frontera_id: int, fecha: date, resultado: dict) -> None:
     # estas curvas de referencia pero nunca se estaban copiando a la fila.
     fila.curva_medidor_principal = resultado.get("curva_medidor_principal")
     fila.curva_medidor_respaldo = resultado.get("curva_medidor_respaldo")
+    fila.curva_cgm_referencia = resultado.get("curva_cgm_referencia")
     # Mismo criterio que _upsert_generacion -- sin curva_final no hay nada
     # que comparar/reportar.
     if fila.curva_final is not None:

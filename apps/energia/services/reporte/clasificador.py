@@ -751,6 +751,14 @@ def clasificar_generacion(
         resultado["curva_reconectador_referencia"] = (
             curva_a_lista(curva_reconectador_ref) if curva_reconectador_ref is not None else None
         )
+    # Las horas del CGM, tal como se leyeron arriba -- una sola línea porque la
+    # curva ya está en la mano (no cuesta una llamada más). Se guarda SIEMPRE,
+    # gane o no el CGM: cuando gana, `curva_final` ya la tiene, pero cuando
+    # pierde era el único lado donde no quedaba registro, y es justo el caso en
+    # que alguien quiere poder adoptarla a mano. Así el panel la lee de la base
+    # en vez de volver a preguntarle a Quoia en cada apertura -- mismo criterio
+    # que las de medidor/Solenium/reconectador.
+    resultado.setdefault("curva_cgm_referencia", curva_a_lista(curva_cgm))
     resultado.setdefault("fp", None)
     resultado.setdefault("fp_calculada", None)
     resultado.setdefault("error_final_pct", None)

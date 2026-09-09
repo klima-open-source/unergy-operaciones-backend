@@ -343,6 +343,7 @@ def clasificar_consumo(
             return {
                 "caso": "CGM", "energia_final_kwh": 0.0, "curva_final": curva_cgm,
                 "medidor_usado": "cgm", "energia_cgm_kwh": 0.0, "estado_reporte": estado_reporte,
+                "curva_cgm_referencia": curva_a_lista(curva_cgm),
                 "horas_rellenadas_historico": None, "recuperacion_datos": None,
                 # Sin un medidor que confirme el apagado, se reporta el 0 (es
                 # el dato del canal oficial, no una invención) pero se marca:
@@ -359,6 +360,7 @@ def clasificar_consumo(
         resultado_cgm = {
             "caso": "CGM", "energia_final_kwh": e_cgm, "curva_final": curva_cgm,
             "medidor_usado": "cgm", "energia_cgm_kwh": e_cgm, "estado_reporte": estado_reporte,
+            "curva_cgm_referencia": curva_a_lista(curva_cgm),
             "horas_rellenadas_historico": None, "recuperacion_datos": None,
         }
         # Blindaje contra outliers: 'reporte automático válido' por sí solo no
@@ -441,6 +443,13 @@ def clasificar_consumo(
     resultado.setdefault("revisar_manualmente", False)
     resultado["horas_rellenadas_historico"] = None
     resultado["horas_rellenadas_medidor_cruzado"] = None
+    # Las horas del CGM, tal como se leyeron arriba. Ver el comentario del
+    # mismo `setdefault` en clasificador.py: se guarda gane o no el CGM,
+    # porque cuando PIERDE es el único lado donde no quedaba registro de
+    # ellas, y es justo el caso en que alguien quiere adoptarlas a mano
+    # (Paso Norte 2026-09-07). `setdefault` y no asignación porque los dos
+    # caminos de Caso 'CGM' retornan antes de acá y ya la traen puesta.
+    resultado.setdefault("curva_cgm_referencia", curva_a_lista(curva_cgm))
     return resultado
 
 

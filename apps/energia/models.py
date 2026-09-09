@@ -42,6 +42,13 @@ class ReporteEnergiaGeneracion(Timer):
     curva_medidor_respaldo = models.JSONField(null=True, blank=True)
     curva_solenium_referencia = models.JSONField(null=True, blank=True)
     curva_reconectador_referencia = models.JSONField(null=True, blank=True)
+    # Las 24 horas que Quoia reportó al ASIC ese día, tal como se leyeron al
+    # clasificar. Mismo papel que las tres de arriba: se consulta una vez en la
+    # corrida de madrugada y el panel la lee de acá, en vez de volver a pedirla
+    # a Quoia en cada apertura. Necesaria para poder adoptar el CGM a mano
+    # cuando el clasificador se fue por otra fuente -- ahí `curva_final` tiene
+    # la otra fuente y las horas del CGM no quedaban en ninguna parte.
+    curva_cgm_referencia = models.JSONField(null=True, blank=True)
     horas_rellenadas_reconectador = models.JSONField(null=True, blank=True)
     horas_rellenadas_solenium = models.JSONField(null=True, blank=True)
     horas_rellenadas_historico = models.JSONField(null=True, blank=True)
@@ -89,6 +96,8 @@ class ReporteEnergiaConsumo(Timer):
     estado_reporte = models.CharField(max_length=20, null=True, blank=True)
     curva_medidor_principal = models.JSONField(null=True, blank=True)
     curva_medidor_respaldo = models.JSONField(null=True, blank=True)
+    # Ver el comentario en ReporteEnergiaGeneracion -- mismo papel acá.
+    curva_cgm_referencia = models.JSONField(null=True, blank=True)
     curva_respaldo_final = models.JSONField(null=True, blank=True)
     respaldo_final_origen = models.CharField(max_length=20, null=True, blank=True)
     horas_rellenadas_historico = models.JSONField(null=True, blank=True)
