@@ -12,7 +12,7 @@ dos salidas eran malas:
     completo (basta una fila pendiente, ver envio.enviar).
 
 Lo que se agrego es 'cgm' como fuente manual. Y lo que este archivo vigila es la
-parte que se puede equivocar en silencio: `_reporte_ya_valido()` mira campos
+parte que se puede equivocar en silencio: `reporte_ya_valido()` mira campos
 DISTINTOS segun el tipo -- `medidor_usado` en Generacion y `caso` en Consumo --
 asi que `editar_curva` tiene que fijar LOS DOS. Si fijara solo uno, en Consumo
 el envio no se saltaria la fila y le pisaria a Quoia su propio reporte, que es
@@ -48,18 +48,18 @@ def _rep(**kw):
 
 def test_consumo_con_cgm_no_se_envia():
     """Lo que fija editar_curva en Consumo: caso 'CGM' + medidor_usado 'cgm'."""
-    from apps.energia.services.reporte.envio import _reporte_ya_valido
+    from apps.energia.services.reporte.utils import reporte_ya_valido
 
     rep = _rep(caso="CGM", medidor_usado="cgm")
-    assert _reporte_ya_valido(rep, es_generacion=False) is True
+    assert reporte_ya_valido(rep, es_generacion=False) is True
 
 
 def test_generacion_con_cgm_no_se_envia():
     """Y en Generacion: caso 1 + medidor_usado 'cgm'."""
-    from apps.energia.services.reporte.envio import _reporte_ya_valido
+    from apps.energia.services.reporte.utils import reporte_ya_valido
 
     rep = _rep(caso=1, medidor_usado="cgm")
-    assert _reporte_ya_valido(rep, es_generacion=True) is True
+    assert reporte_ya_valido(rep, es_generacion=True) is True
 
 
 # ── Por que hay que fijar los DOS campos y no uno ────────────────────────────
@@ -68,42 +68,75 @@ def test_en_consumo_medidor_usado_solo_no_alcanza():
     """El error que se cometeria fijando solo `medidor_usado`: en Consumo el
     chequeo mira `caso`, asi que la fila se enviaria igual y le pisaria a Quoia
     su reporte oficial con nuestra estimacion."""
-    from apps.energia.services.reporte.envio import _reporte_ya_valido
+    from apps.energia.services.reporte.utils import reporte_ya_valido
 
     rep = _rep(caso="Histórico", medidor_usado="cgm")
-    assert _reporte_ya_valido(rep, es_generacion=False) is False
+    assert reporte_ya_valido(rep, es_generacion=False) is False
 
 
 def test_en_generacion_caso_solo_no_alcanza():
     """El simetrico: en Generacion el chequeo mira `medidor_usado`."""
-    from apps.energia.services.reporte.envio import _reporte_ya_valido
+    from apps.energia.services.reporte.utils import reporte_ya_valido
 
     rep = _rep(caso=1, medidor_usado="historico")
-    assert _reporte_ya_valido(rep, es_generacion=True) is False
+    assert reporte_ya_valido(rep, es_generacion=True) is False
 
 
 # ── El caso de Paso Norte, tal como estaba ───────────────────────────────────
 
 def test_paso_norte_como_estaba_si_se_enviaba():
     """La fila del 7/09 antes del arreglo: validarla mandaba la matriz."""
-    from apps.energia.services.reporte.envio import _reporte_ya_valido
+    from apps.energia.services.reporte.utils import reporte_ya_valido
 
-    assert _reporte_ya_valido(_rep(), es_generacion=False) is False
+    assert reporte_ya_valido(_rep(), es_generacion=False) is False
 
 
 # ── Lo que no se toco ────────────────────────────────────────────────────────
 
 def test_una_frontera_excluida_sigue_sin_enviarse():
-    from apps.energia.services.reporte.envio import _reporte_ya_valido
+    from apps.energia.services.reporte.utils import reporte_ya_valido
 
     rep = _rep(medidor_usado="excluida")
-    assert _reporte_ya_valido(rep, es_generacion=True) is True
-    assert _reporte_ya_valido(rep, es_generacion=False) is True
+    assert reporte_ya_valido(rep, es_generacion=True) is True
+    assert reporte_ya_valido(rep, es_generacion=False) is True
 
 
 def test_cgm_es_una_fuente_manual_declarada():
     """Si no estuviera en la lista, `fuente: 'cgm'` caeria en el generico
     'editado_manualmente' y no fijaria ningun `caso`."""
-    from api.v1.reporte_energia.serializers import FUENTES_MANUALES
+    from apps.energia.services.reporte.correcciones import FUENTES_MANUALES
 
     assert "cgm" in FUENTES_MANUALES
+
+
+# ── Adoptar el CGM no va a buscar el respaldo en vivo ────────────────────────
+#
+# `_confirmar_revisa_respaldo()` decide si confirmar una fuente justifica la
+# consulta de red del medidor de respaldo. 'cgm' entraba ahí y la pagaba sin
+# usarla: con `medidor_usado='cgm'` la fila no se envía y el Excel deja el
+# Backup en blanco, así que ese snapshot no llegaba a ninguna salida. El único
+# síntoma de que alguien la vuelva a meter es que guardar se pone más lento,
+# que es exactamente el tipo de regresión que nadie nota.
+
+def test_adoptar_cgm_no_consulta_el_respaldo_en_vivo():
+    from apps.energia.services.reporte.correcciones import _confirmar_revisa_respaldo
+
+    assert _confirmar_revisa_respaldo("cgm") is False
+
+
+def test_confirmar_un_medidor_si_consulta_el_respaldo():
+    """El contrapeso: la guarda tiene que seguir dejando pasar al Principal,
+    que es el caso para el que existe (adoptarlo revisa si el respaldo sigue
+    coherente, ver _revisar_respaldo_en_vivo)."""
+    from apps.energia.services.reporte.correcciones import _confirmar_revisa_respaldo
+
+    assert _confirmar_revisa_respaldo("principal") is True
+
+
+@pytest.mark.parametrize("fuente", ["respaldo", "reconectador", "inversores", "historico", "ceros", None, ""])
+def test_las_demas_fuentes_tampoco_lo_consultan(fuente):
+    """Las estimaciones y la edición celda por celda ya no lo consultaban --
+    esto fija que sigan así, y que la lista no se amplíe por descuido."""
+    from apps.energia.services.reporte.correcciones import _confirmar_revisa_respaldo
+
+    assert _confirmar_revisa_respaldo(fuente) is False

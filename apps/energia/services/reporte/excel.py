@@ -11,9 +11,8 @@ from io import BytesIO
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 
-from apps.fronteras.models import Frontera
 from apps.energia.models import ReporteEnergiaGeneracion, ReporteEnergiaConsumo
-from apps.energia.services.reporte.utils import curva_respaldo_a_reportar
+from apps.energia.services.reporte.utils import curva_respaldo_a_reportar, reporte_ya_valido
 
 COLUMNAS = [
     "nombre_proyecto", "Hora", "Consumo_Principal", "Generación_Principal",
@@ -54,22 +53,22 @@ def generar_excel_dia(fecha: date) -> bytes:
     fila_excel = 2
     for rep_gen, front_gen in gen_filas:
         curva_final = rep_gen.curva_final or [None] * 24
-        reporte_ya_valido = rep_gen.medidor_usado == "cgm"
+        gen_ya_valido = reporte_ya_valido(rep_gen, es_generacion=True)
         # Mismo "Backup" que /enviar realmente manda a Quoia -- antes esto
         # era una fórmula =C*RAND() independiente, que ignoraba por completo
         # curva_respaldo_final (y por lo tanto el dato real del medidor
         # cuando aplicaba). None (celda en blanco) cuando el reporte ya es
         # válido en Quoia -- no se manda nada, tampoco Backup.
-        respaldo_gen = None if reporte_ya_valido else _respaldo_final(rep_gen)
+        respaldo_gen = None if gen_ya_valido else _respaldo_final(rep_gen)
 
         rep_con = con_por_proyecto.get(front_gen.proyecto_id)
-        consumo_ya_valido = bool(rep_con and rep_con.caso == "CGM")
+        consumo_ya_valido = bool(rep_con) and reporte_ya_valido(rep_con, es_generacion=False)
         curva_con = (rep_con.curva_final if rep_con else None) or [None] * 24
         respaldo_con = None if (consumo_ya_valido or rep_con is None) else _respaldo_final(rep_con)
 
         for hora in range(24):
-            valor_gen = None if reporte_ya_valido else curva_final[hora]
-            if valor_gen is None and not reporte_ya_valido:
+            valor_gen = None if gen_ya_valido else curva_final[hora]
+            if valor_gen is None and not gen_ya_valido:
                 valor_gen = 0.0
             valor_con = None if consumo_ya_valido else curva_con[hora]
             if valor_con is None and not consumo_ya_valido:

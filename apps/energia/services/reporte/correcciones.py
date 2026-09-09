@@ -56,6 +56,19 @@ class _SinFilas(Exception):
     """
 
 
+# Las fuentes que una persona puede confirmar a mano desde 'Reportar con otra
+# fuente'. Es la UNICA lista: el serializer no valida `fuente` contra ella a
+# proposito -- cualquier valor que no este aca cae al generico
+# "editado_manualmente", que es justo lo que tiene que pasar con 'Matriz de
+# ceros' (el front la manda como 'ceros': no es una fuente, es un valor de
+# reemplazo) y con la edicion celda por celda. Rechazar en el serializer
+# convertiria esos dos casos legitimos en un 400.
+#
+# El front manda estas mismas claves, con una traduccion: su opcion 'tipica'
+# (Curva tipica historica) viaja como 'historico' -- ver elegirFuenteReportar()
+# en ReporteEnergiaDetalleTab.vue.
+FUENTES_MANUALES = frozenset({"principal", "respaldo", "inversores", "historico", "reconectador", "cgm"})
+
 def _curva_respaldo_en_vivo(front: Frontera, fecha: date, es_generacion: bool) -> list | None:
     """Trae en vivo la curva del medidor de RESPALDO -- únicamente para
     alimentar el chequeo de coherencia de curva_respaldo_a_reportar()
@@ -93,6 +106,26 @@ def _curva_respaldo_en_vivo(front: Frontera, fecha: date, es_generacion: bool) -
         return curva_a_lista(curva_r)
     except Exception:
         return None
+
+
+def _confirmar_revisa_respaldo(medidor_usado: str | None) -> bool:
+    """Si confirmar esta fuente justifica ir a buscar el respaldo en vivo.
+
+    Solo los medidores. Adoptar el CGM tambien entraba aca y costaba una
+    consulta de red que no se usaba para nada: con `medidor_usado='cgm'` la
+    fila no se envia (utils.reporte_ya_valido) y el Excel deja el Backup en
+    blanco, asi que ese snapshot no llegaba a ninguna salida.
+
+    Es una guarda con nombre, y no la condicion suelta que era, para poder
+    probarla sin base de datos -- mismo motivo que `_pedir_cgm_en_vivo()` en
+    vistas.py, y misma cosa que puede regresar en silencio: si alguien vuelve a
+    meter 'cgm' aca, el unico sintoma es que guardar se pone mas lento.
+
+    El endpoint /revisar-respaldo SI funciona sobre una fila CGM -- ahi la
+    persona lo pidio explicitamente, y por eso el guard interno de
+    _revisar_respaldo_en_vivo() sigue aceptandola.
+    """
+    return (medidor_usado or "").startswith("principal")
 
 
 def _revisar_respaldo_en_vivo(front: Frontera, rep, fecha: date, es_generacion: bool) -> None:
@@ -169,9 +202,8 @@ def editar_curva(frontera_id: int, fecha: date, datos: dict) -> dict:
     # edición celda por celda sin pasar por ahí, o si se usó 'Matriz de
     # ceros' (no es una fuente real, solo un valor de reemplazo), queda el
     # genérico "Editado manualmente".
-    FUENTES_MANUALES_VALIDAS = {"principal", "respaldo", "inversores", "historico", "reconectador", "cgm"}
     fuente = datos.get("fuente")
-    rep.medidor_usado = fuente if fuente in FUENTES_MANUALES_VALIDAS else "editado_manualmente"
+    rep.medidor_usado = fuente if fuente in FUENTES_MANUALES else "editado_manualmente"
     # Si la fuente elegida es un medidor, lo que se acaba de guardar pasa a
     # ser el nuevo snapshot de ESE medidor -- si no se actualiza, 'Detalle de
     # las fuentes' y el aviso 'el medidor muestra un valor distinto en Quoia'
@@ -246,8 +278,8 @@ def editar_curva(frontera_id: int, fecha: date, datos: dict) -> dict:
         rep.curva_respaldo_final = curva_a_lista(curva_resp)
         rep.respaldo_final_origen = "manual"
     else:
-        # Si se confirma Principal (o CGM), revisa el respaldo en vivo
-        # contra la tolerancia y adopta su snapshot SOLO si pasa -- ver
+        # Si se confirma un medidor, revisa el respaldo en vivo contra la
+        # tolerancia y adopta su snapshot SOLO si pasa -- ver
         # _revisar_respaldo_en_vivo(). Generación y Consumo.
         #
         # Para cualquier OTRA fuente (reconectador, inversores, histórico,
@@ -261,8 +293,7 @@ def editar_curva(frontera_id: int, fecha: date, datos: dict) -> dict:
         # (bug real: Chiriguaná Norte 2 y Verso, respaldo ~2x el nuevo
         # Principal en vez de ±1%). Se limpia para que los tres lo
         # recalculen al vuelo contra la curva que se acaba de guardar.
-        mu = rep.medidor_usado or ""
-        if mu.startswith("principal") or mu == "cgm":
+        if _confirmar_revisa_respaldo(rep.medidor_usado):
             _revisar_respaldo_en_vivo(front, rep, fecha, es_generacion)
         else:
             rep.curva_respaldo_final = None

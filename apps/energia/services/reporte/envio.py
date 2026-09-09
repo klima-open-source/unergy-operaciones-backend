@@ -23,26 +23,11 @@ from datetime import date, datetime, timezone
 
 from apps.energia.models import ReporteEnergiaConsumo, ReporteEnergiaGeneracion
 from apps.energia.services.reporte.borders import resolver_borders
-from apps.energia.services.reporte.utils import curva_respaldo_a_reportar
+from apps.energia.services.reporte.utils import curva_respaldo_a_reportar, reporte_ya_valido
 from apps.energia.services.reporte.vistas import _nombre_frontera
 
 # `ponytail: el cliente de Quoia sigue en app/services/mgs/`.
 from app.services.mgs.gaia_client import GaiaClient
-
-
-def _reporte_ya_valido(rep, es_generacion: bool) -> bool:
-    """Mismo criterio que excel.py: si Quoia ya reportó bien por su cuenta,
-    no hace falta corregirlo -- enviar de más sobreescribiría un reporte
-    oficial que ya estaba bien.
-
-    'excluida' también se salta acá -- curva_final es None mientras dura la
-    exclusión (ver orquestador._exclusion_activa), así que sin este chequeo
-    /enviar mandaría una curva de 0 kWh fabricada a Quoia para una frontera
-    que justamente no debe reportar nada mientras se resuelve lo que la
-    excluyó."""
-    if rep.medidor_usado == "excluida":
-        return True
-    return rep.medidor_usado == "cgm" if es_generacion else str(rep.caso) == "CGM"
 
 
 def _enviar_a_quoia(rep, front, es_generacion: bool, gaia: GaiaClient, borders: dict) -> tuple[bool | None, str | None]:
@@ -60,11 +45,11 @@ def _enviar_a_quoia(rep, front, es_generacion: bool, gaia: GaiaClient, borders: 
 
     Retorna (resultado, motivo):
     - (None, None): no hacía falta enviar, Quoia ya tenía el dato correcto
-      (_reporte_ya_valido) -- no se llama a Quoia para nada.
+      (reporte_ya_valido) -- no se llama a Quoia para nada.
     - (True, None): envío intentado y exitoso.
     - (False, motivo): envío intentado y falló (sin border_id, Quoia
       rechazó, o excepción de red)."""
-    if _reporte_ya_valido(rep, es_generacion):
+    if reporte_ya_valido(rep, es_generacion):
         return None, None
 
     frt_code = (front.codigo_frontera or "").strip().lower()

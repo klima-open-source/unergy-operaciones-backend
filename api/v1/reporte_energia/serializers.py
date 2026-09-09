@@ -6,13 +6,6 @@ fuentes, no filas de una tabla.
 
 from rest_framework import serializers
 
-# Las fuentes que una persona puede confirmar a mano. `matriz_ceros` NO está:
-# no es una fuente real, es un valor de reemplazo — cae al genérico
-# "editado_manualmente" y por eso tampoco toca `caso`.
-# 'cgm' es distinta de las demás: no aporta otra curva para la matriz, decide
-# que NO se manda matriz porque Quoia ya reportó bien (ver editar_curva).
-FUENTES_MANUALES = ["principal", "respaldo", "inversores", "historico", "reconectador", "cgm"]
-
 
 class _Curva24(serializers.ListField):
     child = serializers.FloatField(allow_null=True)
@@ -22,6 +15,14 @@ class EditarCurvaSerializer(serializers.Serializer):
     curva_final = _Curva24()
     # Si viene, manda tal cual (origen 'manual') y no se recalcula.
     curva_respaldo_final = _Curva24(required=False, allow_null=True, default=None)
+    # Texto libre a proposito, NO validado contra una lista. La unica lista de
+    # fuentes es FUENTES_MANUALES (correcciones.py), y editar_curva() manda
+    # cualquier valor desconocido al generico "editado_manualmente" -- que es
+    # lo correcto para 'ceros' (Matriz de ceros: un valor de reemplazo, no una
+    # fuente) y para la edicion celda por celda, los dos casos legitimos que
+    # un ChoiceField convertiria en 400. Antes habia una copia de la lista
+    # aca que no validaba nada y solo la leia un test: dos verdades para lo
+    # mismo, listas para separarse.
     fuente = serializers.CharField(required=False, allow_null=True, allow_blank=True, default=None)
 
 

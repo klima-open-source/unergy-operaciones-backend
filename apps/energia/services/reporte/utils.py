@@ -220,3 +220,31 @@ def actualizar_respaldo_final(rep, curva_medidor_respaldo: list | None = None) -
     curva, origen = curva_respaldo_a_reportar(rep, curva_medidor_respaldo)
     rep.curva_respaldo_final = curva
     rep.respaldo_final_origen = origen
+
+
+def reporte_ya_valido(rep, es_generacion: bool) -> bool:
+    """Si esta fila NO debe reportarse: Quoia ya tiene el dato bueno, o la
+    frontera esta excluida.
+
+    Vive aca porque la comparten los DOS caminos por los que sale una matriz
+    -- `/enviar` (envio._enviar_a_quoia) y el Excel del dia (excel.py) -- y
+    tenerla duplicada ya los dejo divergir: el Excel no miraba 'excluida' y le
+    escribia 24 horas de 0,0 a una frontera excluida, justo la curva fabricada
+    que el chequeo de `/enviar` existe para evitar. Cualquier criterio nuevo
+    de "no reportar" va aca, no en una copia.
+
+    Los campos que decide mirar son distintos por tipo, y no es un descuido:
+    al adoptar el CGM a mano, editar_curva() fija `medidor_usado='cgm'` y
+    `caso='CGM'`/1 juntos, pero el clasificador automatico de Generacion deja
+    `medidor_usado='cgm'` con un `caso` numerico, y el de Consumo deja
+    `caso='CGM'`. Mirar el campo equivocado en cada arbol sobreescribiria en
+    Quoia su propio reporte con una copia nuestra.
+
+    'excluida' -- `curva_final` es None mientras dura la exclusion (ver
+    orquestador._exclusion_activa), asi que sin este chequeo se mandaria una
+    curva de 0 kWh a una frontera que justamente no debe reportar nada
+    mientras se resuelve lo que la excluyo.
+    """
+    if rep.medidor_usado == "excluida":
+        return True
+    return rep.medidor_usado == "cgm" if es_generacion else str(rep.caso) == "CGM"
