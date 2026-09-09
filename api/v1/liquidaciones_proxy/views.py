@@ -11,7 +11,7 @@ from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
-from api.logging import class_logger_wrapper, log_endpoint
+from api.logging import class_logger_wrapper, get_logger, log_endpoint
 from api.pagination import recortar
 from api.permissions import RolePermission
 from apps.liquidaciones.services import agregados
@@ -20,6 +20,8 @@ from apps.liquidaciones.services import proxy as proxy_service
 from apps.proyectos import models as py_models
 
 from . import serializers as liq_serializers
+
+logger = get_logger("Liquidaciones | proxy")
 
 # Códigos según de quién es el fallo: si la API externa no responde es 502; si
 # ni siquiera hay credenciales configuradas, 503 (el servidor no está listo).
@@ -449,35 +451,60 @@ class LiquidacionesApiViewSet(viewsets.GenericViewSet):
         except api.LiquidacionesAPIError as exc:
             return Response({"detail": str(exc)}, status=HTTP_API_EXTERNA)
 
+        # Sin id no se puede vincular nada, y el contrato puede haber quedado
+        # creado igual: se dice, en vez de reventar con un KeyError.
+        contrato_id = contrato.get("id")
+        if contrato_id is None:
+            return Response({"detail": (
+                "La API de Liquidaciones no devolvió el id del contrato, así que "
+                "no se pudo vincular ningún proyecto. Puede haber quedado creado "
+                "sin proyectos: revísalo antes de volver a intentarlo."
+            )}, status=HTTP_API_EXTERNA)
+
         creados = []
         for proyecto in proyectos:
+            # Se atrapa CUALQUIER error, no solo los de la API. Un fallo
+            # inesperado aquí escapaba de DRF y salía como un 500 en HTML, sin
+            # decir que el contrato ya estaba creado — y quien reintentaba
+            # terminaba con un duplicado en producción.
             try:
                 vinculo = api.vincular_contrato_proyecto({
-                    "contract_energy": contrato["id"],
+                    "contract_energy": contrato_id,
                     "project": proyecto["project"],
                     **(
                         {"energy_price": proyecto["energy_price"]}
                         if proyecto.get("energy_price") is not None else {}
                     ),
                 })
+                vinculo_id = vinculo.get("id")
+                if vinculo_id is None:
+                    raise api.LiquidacionesAPIError(
+                        "la API no devolvió el id del vínculo"
+                    )
                 for concepto, horas in (
                     ("floor", proyecto.get("floor")),
                     ("roof", proyecto.get("roof")),
                 ):
                     if horas:
                         api.crear_cantidades({
-                            "contract_energy_project": vinculo["id"],
+                            "contract_energy_project": vinculo_id,
                             "concept_type": concepto,
                             "hours": horas,
                         })
-            except api.LiquidacionesAPIError as exc:
+            except Exception as exc:
+                if not isinstance(exc, api.LiquidacionesAPIError):
+                    logger.exception(
+                        "Fallo inesperado vinculando el contrato %s con «%s»",
+                        contrato_id, proyecto["project"],
+                    )
                 return Response({"detail": (
-                    f'El contrato {contrato["id"]} se creó, pero falló al '
+                    f"El contrato {contrato_id} SÍ se creó, pero falló al "
                     f'vincular «{proyecto["project"]}»: {exc}. Alcanzaron a '
-                    f"vincularse {len(creados)}."
+                    f"vincularse {len(creados)}. No lo vuelvas a crear: "
+                    f"completa los vínculos que falten."
                 )}, status=HTTP_API_EXTERNA)
             creados.append({
-                "id": vinculo["id"],
+                "id": vinculo_id,
                 "proyecto": proyecto["project"],
                 "precio_energia_id": proyecto.get("energy_price"),
                 "tiene_piso": bool(proyecto.get("floor")),
@@ -485,7 +512,7 @@ class LiquidacionesApiViewSet(viewsets.GenericViewSet):
             })
 
         return Response({
-            "id": contrato["id"],
+            "id": contrato_id,
             "fecha_desde": contrato.get("date_from"),
             "fecha_hasta": contrato.get("date_to"),
             "codigo": contrato.get("code"),

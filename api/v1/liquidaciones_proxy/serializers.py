@@ -72,11 +72,24 @@ class ProyectoDeContratoSerializer(serializers.Serializer):
 
 
 class ContratoEnergiaSerializer(serializers.Serializer):
+    """Alta de un contrato de energía en la API externa.
+
+    `code` y `company` NO son obligatorios, aunque lo parezcan: la API tampoco
+    los exige. De los 106 contratos que existen, 25 no tienen código y 8 no
+    tienen empresa — y los **20** de tipo `no_contract` no tienen código ni uno
+    solo, porque «Sin contrato» no tiene contrato en XM que codificar.
+
+    Declararlos obligatorios hacía imposible crear un «Sin contrato»: el
+    formulario omite el código a propósito y el POST se caía con 400. La vista
+    descarta los nulos antes de mandar (`if v is not None`), así que omitirlos
+    no cambia lo que viaja afuera.
+    """
+
     date_from = serializers.DateField()
     date_to = serializers.DateField()
-    code = serializers.CharField()
+    code = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     contract_type = serializers.CharField()
     tariff_price_type = serializers.CharField(required=False, allow_null=True)
     percentage = serializers.FloatField(required=False, allow_null=True)
-    company = serializers.IntegerField()
+    company = serializers.IntegerField(required=False, allow_null=True)
     proyectos = ProyectoDeContratoSerializer(many=True, default=list)
