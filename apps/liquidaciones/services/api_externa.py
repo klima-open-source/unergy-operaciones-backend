@@ -13,9 +13,11 @@ Particularidades de la API, verificadas contra producción:
 * ``/api/admin/*`` exige ``is_staff`` y ``/api/liquidaciones/*`` pertenecer al
   grupo ``admin``; la cuenta de servicio debe cumplir ambos.
 """
+import datetime
 import logging
 import threading
 import time
+from decimal import Decimal
 from enum import Enum
 from typing import Any
 
@@ -179,6 +181,29 @@ def _credenciales() -> tuple[str, str]:
     return login, password
 
 
+def _json_seguro(valor: Any) -> Any:
+    """Convierte a tipos que `json.dumps` entienda, sin `default=`.
+
+    httpx serializa el `json=` con `json.dumps` pelado, así que un tipo que no
+    conozca lanza `TypeError` — y ese error **no** es un `httpx.HTTPError`, así
+    que se escapa de los `except` de `_request` y termina en un 500 mudo, sin
+    haber llegado a salir a la red.
+
+    Es fácil toparse con eso sin darse cuenta: DRF entrega `validated_data` con
+    tipos de Python, no con texto. Un `DateField` da `datetime.date` y un
+    `DecimalField` da `Decimal`. Paso obligado antes de mandar cualquier cuerpo.
+    """
+    if isinstance(valor, dict):
+        return {k: _json_seguro(v) for k, v in valor.items()}
+    if isinstance(valor, (list, tuple)):
+        return [_json_seguro(v) for v in valor]
+    if isinstance(valor, (datetime.datetime, datetime.date, datetime.time)):
+        return valor.isoformat()
+    if isinstance(valor, Decimal):
+        return float(valor)
+    return valor
+
+
 def _url(path: str) -> str:
     return f"{settings.UNERGY_API_URL.rstrip('/')}{path}"
 
@@ -211,6 +236,9 @@ def _request(method: str, path: str, **kwargs: Any) -> Any:
 
     with _token_lock:
         token = _token or _login()
+
+    if "json" in kwargs:
+        kwargs = {**kwargs, "json": _json_seguro(kwargs["json"])}
 
     def _enviar(bearer: str) -> httpx.Response:
         with httpx.Client(timeout=_TIMEOUT) as client:
