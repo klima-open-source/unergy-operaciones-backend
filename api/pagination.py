@@ -11,12 +11,38 @@ from collections import OrderedDict
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
+# El tope de filas por pagina de TODA la API. Era 500 (y 5000 en fallas), y
+# `/api/v1/fallas?size=500` mataba al Worker de Cloudflare que sirve
+# operaciones.unergy.io con un 1102 (exceeded resource limits): 500 filas del
+# serializer de lista son varios MB. `GZipMiddleware` bajo el cuerpo; el tope
+# lo acota.
+TOPE_FILAS = 100
+
+
+def recortar(tamano: int) -> int:
+    """Recorta a `TOPE_FILAS`, sin fallar.
+
+    `BasePagination` ya lo hace solo (DRF pasa `max_page_size` como `cutoff` a
+    `_positive_int`), pero media docena de listados paginan a mano con su propio
+    `_entero`. Recortar y no lanzar 422 es deliberado: el frontend pide 500 hoy,
+    y un 422 lo dejaria sin listado en vez de con las primeras 100 filas.
+    """
+    return min(tamano, TOPE_FILAS)
+
 
 class BasePagination(PageNumberPagination):
     page_size = 50
     page_size_query_param = "size"
     page_query_param = "page"
-    max_page_size = 500
+    # 100 y no 500: `/api/v1/fallas?size=500` mataba al Worker de Cloudflare que
+    # sirve operaciones.unergy.io con un 1102 (exceeded resource limits) — 500
+    # filas del serializer de lista son varios MB. `GZipMiddleware`
+    # (`config/settings.py`) bajo el cuerpo pero no alcanzo; el tope si.
+    #
+    # DRF RECORTA, no falla: `get_page_size` pasa `max_page_size` como `cutoff`
+    # a `_positive_int`, asi que `?size=500` devuelve 100 filas con un 200. Eso
+    # es deliberado — un 422 dejaria al frontend sin listado.
+    max_page_size = TOPE_FILAS
 
     def get_paginated_response(self, data):
         return Response(

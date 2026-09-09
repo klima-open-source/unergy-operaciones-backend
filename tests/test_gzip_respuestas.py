@@ -70,3 +70,35 @@ def test_sin_accept_encoding_la_respuesta_viene_en_claro(cliente):
     assert respuesta.status_code == 200
     assert "Content-Encoding" not in respuesta.headers
     assert json.loads(respuesta.content) == payload
+
+
+# ── El tope de filas ─────────────────────────────────────────────────────────
+#
+# gzip bajo el cuerpo pero el 1102 seguia: el tope de 500 filas (5000 en fallas)
+# era lo que dejaba pedir un cuerpo que el Worker no aguanta. Ahora son 100 en
+# TODA la API, y pedir mas RECORTA en vez de dar 422 -- un 422 dejaria al
+# frontend, que hoy pide `size=500`, sin listado.
+
+def test_el_tope_de_filas_es_100_y_recorta_en_vez_de_fallar():
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    os.environ.setdefault("SECRET_KEY", "x" * 40)
+    import django
+
+    django.setup()
+    from rest_framework.test import APIRequestFactory
+
+    from api.pagination import TOPE_FILAS, BasePagination, recortar
+    from api.v1.fallas.views import PaginacionFallas
+
+    assert TOPE_FILAS == 100
+    # Las tres clases de paginacion de la API: fallas heredaba un 5000 propio.
+    for clase in (BasePagination, PaginacionFallas):
+        assert clase.max_page_size == 100, clase.__name__
+
+    assert recortar(500) == 100 and recortar(20) == 20
+
+    # DRF recorta, no lanza: es lo que hace que `?size=500` siga siendo un 200.
+    peticion = APIRequestFactory().get("/api/v1/fallas?size=500")
+    from rest_framework.request import Request
+
+    assert BasePagination().get_page_size(Request(peticion)) == 100

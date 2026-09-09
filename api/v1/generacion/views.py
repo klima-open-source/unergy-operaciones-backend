@@ -8,6 +8,7 @@ from rest_framework.response import Response
 
 from api.exceptions import Conflict
 from api.logging import class_logger_wrapper, log_endpoint
+from api.pagination import recortar
 from api.permissions import RolePermission
 from apps.proyectos import models as py_models
 from apps.proyectos.services import generacion as generacion_service
@@ -64,7 +65,7 @@ class GeneracionViewSet(viewsets.GenericViewSet):
                 consulta = consulta.filter(**{filtro: valor})
 
         pagina = self._entero(request, "page", 1, 1, 10**6)
-        tamano = self._entero(request, "size", 90, 1, 2000)
+        tamano = recortar(self._entero(request, "size", 90, 1, 10**6))
         total = consulta.count()
         inicio = (pagina - 1) * tamano
         items = consulta.order_by("-fecha")[inicio:inicio + tamano]

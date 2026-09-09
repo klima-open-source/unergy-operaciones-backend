@@ -112,7 +112,7 @@ curl "https://operaciones.unergy.io/api/v1/proyectos?page=1&size=50" \
   -H "X-API-Key: $UNERGY_API_KEY"
 ```
 
-Devuelve `{ "items": [...], "total": …, "page": 1, "size": 50, … }`; el `size` admite hasta 500. Acepta además los filtros `q` (búsqueda por nombre), `estado`, `tipo_proyecto`, `portafolio_id` y `servicio`.
+Devuelve `{ "items": [...], "total": …, "page": 1, "size": 50, … }`; el `size` admite hasta 100 (pedir mas recorta a 100, no falla). Acepta además los filtros `q` (búsqueda por nombre), `estado`, `tipo_proyecto`, `portafolio_id` y `servicio`.
 
 Necesitan el `id` del proyecto. Para pruebas, pídanle a Juan José que les indique uno seguro.
 
@@ -469,7 +469,7 @@ Respuesta: `{ "items": [...], "total": 137, "page": 1, "size": 20, "pages": 7 }`
 | Parámetro | Tipo | Descripción |
 |---|---|---|
 | `page` | `int` ≥1 | Default 1 |
-| `size` | `int` 1–5000 | Default 20. `page_size` es un alias que tiene precedencia |
+| `size` | `int` >= 1 | Default 20, tope 100 (`api.pagination.TOPE_FILAS`): pedir mas recorta a 100 con un 200, no da 422. `page_size` es un alias que tiene precedencia |
 | `q` / `buscar` | `string` | Búsqueda parcial, insensible a mayúsculas, sobre `descripcion` **o** `codigo_interno` |
 | `estado_id` / `estado_codigo` | `int` / `string` | Por ID o por código (`abierta`, …) |
 | `prioridad_id` / `prioridad_codigo` | `int` / `string` | Por ID o por código |

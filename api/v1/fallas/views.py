@@ -51,14 +51,15 @@ DRIVE_ROOT_FOLDER_ID = "0AD_e3wIWHByDUk9PVA"
 
 
 class PaginacionFallas(PaginacionConPaginas):
-    """20/5000, los limites que declaraba `app/api/v1/fallas.py:609-611`.
+    """20 por pagina; el tope son los 100 de `api.pagination.BasePagination`.
 
-    No se cambia `api.pagination` porque sus 50/500 son el default de los otros
-    46 recursos, y en FastAPI cada listado traia sus propios limites.
+    El `max_page_size = 5000` que estaba aca (los limites de
+    `app/api/v1/fallas.py:609-611`) es justo lo que dejaba pedir
+    `?size=500` y matar al Worker de Cloudflare con un 1102. Ahora hereda el
+    tope global, que recorta callado a 100.
     """
 
     page_size = 20
-    max_page_size = 5000
 
 
 def _drive():
@@ -235,14 +236,13 @@ class FallaViewSet(viewsets.GenericViewSet):
                 else par.bandera(request, "pendiente_reclasificar")
             ),
         }
-        # FastAPI declaraba `page`, `size` y `page_size` con `ge=`/`le=`, asi que
-        # un valor fuera de rango devolvia 422. DRF los recorta CALLADO, que es
-        # peor: el cliente pide 99 999 filas, recibe 5 000 y no se entera de que
-        # le faltan. Se validan aca sin usar el resultado -- `par.entero` lanza.
-        tope = self.pagination_class.max_page_size
+        # `page`/`size`/`page_size` no numericos o <= 0 siguen siendo 422 (FastAPI
+        # los declaraba con `ge=`). Pero pasarse del tope YA NO falla: se recorta
+        # a `max_page_size` (100) y sale un 200 con menos filas. El 422 de antes
+        # dejaba al frontend sin listado en cuanto alguien pedia 500.
         par.entero(request, "page", minimo=1)
-        par.entero(request, "size", minimo=1, maximo=tope)
-        par.entero(request, "page_size", minimo=1, maximo=tope)
+        par.entero(request, "size", minimo=1)
+        par.entero(request, "page_size", minimo=1)
 
         # `page_size` es un alias histórico de `size` solo en este listado.
         alias = request.query_params.get("page_size")

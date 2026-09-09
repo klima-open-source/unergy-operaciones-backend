@@ -227,9 +227,9 @@ def test_los_decimales_salen_como_numero_no_como_string(datos):
 @pytest.mark.parametrize(
     ("consulta", "esperado"),
     [
-        ("", 20),              # el default de FastAPI, no el 50 de BasePagination
-        ("?page_size=4", 4),   # el alias historico, que era un no-op
-        ("?size=1000", 1000),  # antes recortaba callado a max_page_size=500
+        ("", 20),             # el default de FastAPI, no el 50 de BasePagination
+        ("?page_size=4", 4),  # el alias historico, que era un no-op
+        ("?size=1000", 100),  # recortado al tope global (`api.pagination.TOPE_FILAS`)
     ],
 )
 def test_paginacion_igual_a_fastapi(datos, consulta, esperado):
@@ -668,10 +668,8 @@ def test_el_serializer_expone_el_sla_contractual(datos):
 # ── P1-12 · la paginacion recortaba callado y `updated_at` se quedaba atras ──
 
 @pytest.mark.parametrize("consulta", [
-    "?size=99999",       # sobre el tope de 5000
     "?size=0",           # bajo el minimo
     "?size=abc",         # no es entero
-    "?page_size=99999",  # el alias tiene el mismo tope
     "?page=0",           # FastAPI declaraba ge=1
 ])
 def test_una_paginacion_fuera_de_rango_da_422(datos, consulta):
@@ -683,14 +681,21 @@ def test_una_paginacion_fuera_de_rango_da_422(datos, consulta):
     assert respuesta.status_code == 422, respuesta.data
 
 
-def test_el_tope_valido_sigue_pasando(datos):
-    """El limite exacto no se rechaza: `le=5000` es inclusivo."""
+@pytest.mark.parametrize("consulta", ["?size=99999", "?page_size=99999", "?size=5000"])
+def test_pasarse_del_tope_recorta_a_100_y_no_da_422(datos, consulta):
+    """Pasarse del tope YA NO es un error: son 100 filas y un 200.
+
+    Antes el tope eran 5000 y salirse daba 422. Los 5000 son justo lo que dejaba
+    pedir `?size=500` y matar al Worker de Cloudflare con un 1102, asi que el
+    tope bajo a los 100 de `api.pagination.TOPE_FILAS`. Recorta y no falla a
+    proposito: el frontend pide `size=500` hoy y un 422 lo dejaria sin listado.
+    """
     _falla(datos)
     respuesta = _pedir(
-        "get", "/api/v1/fallas?size=5000", datos, acciones={"get": "list"},
+        "get", f"/api/v1/fallas{consulta}", datos, acciones={"get": "list"},
     )
     assert respuesta.status_code == 200, respuesta.data
-    assert respuesta.data["size"] == 5000
+    assert respuesta.data["size"] == 100, respuesta.data
 
 
 def test_el_borrado_logico_mueve_updated_at(datos):

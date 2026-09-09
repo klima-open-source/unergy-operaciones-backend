@@ -12,6 +12,7 @@ from rest_framework.response import Response
 
 from api.exceptions import Conflict, NoProcesable
 from api.logging import class_logger_wrapper, log_endpoint
+from api.pagination import recortar
 from api.permissions import RolePermission
 from apps.liquidaciones import models as lq_models
 from apps.liquidaciones.services import excel as excel_service
@@ -126,7 +127,7 @@ class LiquidacionViewSet(viewsets.GenericViewSet):
                 consulta = consulta.filter(**{filtro: valor})
 
         pagina = self._entero(request, "page", 1, 1, 10**6)
-        tamano = self._entero(request, "size", 20, 1, 200)
+        tamano = recortar(self._entero(request, "size", 20, 1, 10**6))
         total = consulta.count()
         inicio = (pagina - 1) * tamano
         items = consulta.order_by("-periodo")[inicio:inicio + tamano]
