@@ -31,15 +31,21 @@ import logging
 import os
 from datetime import date
 
-from apps.contratos.models import ContratoServicio
+from apps.contratos.models import AlertaAniversario, ContratoServicio
 from apps.om.models import OmIpcTasa
 from apps.plataforma.services.fechas import hoy_col
-from apps.ppa.services.vencimientos import correos_de_alerta
+from apps.ppa.services.vencimientos import correos_de_alerta, elegir_umbral
 
 logger = logging.getLogger("operaciones.contratos.alertas")
 
-# Días antes del aniversario en que se avisa.
+# Ventanas de aviso, en días antes del aniversario. Se CRUZAN (`<=`), no se
+# aciertan: ver `revisar_aniversarios`.
 AVISOS = (30, 15)
+
+# Un contrato terminado o vencido no indexa nada, así que avisar de su
+# aniversario es ruido. `en_renovacion` sí avisa: es justo cuando la tarifa
+# nueva importa.
+ESTADOS_QUE_AVISAN = ("vigente", "en_renovacion")
 
 FILA_TARIFA = (
     '<tr><td style="padding:6px 0;color:#6B5F80">Nueva tarifa {etiqueta}</td>'
@@ -168,11 +174,13 @@ def tarifa_indexada(tarifa: float | None, anio_aniversario: int, numero: int,
 
 
 def contratos_de_representacion() -> list[dict]:
-    """Los contratos con servicio de representación y fecha de firma."""
+    """Los contratos de representación vivos y con fecha de firma."""
     filas = ContratoServicio.objects.filter(
         servicio_aplica="representacion", fecha_firma_contrato__isnull=False,
+        estado__in=ESTADOS_QUE_AVISAN,
     ).select_related("proyecto")
     return [{
+        "id": r.id,
         "firma": r.fecha_firma_contrato,
         "proyecto": (r.nombre_proyecto_ref
                      or (r.proyecto.nombre_comercial if r.proyecto else "")).strip(),
@@ -215,18 +223,46 @@ def construir_html(contrato: dict, aniversario: date, numero: int, dias: int,
     )
 
 
+def avisos_ya_enviados(contratos: list[dict]) -> set[tuple[int, date, int]]:
+    """Las ventanas ya avisadas, en una sola consulta para toda la corrida."""
+    return set(
+        AlertaAniversario.objects
+        .filter(contrato_id__in=[c["id"] for c in contratos])
+        .values_list("contrato_id", "aniversario", "dias_aviso")
+    )
+
+
 def revisar_aniversarios() -> int:
-    """Manda las alertas que correspondan hoy. Devuelve cuántas salieron."""
+    """Manda las alertas que correspondan hoy. Devuelve cuántas salieron.
+
+    **Cruce por umbral (`<=`) y no coincidencia exacta (`==`)**, igual que las
+    alertas de vencimiento de PPA y por el mismo motivo: así el job tolera
+    corridas perdidas —un deploy, una caída, el worker reiniciando a las 8:00— y
+    contratos dados de alta ya dentro de una ventana. Con `==`, un contrato a 22
+    días del aniversario no disparaba ni la ventana de 30 ni la de 15: no avisaba
+    nunca.
+
+    Lo que hace seguro el `<=` es el libro de `AlertaAniversario`: sin él, cruzar
+    la ventana mandaría el correo los 30 días seguidos. La fila se escribe
+    después del envío, así que un SMTP caído se reintenta mañana.
+
+    Se avisa la ventana MÁS AJUSTADA ya cruzada, no todas: un contrato que
+    aparece a 5 días recibe un correo (el de 15), no dos.
+    """
     if not os.environ.get("SMTP_HOST"):
         logger.info("SMTP sin configurar — alertas de representación omitidas")
         return 0
 
     hoy = hoy_col()
-    enviadas = 0
-    # Una sola consulta para toda la corrida, no una por contrato.
-    tasas = tasas_ipc_confirmadas()
+    contratos = contratos_de_representacion()
+    if not contratos:
+        return 0
 
-    for contrato in contratos_de_representacion():
+    tasas = tasas_ipc_confirmadas()
+    ya_avisados = avisos_ya_enviados(contratos)
+    enviadas = 0
+
+    for contrato in contratos:
         if not contrato["firma"] or not contrato["proyecto"]:
             continue
         proximo = proximo_aniversario(contrato["firma"], hoy)
@@ -234,10 +270,18 @@ def revisar_aniversarios() -> int:
             continue
         aniversario, numero = proximo
         dias = (aniversario - hoy).days
-        if dias not in AVISOS:
+        umbral = elegir_umbral(dias, list(AVISOS))
+        if umbral is None or (contrato["id"], aniversario, umbral) in ya_avisados:
             continue
-        if _enviar(contrato, aniversario, numero, dias, tasas):
-            enviadas += 1
+
+        # El correo lleva los días REALES que faltan ("En 22 dias"), no el
+        # umbral de la ventana: el umbral solo identifica el aviso.
+        if not _enviar(contrato, aniversario, numero, dias, tasas):
+            continue
+        AlertaAniversario.objects.create(
+            contrato_id=contrato["id"], aniversario=aniversario, dias_aviso=umbral,
+        )
+        enviadas += 1
 
     if enviadas:
         logger.info("alertas de renovación CGM enviadas: %d", enviadas)

@@ -20,6 +20,8 @@ Sin `pytest-django`: el fixture arma sqlite en memoria con `create_test_db`,
 igual que `tests/test_fallas_django.py` — ver su docstring para el detalle de
 por qué hay que invalidar el cache del `ConnectionHandler`.
 """
+from datetime import date
+
 import pytest
 
 django = pytest.importorskip("django", reason="requiere el entorno de Django (uv sync)")
@@ -219,3 +221,148 @@ def test_solo_entran_las_tasas_confirmadas():
         transaction.set_rollback(True)
 
 
+# ── Ventana de aviso e idempotencia ───────────────────────────────────────────
+#
+# Antes el disparo era `dias not in (30, 15)`: coincidencia EXACTA. Dos agujeros
+# que no se podían tapar por separado —pasar a `<=` sin registro manda el correo
+# los 30 días seguidos—, así que la ventana y el libro de enviados van juntos:
+#
+#   * una corrida perdida (deploy, caída, el worker reiniciando a las 8:00)
+#     perdía el aviso para siempre, y un contrato dado de alta a 22 días no
+#     disparaba ni 30 ni 15: no avisaba NUNCA;
+#   * dos corridas el mismo día mandaban dos correos.
+
+HOY = date(2026, 6, 15)
+
+
+class _Escenario:
+    """Contratos en la base en memoria y el job corrido contra un `hoy` fijo.
+
+    `_enviar` se sustituye porque el SMTP es el único borde que no se puede
+    ejercer acá; todo lo demás (la elección de ventana, el libro de enviados,
+    el filtro de estado) corre de verdad contra la base.
+    """
+
+    def __init__(self, srv, ct, enviados, enviar):
+        self._srv, self._ct = srv, ct
+        self.enviados = enviados
+        self._enviar = enviar
+        self.hoy = HOY
+
+    def crear(self, firma: date, estado: str = "vigente", nombre: str = "Planta"):
+        return self._ct.ContratoServicio.objects.create(
+            servicio_aplica="representacion", estado=estado,
+            nombre_proyecto_ref=nombre, fecha_firma_contrato=firma,
+            tarifa_cgm="5.000000", tarifa_representacion="5.000000",
+        )
+
+    def correr(self) -> int:
+        return self._srv.revisar_aniversarios()
+
+    def que_el_envio_falle(self, falla: bool = True) -> None:
+        self._enviar.exito = not falla
+
+    def avisos(self) -> list[tuple]:
+        return sorted(self._ct.AlertaAniversario.objects
+                      .values_list("aniversario", "dias_aviso"))
+
+
+@pytest.fixture
+def esc(monkeypatch):
+    from django.db import transaction
+
+    from apps.contratos import models as ct
+    from apps.contratos.services import alertas_representacion as srv
+
+    monkeypatch.setenv("SMTP_HOST", "smtp.prueba")
+    enviados: list[tuple] = []
+
+    def _falso_enviar(contrato, aniversario, numero, dias, tasas):
+        enviados.append((contrato["proyecto"], aniversario, dias))
+        return _falso_enviar.exito
+
+    _falso_enviar.exito = True
+    monkeypatch.setattr(srv, "_enviar", _falso_enviar)
+
+    with transaction.atomic():
+        escenario = _Escenario(srv, ct, enviados, _falso_enviar)
+        monkeypatch.setattr(srv, "hoy_col", lambda: escenario.hoy)
+        yield escenario
+        transaction.set_rollback(True)
+
+
+def test_avisa_aunque_no_sea_el_dia_exacto_del_umbral(esc):
+    """A 22 días dispara la ventana de 30. Con `==` este contrato no avisaba nunca."""
+    esc.crear(date(2024, 7, 7))            # aniversario 2026-07-07 → 22 días
+
+    assert esc.correr() == 1
+    assert esc.avisos() == [(date(2026, 7, 7), 30)]
+    assert esc.enviados[0][2] == 22, "el correo debe decir los días reales, no el umbral"
+
+
+def test_no_avisa_fuera_de_toda_ventana(esc):
+    esc.crear(date(2024, 7, 25))           # aniversario 2026-07-25 → 40 días
+
+    assert esc.correr() == 0
+    assert esc.avisos() == []
+
+
+def test_la_segunda_corrida_del_dia_no_repite_el_correo(esc):
+    esc.crear(date(2024, 7, 7))
+
+    assert esc.correr() == 1
+    assert esc.correr() == 0
+    assert len(esc.enviados) == 1
+
+
+def test_un_envio_fallido_se_reintenta_en_la_corrida_siguiente(esc):
+    """La fila se escribe DESPUÉS del envío: un SMTP caído no consume el aviso."""
+    esc.crear(date(2024, 7, 7))
+
+    esc.que_el_envio_falle()
+    assert esc.correr() == 0
+    assert esc.avisos() == [], "un envío fallido no debe dejar registro"
+
+    esc.que_el_envio_falle(False)
+    assert esc.correr() == 1
+    assert esc.avisos() == [(date(2026, 7, 7), 30)]
+
+
+def test_cruzar_30_y_despues_15_son_dos_avisos(esc):
+    esc.crear(date(2024, 7, 7))            # aniversario 2026-07-07
+
+    assert esc.correr() == 1               # a 22 días → ventana de 30
+    esc.hoy = date(2026, 6, 25)            # a 12 días → ventana de 15
+    assert esc.correr() == 1
+
+    assert esc.avisos() == [(date(2026, 7, 7), 15), (date(2026, 7, 7), 30)]
+
+
+def test_el_aniversario_del_ano_siguiente_vuelve_a_avisar(esc):
+    """La llave incluye la fecha del aniversario: si solo fuera (contrato, umbral)
+    el aviso saldría una única vez en la vida del contrato."""
+    esc.crear(date(2024, 7, 7))
+
+    assert esc.correr() == 1               # aniversario 2026
+    esc.hoy = date(2027, 6, 15)
+    assert esc.correr() == 1               # aniversario 2027
+
+    assert esc.avisos() == [(date(2026, 7, 7), 30), (date(2027, 7, 7), 30)]
+
+
+# ── Filtro de estado ──────────────────────────────────────────────────────────
+
+def test_no_avisa_contratos_terminados_ni_vencidos(esc):
+    """Un contrato terminado no indexa nada: avisar de su aniversario es ruido."""
+    esc.crear(date(2024, 7, 7), estado="terminado", nombre="Terminada")
+    esc.crear(date(2024, 7, 7), estado="vencido", nombre="Vencida")
+
+    assert esc.correr() == 0
+    assert esc.avisos() == []
+
+
+def test_avisa_contratos_en_renovacion(esc):
+    """En renovación es justo cuando la tarifa nueva importa."""
+    esc.crear(date(2024, 7, 7), estado="en_renovacion", nombre="En renovación")
+
+    assert esc.correr() == 1
