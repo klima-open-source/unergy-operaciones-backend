@@ -15,6 +15,7 @@ from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 
 from apps.clientes import models as cl_models
+from apps.clientes.services.gestion import normalizar_nit
 
 
 class _EmailNormalizado(serializers.EmailField):
@@ -37,20 +38,41 @@ class _NitNormalizado(serializers.CharField):
     """
 
     def run_validation(self, data=serializers.empty):
-        # `CharField.run_validation` devuelve "" tal cual --antes de
-        # `to_internal_value` y antes de los validadores-- cuando `allow_blank`
-        # está puesto, así que la cadena vacía hay que traducirla acá.
-        # Importa: en Postgres "" SÍ colisiona con otra "" (a diferencia de
-        # NULL), así que guardarla haría que el segundo cliente sin NIT chocara
-        # contra el primero al escribir.
-        if data == "":
+        """Normaliza ANTES de validar, y traduce el vacío a None.
+
+        Dos razones para hacerlo acá y no solo en `to_internal_value`:
+
+        - `CharField.run_validation` devuelve "" tal cual --sin pasar por
+          `to_internal_value` ni por los validadores-- cuando `allow_blank` está
+          puesto. Y en Postgres "" SÍ colisiona con otra "" (a diferencia de
+          NULL), así que guardarla haría chocar al segundo cliente sin NIT.
+        - " - . " tampoco es un NIT: normalizado no queda nada. Si eso llegara a
+          los validadores de longitud como `None`, revienta con un TypeError
+          (`len(None)`), que sale como 500 en vez de como "falta el NIT".
+        """
+        if data is not serializers.empty and data is not None:
+            data = normalizar_nit(str(data))
+        if data in (None, ""):
             return None
         return super().run_validation(data)
 
     def to_internal_value(self, data):
-        digitos = re.sub(r"\D", "", super().to_internal_value(data) or "")
         # Vacío es "sin NIT", no un NIT que sea la cadena vacía.
-        return digitos or None
+        return normalizar_nit(super().to_internal_value(data))
+
+
+class _TextoLimpio(serializers.CharField):
+    """Sin espacios al borde y sin espacios dobles adentro.
+
+    " Quantum  Energy " y "Quantum Energy" son el mismo cliente escrito con la
+    mano temblorosa, y sin esto entraban como dos filas: el aviso de nombre
+    parecido las habría marcado, pero es un aviso y se puede saltar. Limpiar
+    antes de comparar hace que el UNIQUE y la búsqueda de duplicados vean lo
+    mismo que ve una persona.
+    """
+
+    def to_internal_value(self, data):
+        return re.sub(r"\s+", " ", super().to_internal_value(data) or "").strip()
 
 
 class _UnicoSiVieneDato(UniqueValidator):
@@ -74,7 +96,13 @@ class ContactoParaClienteSerializer(serializers.Serializer):
     nombre = serializers.CharField(required=False, allow_null=True, allow_blank=True, default=None)
     telefono = serializers.CharField(required=False, allow_null=True, allow_blank=True, default=None)
     email = _EmailNormalizado()
-    tipo = serializers.CharField(default="comercial")
+    # Las choices estaban solo en el modelo, y este no es un ModelSerializer:
+    # entraba cualquier cadena de <=11 caracteres (y con mas, un 500 al escribir
+    # sobre un varchar(11)). Los cinco valores son los de `Contacto.tipo`.
+    tipo = serializers.ChoiceField(
+        choices=[c[0] for c in cl_models.Contacto._meta.get_field("tipo").choices],
+        default="comercial",
+    )
 
 
 class ClienteSerializer(serializers.ModelSerializer):
@@ -122,6 +150,15 @@ class ClienteEntradaSerializer(serializers.ModelSerializer):
     # perdio. El validador por campo devuelve el mismo error con el texto de
     # antes, y sigue cubriendo el PATCH -- que por este camino nunca llega a
     # tocar la base, asi que no puede reventar con un 500.
+    razon_social_nombre = _TextoLimpio(max_length=255)
+    representante_legal = _TextoLimpio(
+        max_length=255, required=False, allow_null=True, allow_blank=True)
+    direccion = _TextoLimpio(
+        max_length=500, required=False, allow_null=True, allow_blank=True)
+    ciudad = _TextoLimpio(
+        max_length=100, required=False, allow_null=True, allow_blank=True)
+    departamento = _TextoLimpio(
+        max_length=100, required=False, allow_null=True, allow_blank=True)
     nit_cedula = _NitNormalizado(
         max_length=20, required=False, allow_null=True, allow_blank=True,
         validators=[_UnicoSiVieneDato(
@@ -143,6 +180,49 @@ class ClienteEntradaSerializer(serializers.ModelSerializer):
             "origen_tipo", "origen_detalle", "contactos",
         ]
         extra_kwargs = {c: {"required": False} for c in fields[1:]}
+        # Sin esto DRF vuelve a agregar el `UniqueTogetherValidator` de
+        # `(nit_cedula,)` y el error saldria dos veces, una en jerga: el
+        # validador del campo (arriba) ya cubre ese UNIQUE. Es el unico
+        # `unique_together` del modelo.
+        validators = []
+
+    # Un cliente NO se guarda sin estos dos, ni al crear ni al editar. El NIT es
+    # su unica identidad real: mientras fue opcional, lo unico que habia para
+    # detectar duplicados era el nombre, que es justo lo que se escribe de diez
+    # formas distintas.
+    OBLIGATORIOS = {
+        "razon_social_nombre": "La razón social / nombre",
+        "nit_cedula": "El NIT / cédula",
+    }
+
+    def validate(self, datos):
+        """Exige `OBLIGATORIOS` en POST **y** en PATCH.
+
+        `partial=True` vuelve opcional TODO por diseño, asi que la
+        obligatoriedad de un PATCH hay que expresarla acá. La regla es "no se
+        puede guardar un cliente sin estos dos", no "el payload tiene que
+        traerlos":
+
+          - un PATCH que no menciona el campo hereda el valor que el cliente ya
+            tiene, asi que guardar solo la ciudad sigue funcionando;
+          - un PATCH que lo manda vacío se rechaza (no se puede borrar);
+          - y un cliente que HOY no tiene NIT no se puede guardar hasta que se
+            le cargue -- que es el punto: los que ya están sin NIT se completan
+            la próxima vez que alguien los toque.
+        """
+        errores = {}
+        for campo, etiqueta in self.OBLIGATORIOS.items():
+            if campo in datos:
+                valor = datos[campo]
+            elif self.partial:
+                valor = getattr(self.instance, campo, None)
+            else:
+                valor = None
+            if not str(valor or "").strip():
+                errores[campo] = [f"{etiqueta} es obligatorio."]
+        if errores:
+            raise serializers.ValidationError(errores)
+        return datos
         # Sin esto DRF vuelve a agregar el `UniqueTogetherValidator` de
         # `(nit_cedula,)` y el error saldria dos veces, una en jerga: el
         # validador del campo (arriba) ya cubre ese UNIQUE. Es el unico

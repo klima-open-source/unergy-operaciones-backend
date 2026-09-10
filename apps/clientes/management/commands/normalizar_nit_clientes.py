@@ -21,18 +21,13 @@ dos veces -- y no se pueden normalizar los dos porque el UNIQUE lo impide. Esas
 filas se dejan intactas y se listan: qué hacer con ellas (fusionar, corregir, dar
 de baja una) es una decisión de negocio, no algo que este comando deba adivinar.
 """
-import re
 from collections import defaultdict
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from apps.clientes.models import Cliente
-
-
-def solo_digitos(valor: str | None) -> str | None:
-    digitos = re.sub(r"\D", "", valor or "")
-    return digitos or None
+from apps.clientes.services.gestion import normalizar_nit
 
 
 class Command(BaseCommand):
@@ -59,7 +54,7 @@ class Command(BaseCommand):
 
         por_normalizado: dict[str, list[tuple]] = defaultdict(list)
         for cid, nombre, nit in filas:
-            normalizado = solo_digitos(nit)
+            normalizado = normalizar_nit(nit)
             if normalizado:
                 por_normalizado[normalizado].append((cid, nombre, nit))
 

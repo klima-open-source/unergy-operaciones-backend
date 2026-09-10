@@ -18,6 +18,11 @@ revisando por que una compañera no podia crear un cliente:
    mas un unico `commit` (app/api/v1/clientes.py): la atomicidad se perdio en el
    port a Django.
 
+Y desde el 2026-09-10 el NIT y la razon social son OBLIGATORIOS, al crear y al
+editar: el NIT es la unica identidad real del cliente, y mientras fue opcional lo
+unico que habia para detectar duplicados era el nombre -- que es justo lo que se
+escribe de diez formas distintas.
+
 Estas pruebas llamaban a `app/api/v1/clientes.py`, el arbol FastAPI apagado.
 Ahora apuntan al ViewSet de Django, que es lo que se sirve.
 """
@@ -108,11 +113,25 @@ def _editar(datos_usuario, cliente_id, cuerpo, querystring=""):
     return respuesta
 
 
+_nits = iter(range(900_000_001, 900_001_000))
+
+
 def _cliente(**kw):
+    """Un cliente YA existente, escrito directo con el modelo (sin pasar por la
+    validacion de la API). Lleva un NIT propio salvo que se pida `nit_cedula=None`
+    a proposito -- las filas sin NIT existen en la base y hay que poder probarlas."""
     from apps.clientes.models import Cliente
 
     kw.setdefault("razon_social_nombre", "Cliente")
+    kw.setdefault("nit_cedula", str(next(_nits)))
     return Cliente.objects.create(**kw)
+
+
+def _payload(nombre, **kw):
+    """El cuerpo minimo que la API acepta: nombre y NIT."""
+    cuerpo = {"razon_social_nombre": nombre, "nit_cedula": str(next(_nits))}
+    cuerpo.update(kw)
+    return cuerpo
 
 
 def _contactos_de(cliente_id):
@@ -128,7 +147,7 @@ def test_crear_cliente_con_nombre_parecido_da_409_estructurado(datos):
     para ofrecer "crear de todos modos", no solo para mostrar un mensaje."""
     _cliente(razon_social_nombre="Quantum Energy Ingenieria S.A.S.")
 
-    respuesta = _crear(datos, {"razon_social_nombre": "Quantum"})
+    respuesta = _crear(datos, _payload("Quantum"))
 
     assert respuesta.status_code == 409, respuesta.data
     detalle = respuesta.data["detail"]
@@ -141,7 +160,7 @@ def test_crear_forzado_permite_el_nombre_parecido(datos):
 
     _cliente(razon_social_nombre="Quantum Energy Ingenieria S.A.S.")
 
-    respuesta = _crear(datos, {"razon_social_nombre": "Quantum"}, "?forzar=true")
+    respuesta = _crear(datos, _payload("Quantum"), "?forzar=true")
 
     assert respuesta.status_code == 201, respuesta.data
     assert respuesta.data["razon_social_nombre"] == "Quantum"
@@ -232,22 +251,95 @@ def test_el_mismo_nit_escrito_distinto_choca(datos):
     assert respuesta.data["nit_cedula"] == ["Ya existe un cliente con ese NIT/cédula."]
 
 
-def test_dos_clientes_sin_nit_no_chocan_entre_si(datos):
-    """En Postgres los NULL no colisionan, y la mayoria de los clientes no
-    tienen NIT cargado: si el validador tratara el vacio como un valor, el alta
-    mas comun quedaria bloqueada."""
-    from apps.clientes.models import Cliente
+# ── Obligatorios: NIT y razon social ─────────────────────────────────────────
 
-    _cliente(razon_social_nombre="Sin NIT Uno")
+def test_no_se_puede_crear_un_cliente_sin_nit(datos):
+    respuesta = _crear(datos, {"razon_social_nombre": "Sin NIT"}, "?forzar=true")
 
+    assert respuesta.status_code == 400, respuesta.data
+    assert respuesta.data["nit_cedula"] == ["El NIT / cédula es obligatorio."]
+
+
+def test_el_nit_vacio_cuenta_como_ausente(datos):
+    """"" y "   -  " no son un NIT: normalizan a nada y se rechazan igual que si
+    no viniera el campo."""
     respuesta = _crear(
-        datos,
-        {"razon_social_nombre": "Sin NIT Dos", "nit_cedula": ""},
+        datos, {"razon_social_nombre": "NIT De Mentira", "nit_cedula": " - . "},
         "?forzar=true",
     )
 
+    assert respuesta.status_code == 400, respuesta.data
+    assert respuesta.data["nit_cedula"] == ["El NIT / cédula es obligatorio."]
+
+
+def test_no_se_puede_crear_un_cliente_sin_nombre(datos):
+    respuesta = _crear(datos, {"nit_cedula": "900555444"}, "?forzar=true")
+
+    assert respuesta.status_code == 400, respuesta.data
+    assert "razon_social_nombre" in respuesta.data
+
+
+def test_no_se_puede_vaciar_el_nit_al_editar(datos):
+    cliente = _cliente(razon_social_nombre="Con NIT", nit_cedula="9005554443")
+
+    respuesta = _editar(datos, cliente.id, {"nit_cedula": ""}, "?forzar=true")
+
+    assert respuesta.status_code == 400, respuesta.data
+    assert respuesta.data["nit_cedula"] == ["El NIT / cédula es obligatorio."]
+
+
+def test_un_cliente_que_hoy_no_tiene_nit_no_se_puede_guardar_hasta_cargarlo(datos):
+    """La consecuencia buscada de "obligatorio tambien al editar": las filas que
+    ya estan sin NIT se completan la proxima vez que alguien las toque."""
+    cliente = _cliente(razon_social_nombre="Viejo Sin NIT", nit_cedula=None)
+
+    respuesta = _editar(datos, cliente.id, {"ciudad": "Medellín"}, "?forzar=true")
+
+    assert respuesta.status_code == 400, respuesta.data
+    assert respuesta.data["nit_cedula"] == ["El NIT / cédula es obligatorio."]
+
+    # Y con el NIT cargado en el mismo guardado, pasa.
+    respuesta = _editar(
+        datos, cliente.id,
+        {"ciudad": "Medellín", "nit_cedula": "900777666-1"},
+        "?forzar=true",
+    )
+    assert respuesta.status_code == 200, respuesta.data
+
+
+def test_editar_un_campo_cualquiera_no_exige_repetir_el_nit(datos):
+    """La regla es "no se puede guardar sin NIT", no "el payload tiene que
+    traerlo": un PATCH que no lo menciona hereda el que el cliente ya tiene."""
+    cliente = _cliente(razon_social_nombre="Con NIT", nit_cedula="9008887776")
+
+    respuesta = _editar(datos, cliente.id, {"ciudad": "Cali"}, "?forzar=true")
+
+    assert respuesta.status_code == 200, respuesta.data
+    assert respuesta.data["ciudad"] == "Cali"
+
+
+# ── Limpieza de los textos ───────────────────────────────────────────────────
+
+def test_la_razon_social_se_guarda_sin_espacios_de_sobra(datos):
+    from apps.clientes.models import Cliente
+
+    respuesta = _crear(
+        datos, _payload("  Quantum   Energy  S.A.S. "), "?forzar=true",
+    )
+
     assert respuesta.status_code == 201, respuesta.data
-    assert Cliente.objects.get(pk=respuesta.data["id"]).nit_cedula is None
+    guardado = Cliente.objects.get(pk=respuesta.data["id"]).razon_social_nombre
+    assert guardado == "Quantum Energy S.A.S."
+
+
+def test_un_tipo_de_contacto_inventado_se_rechaza(datos):
+    """Las choices estaban solo en el modelo: entraba cualquier cadena, y con
+    mas de 11 caracteres era un 500 contra el varchar de la columna."""
+    respuesta = _crear(datos, _payload("Cliente Tipo Raro", contactos=[
+        {"nombre": "Ana", "email": "ana@x.com", "tipo": "superusuario"},
+    ]))
+
+    assert respuesta.status_code == 400, respuesta.data
 
 
 # ── Nombre parecido al EDITAR ────────────────────────────────────────────────
@@ -307,13 +399,10 @@ def test_guardar_un_cliente_con_su_mismo_nombre_no_avisa(datos):
 def test_dos_contactos_iguales_no_tumban_el_alta(datos):
     """El caso real: el formulario deja agregar dos renglones con el mismo
     correo y el mismo tipo, y el UNIQUE de `contactos` respondia con un 500."""
-    respuesta = _crear(datos, {
-        "razon_social_nombre": "Cliente Con Contactos Repetidos",
-        "contactos": [
-            {"nombre": "Ana", "email": "ana@x.com", "tipo": "comercial"},
-            {"nombre": "Ana otra vez", "email": "ana@x.com", "tipo": "comercial"},
-        ],
-    })
+    respuesta = _crear(datos, _payload("Cliente Con Contactos Repetidos", contactos=[
+        {"nombre": "Ana", "email": "ana@x.com", "tipo": "comercial"},
+        {"nombre": "Ana otra vez", "email": "ana@x.com", "tipo": "comercial"},
+    ]))
 
     assert respuesta.status_code == 201, respuesta.data
     contactos = _contactos_de(respuesta.data["id"])
@@ -325,13 +414,10 @@ def test_dos_contactos_iguales_no_tumban_el_alta(datos):
 def test_el_mismo_correo_en_dos_tipos_distintos_si_se_guarda(datos):
     """La misma persona puede ser el contacto comercial y el de CGM: el UNIQUE
     es por (cliente, email, tipo), y el filtro de repetidos no debe pasarse."""
-    respuesta = _crear(datos, {
-        "razon_social_nombre": "Cliente Dos Roles",
-        "contactos": [
-            {"nombre": "Ana", "email": "ana@x.com", "tipo": "comercial"},
-            {"nombre": "Ana", "email": "ana@x.com", "tipo": "cgm"},
-        ],
-    })
+    respuesta = _crear(datos, _payload("Cliente Dos Roles", contactos=[
+        {"nombre": "Ana", "email": "ana@x.com", "tipo": "comercial"},
+        {"nombre": "Ana", "email": "ana@x.com", "tipo": "cgm"},
+    ]))
 
     assert respuesta.status_code == 201, respuesta.data
     assert [c.tipo for c in _contactos_de(respuesta.data["id"])] == ["cgm", "comercial"]
@@ -341,13 +427,10 @@ def test_el_mismo_correo_con_mayusculas_cuenta_como_repetido(datos):
     """El serializer normaliza el correo antes de validar, asi que el filtro de
     repetidos ve "Ana@X.com" y "ana@x.com" como el mismo -- si no, el UNIQUE los
     dejaba pasar como dos contactos distintos."""
-    respuesta = _crear(datos, {
-        "razon_social_nombre": "Cliente Correo Con Mayusculas",
-        "contactos": [
-            {"nombre": "Ana", "email": "Ana@X.com", "tipo": "comercial"},
-            {"nombre": "Ana", "email": "ana@x.com", "tipo": "comercial"},
-        ],
-    })
+    respuesta = _crear(datos, _payload("Cliente Correo Con Mayusculas", contactos=[
+        {"nombre": "Ana", "email": "Ana@X.com", "tipo": "comercial"},
+        {"nombre": "Ana", "email": "ana@x.com", "tipo": "comercial"},
+    ]))
 
     assert respuesta.status_code == 201, respuesta.data
     contactos = _contactos_de(respuesta.data["id"])

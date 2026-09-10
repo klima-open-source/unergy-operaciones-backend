@@ -13,6 +13,8 @@ soft-delete, además, contactos/servicios/documentos ya no se pierden: poner
 
 from __future__ import annotations
 
+import re
+
 from django.db import connection, transaction
 from django.utils import timezone
 
@@ -45,6 +47,25 @@ MERGE_ESCALAR_UNICO = ["nit_cedula"]
 MERGE_ESCALAR_SI_VACIO = [
     "direccion", "ciudad", "departamento", "tipo_persona", "representante_legal",
 ]
+
+
+def normalizar_nit(valor: str | None) -> str | None:
+    """El NIT con solo sus dígitos, o None si no queda nada.
+
+    El UNIQUE de `clientes.nit_cedula` compara TEXTO: sin esto,
+    "900.123.456-7", "900123456-7" y "9001234567" son tres clientes distintos
+    para la base. Vive acá y no en el serializer porque hay tres caminos que
+    crean clientes --la API, el CRM (`apps/comercial/services/escritura.py`) y
+    la carga de prospectos-- y el que no normalice abre el hueco para todos:
+    una fila cruda no choca con las normalizadas.
+
+    No intenta quitar ni agregar el dígito de verificación: "900123456" y
+    "9001234567" siguen siendo distintos, porque el último dígito de una cédula
+    de 10 cifras es parte del número y adivinar acá significa rechazar a un
+    cliente legítimo.
+    """
+    digitos = re.sub(r"\D", "", valor or "")
+    return digitos or None
 
 
 def buscar_duplicado(razon_social_nombre: str | None, excluir_id: int | None = None):

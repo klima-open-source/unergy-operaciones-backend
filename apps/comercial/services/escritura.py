@@ -21,7 +21,7 @@ from rest_framework.exceptions import NotFound
 
 from api.exceptions import Conflict, NoProcesable
 from apps.clientes.models import Cliente, Contacto
-from apps.clientes.services.gestion import buscar_duplicado
+from apps.clientes.services.gestion import buscar_duplicado, normalizar_nit
 from apps.comercial.models import (
     Oportunidad, OportunidadEstadoHistorial, OportunidadOferta,
     OportunidadOfertaProyecto,
@@ -143,7 +143,10 @@ def resolver_cliente(cliente_id: int | None, cliente_nuevo: dict | None,
         # aparte, sin pasar por el umbral de similitud.
         duplicado = None
         por_nit = False
-        nit = (cn.get("nit_cedula") or "").strip()
+        # Normalizado, igual que en `POST /clientes`: comparar el texto crudo
+        # dejaba pasar el mismo NIT escrito con puntos o guiones, y al crear
+        # dejaba una fila cruda que despues no choca con ninguna normalizada.
+        nit = normalizar_nit(cn.get("nit_cedula"))
         if nit:
             duplicado = Cliente.objects.filter(
                 nit_cedula=nit, deleted_at__isnull=True,
@@ -168,7 +171,7 @@ def resolver_cliente(cliente_id: int | None, cliente_nuevo: dict | None,
 
     cliente = Cliente.objects.create(
         razon_social_nombre=cn.get("razon_social_nombre"),
-        nit_cedula=cn.get("nit_cedula") or None,
+        nit_cedula=normalizar_nit(cn.get("nit_cedula")),
         origen_tipo=cn.get("origen_tipo"),
         origen_detalle=cn.get("origen_detalle"),
         # Sugerencia, no certeza: solo se marca "juridica" cuando la razón social
