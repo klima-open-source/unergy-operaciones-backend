@@ -508,9 +508,20 @@ def sync_tsf_projects(enrich_dates: bool = True) -> dict:
                 # vez que hay match (por texto o por id) — de ahí en adelante el
                 # match ya no depende de que el texto siga siendo el mismo.
                 cambios = {
+                    # `avance_obra_pct` es la EXCEPCION deliberada: es una
+                    # medicion viva del avance de obra, nadie la carga a mano y
+                    # congelarla en su primer valor dejaria "Proximos a
+                    # energizar" mostrando un porcentaje viejo para siempre. Por
+                    # eso ahi el valor nuevo gana.
                     "avance_obra_pct": Coalesce(Value(p.get("avance_pct")), F("avance_obra_pct")),
+                    # La potencia NO: es un atributo estable de la planta que
+                    # carga el operador, y hasta el 2026-09-10 este era el unico
+                    # campo del diccionario --junto al avance-- donde el valor de
+                    # Sun Factory PISABA lo cargado, contra lo que dice el
+                    # comentario de arriba y contra los otros ocho campos. Ahora
+                    # rellena solo si esta vacia.
                     "potencia_instalada_kwp": Coalesce(
-                        Value(p.get("installed_power_kwp")), F("potencia_instalada_kwp")),
+                        F("potencia_instalada_kwp"), Value(p.get("installed_power_kwp"))),
                     "origina_code": Coalesce(F("origina_code"), Value(code)),
                     "codigo_tsf": Coalesce(F("codigo_tsf"), Value(tsf_code)),
                     "sunfactory_project_id": Coalesce(
