@@ -11,7 +11,7 @@ Los agregados (vista comercial, servicios-contratos, panel) los arma
 import uuid
 from pathlib import Path
 
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, ValidationError
@@ -122,14 +122,41 @@ class ClienteViewSet(viewsets.GenericViewSet):
                     "candidato_nombre": duplicado.razon_social_nombre,
                 })
 
-        try:
-            cliente = cl_models.Cliente.objects.create(**datos)
-        except IntegrityError:
-            raise Conflict("Ya existe un cliente con ese NIT/cédula.")
+        # Dos filas con el mismo (email, tipo) son la misma persona repetida en
+        # el formulario, no un error que valga tumbar el alta: `contactos` tiene
+        # UNIQUE (cliente_id, email, tipo). El email ya viene normalizado por el
+        # serializer, así que "Juan@X.com" y "juan@x.com" cuentan como uno.
+        unicos: dict[tuple, dict] = {}
+        for c in contactos:
+            unicos.setdefault((c["email"], c["tipo"]), c)
+        contactos = list(unicos.values())
 
-        cl_models.Contacto.objects.bulk_create([
-            cl_models.Contacto(cliente_id=cliente.id, **c) for c in contactos
-        ])
+        # Todo en UNA transacción. Antes el cliente se creaba con su propio
+        # commit (autocommit) y los contactos iban después: si ese INSERT
+        # fallaba, salía un 500 y el cliente quedaba creado igual -- el usuario
+        # veía un error, reintentaba, y entonces chocaba con el NIT de la fila
+        # que su intento anterior sí había dejado. En FastAPI esto no pasaba
+        # porque era un `flush` + un solo `commit` (ver app/api/v1/clientes.py).
+        #
+        # Atrapar `IntegrityError` acá adentro es seguro porque no se ejecuta
+        # ninguna consulta entre el `except` y el `raise`: la excepción sale del
+        # bloque y lo revierte entero.
+        with transaction.atomic():
+            try:
+                cliente = cl_models.Cliente.objects.create(**datos)
+            except IntegrityError:
+                raise Conflict("Ya existe un cliente con ese NIT/cédula.")
+            if contactos:
+                try:
+                    cl_models.Contacto.objects.bulk_create([
+                        cl_models.Contacto(cliente_id=cliente.id, **c)
+                        for c in contactos
+                    ])
+                except IntegrityError:
+                    raise Conflict(
+                        "No se pudo guardar la lista de contactos: hay dos con el "
+                        "mismo correo y el mismo tipo."
+                    )
         return Response(
             cl_serializers.ClienteSerializer(self._cliente(cliente.id)).data,
             status=status.HTTP_201_CREATED,

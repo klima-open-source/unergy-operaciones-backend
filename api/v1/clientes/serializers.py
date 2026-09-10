@@ -10,6 +10,7 @@ tipo)` deja pasar "Juan@X.com" y "juan@x.com" como dos contactos distintos.
 """
 
 from rest_framework import serializers
+from rest_framework.validators import UniqueValidator
 
 from apps.clientes import models as cl_models
 
@@ -62,6 +63,22 @@ class ClienteEntradaSerializer(serializers.ModelSerializer):
     """POST y PATCH. `contactos` solo se lee al crear."""
 
     contactos = ContactoParaClienteSerializer(many=True, required=False, default=list)
+    # `nit_cedula` es UNIQUE en la base (`unique_together = [("nit_cedula",)]`),
+    # y de ahi DRF armaba solo un `UniqueTogetherValidator` que responde
+    # `{"non_field_errors": ["Los campos nit_cedula deben formar un conjunto
+    # único."]}`. Es correcto pero ilegible, y sustituyo sin quererlo al mensaje
+    # que daba FastAPI ("Ya existe un cliente con ese NIT/cédula.", un 409 con
+    # `detail` de texto): al portar, la explicacion que el usuario entendia se
+    # perdio. El validador por campo devuelve el mismo error con el texto de
+    # antes, y sigue cubriendo el PATCH -- que por este camino nunca llega a
+    # tocar la base, asi que no puede reventar con un 500.
+    nit_cedula = serializers.CharField(
+        max_length=20, required=False, allow_null=True, allow_blank=True,
+        validators=[UniqueValidator(
+            queryset=cl_models.Cliente.objects.all(),
+            message="Ya existe un cliente con ese NIT/cédula.",
+        )],
+    )
 
     class Meta:
         model = cl_models.Cliente
@@ -72,6 +89,11 @@ class ClienteEntradaSerializer(serializers.ModelSerializer):
             "origen_tipo", "origen_detalle", "contactos",
         ]
         extra_kwargs = {c: {"required": False} for c in fields[1:]}
+        # Sin esto DRF vuelve a agregar el `UniqueTogetherValidator` de
+        # `(nit_cedula,)` y el error saldria dos veces, una en jerga: el
+        # validador del campo (arriba) ya cubre ese UNIQUE. Es el unico
+        # `unique_together` del modelo.
+        validators = []
 
 
 class TasaServicioSerializer(serializers.ModelSerializer):
