@@ -465,7 +465,6 @@ def sync_tsf_projects(enrich_dates: bool = True) -> dict:
                 })
             existing = matches[0] if matches else None
 
-            fase = _STATUS_TO_FASE.get(p["status"], "en_construccion")
             energ = p["energization_date"]
 
             if existing is None:
@@ -496,13 +495,16 @@ def sync_tsf_projects(enrich_dates: bool = True) -> dict:
                 # /proyectos/pendientes lo detecte y un humano lo confirme.
                 stats["sin_match"] += 1
             else:
-                # Si el proyecto ya quedó confirmado como en operación (ej. vía
-                # Proyectos pendientes con evidencia real de Quoia/Solenium), no
-                # dejar que Sun Factory lo regrese a una fase de obra anterior
-                # solo porque su propio tracker todavía no se actualizó -- el
-                # estado real (`estado`) manda sobre el pipeline de construcción,
-                # salvo que Sun Factory ya reporte "energizado", que siempre gana.
-                set_fase = fase == "energizado" or existing.estado != "en_operacion"
+                # `fase_construccion` YA NO se escribe acá: cambiar la fase de
+                # un proyecto que ya existe es una actualización, y desde el
+                # 2026-09-10 las actualizaciones se PROPONEN en
+                # /proyectos/pendientes para que una persona las confirme, no se
+                # aplican solas cada 6 horas.
+                #
+                # `resolver_pendientes` ya sabía proponerla --incluida la guarda
+                # de no devolver a una fase anterior un proyecto ya energizado--
+                # pero esa sugerencia casi nunca llegaba a verse: esta tarea la
+                # había aplicado antes de que nadie abriera la pantalla.
                 # COALESCE(existente, nuevo): enlaza y rellena sin pisar lo que el
                 # operador ya tenga. `sunfactory_project_id` se respalda la PRIMERA
                 # vez que hay match (por texto o por id) — de ahí en adelante el
@@ -532,8 +534,6 @@ def sync_tsf_projects(enrich_dates: bool = True) -> dict:
                     "longitud": Coalesce(F("longitud"), Value(p["longitud"])),
                     "updated_at": timezone.now(),
                 }
-                if set_fase:
-                    cambios["fase_construccion"] = fase
                 if energ is not None:
                     cambios["fecha_estimada_energizacion"] = energ
                 with transaction.atomic():

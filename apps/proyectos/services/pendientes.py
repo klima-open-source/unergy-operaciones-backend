@@ -13,6 +13,19 @@ que Sun Factory reporta bajo dos ids propios.
 anterior.** Sun Factory puede seguir trayendo un status desactualizado para un
 proyecto ya confirmado operando (caso real 2026-07-09: Chima Oriente, Chiriguana
 N1 y Valencia Oriente 1).
+
+**Desde el 2026-09-10 esta cola es el unico camino por el que cambia la fase de
+un proyecto que ya existe.** `sync_tsf_projects` la escribia sola cada 6 horas,
+asi que estas sugerencias casi nunca alcanzaban a verse: la cola existia y
+estaba vacia por construccion. Ahora la tarea solo rellena huecos y actualiza
+las dos mediciones vivas de la obra (`avance_obra_pct` y la fecha estimada de
+energizacion).
+
+**Ignorar es por PLANTA y es para siempre.** La clave es `core:<nombre
+normalizado>`, no el campo sugerido, asi que una planta ignorada no vuelve a
+proponerse -- tampoco cuando cambie su fase mas adelante. Es lo que se pidio
+explicitamente; el contrapeso es que para volver a verla hay que borrar su fila
+de `proyectos_pendientes_ignorados`.
 """
 
 from __future__ import annotations
