@@ -9,9 +9,11 @@ Los agregados (vista comercial, servicios-contratos, panel) los arma
 """
 
 import uuid
+from collections import defaultdict
 from pathlib import Path
 
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, ValidationError
@@ -24,9 +26,10 @@ from api.pagination import PaginacionConPaginas
 from api.permissions import RolePermission
 from apps.clientes import models as cl_models
 from apps.clientes.services import gestion, vistas
-from apps.contratos.models import ContratoServicio  # noqa: F401  (lo usa vistas)
+from apps.clientes.services.panel import proyectos_por_cliente
+from apps.contratos.models import ContratoServicio
 from apps.fronteras.models import Frontera
-from apps.ppa.models import PpaContrato
+from apps.ppa.models import PpaContrato, PpaContratoProyecto
 from apps.proyectos.models import Proyecto, ProyectoInversionista
 
 from . import serializers as cl_serializers
@@ -386,38 +389,98 @@ class ClienteViewSet(viewsets.GenericViewSet):
 
     # ── Vínculos: proyectos, fronteras, PPAs ──────────────────────────────
 
+    def _roles_por_proyecto(self, cliente_id, ids):
+        """Por qué cada planta está en la lista de este cliente.
+
+        Una planta puede entrar por más de un motivo (inversionista Y
+        contratante del contrato de esa misma planta), y sin el rol la pestaña
+        crece sin que se entienda de dónde salieron las filas nuevas: alguien
+        abre un cliente y ve plantas en las que no tiene participación.
+        """
+        roles = defaultdict(list)
+
+        def anotar(proyecto_ids, etiqueta):
+            for pid in proyecto_ids:
+                if etiqueta not in roles[pid]:
+                    roles[pid].append(etiqueta)
+
+        anotar(
+            ProyectoInversionista.objects
+            .filter(cliente_id=cliente_id, proyecto_id__in=ids)
+            .values_list("proyecto_id", flat=True),
+            "inversionista",
+        )
+        for campo, etiqueta in (("contratante_id", "contratante"),
+                                ("prestador_id", "prestador")):
+            anotar(
+                ContratoServicio.objects
+                .filter(proyecto_id__in=ids, **{campo: cliente_id})
+                .values_list("proyecto_id", flat=True),
+                etiqueta,
+            )
+        anotar(
+            PpaContratoProyecto.objects
+            .filter(proyecto_id__in=ids, contrato__deleted_at__isnull=True)
+            .filter(Q(contrato__comprador_id=cliente_id)
+                    | Q(contrato__vendedor_id=cliente_id))
+            .values_list("proyecto_id", flat=True),
+            "ppa",
+        )
+        return roles
+
+    def _plantas_del_cliente(self, cliente_id) -> set[int]:
+        """Las plantas que TOCAN a este cliente, con el mismo criterio que el
+        Resumen: inversionista, contratante/prestador de un contrato de
+        servicio, o cubierta por uno de sus PPA.
+
+        Antes estas dos pestañas usaban solo `ProyectoInversionista`, así que
+        una planta que llegaba por contrato o por PPA salía en el Resumen y NO
+        acá -- la inconsistencia que se reportó el 2026-09-10. El criterio
+        amplio es el que está bien pensado: `contratante_id`/`prestador_id` casi
+        nunca se pueblan (el campo del wizard es texto libre), y sin el camino
+        por planta el panel quedaba vacío aunque el cliente tuviera contratos
+        reales -- el caso Quantum, inversionista de GD Sirius y GD Elektra,
+        cuyos contratos de representación no lo nombran como contratante.
+        """
+        return proyectos_por_cliente({int(cliente_id)}).get(int(cliente_id), set())
+
     @action(detail=True, methods=["get"], url_path="proyectos")
     def proyectos(self, request, pk=None):
-        """Los proyectos donde este cliente es INVERSIONISTA (solo ese rol)."""
+        """Las plantas de este cliente, con el rol por el que entra cada una."""
         self._cliente(pk)
-        ids = set(
-            ProyectoInversionista.objects
-            .filter(cliente_id=pk)
-            .values_list("proyecto_id", flat=True)
-        )
+        ids = self._plantas_del_cliente(pk)
+        if not ids:
+            return Response([])
+        roles = self._roles_por_proyecto(int(pk), ids)
         return Response([
             {
                 "id": p.id,
                 "nombre_comercial": p.nombre_comercial,
                 "estado": p.estado,
-                "potencia_kwp": float(p.potencia_instalada_kwp)
+                # `potencia_ac_kw` y no `potencia_kwp`: la columna se llama
+                # `potencia_instalada_kwp` pero lo que guarda es potencia AC
+                # (revisado con Sara el 2026-09-10). Renombrar la columna son
+                # 171 usos entre los dos repos y una migración; el nombre del
+                # campo de ESTA respuesta se corrige sin costo. El front leía
+                # `potencia_instalada_kwp`, que nunca llegó: la potencia no se
+                # mostraba en ninguna planta.
+                "potencia_ac_kw": float(p.potencia_instalada_kwp)
                 if p.potencia_instalada_kwp else None,
                 "departamento": p.departamento,
                 "municipio": p.municipio,
-                "rol": "inversionista",
+                "roles": roles.get(p.id, []),
             }
             for p in Proyecto.objects.filter(id__in=ids, deleted_at__isnull=True)
-        ] if ids else [])
+            .order_by("nombre_comercial")
+        ])
 
     @action(detail=True, methods=["get"], url_path="fronteras")
     def fronteras(self, request, pk=None):
-        """Las fronteras de los proyectos donde el cliente es inversionista."""
+        """Las fronteras de las plantas de este cliente -- mismo criterio que la
+        pestaña Proyectos, o una planta que llega por contrato no mostraba
+        ninguna frontera."""
         self._cliente(pk)
-        ids = set(
-            ProyectoInversionista.objects
-            .filter(cliente_id=pk)
-            .values_list("proyecto_id", flat=True)
-        )
+        ids = self._plantas_del_cliente(pk)
         if not ids:
             return Response([])
         filas = (
@@ -444,7 +507,7 @@ class ClienteViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=["get"], url_path="contratos-ppa")
     def contratos_ppa(self, request, pk=None):
         """Los PPA donde este cliente es comprador o vendedor."""
-        from django.db.models import F, Q
+        from django.db.models import F
 
         self._cliente(pk)
         contratos = (
