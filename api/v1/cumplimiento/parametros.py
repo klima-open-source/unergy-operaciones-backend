@@ -28,6 +28,28 @@ def entero(request, nombre, defecto=None, minimo=None, maximo=None, requerido=Fa
     return valor
 
 
+def enteros(request, nombre):
+    """`?ppa_id=12&ppa_id=45` — un parámetro repetible, como lista de enteros.
+
+    FastAPI lo declaraba `list[int] | None = Query(None)` y devolvía 422 con
+    solo verlo en la firma. Media docena de vistas lo parsean a mano con
+    `[int(v) for v in getlist(...)]`, que ante un valor no numérico levanta un
+    `ValueError` y sale un **500**: peor que un 422, porque parece una caída.
+
+    Un valor vacío (`?ppa_id=`) se ignora, igual que en `entero`.
+    """
+    crudos = [v for v in request.query_params.getlist(nombre) if v not in (None, "")]
+    valores = []
+    for crudo in crudos:
+        try:
+            valores.append(int(crudo))
+        except (TypeError, ValueError):
+            raise NoProcesable(
+                f"'{nombre}' debe ser un número entero ('{crudo}' no lo es)"
+            )
+    return valores
+
+
 _VERDADEROS = frozenset({"1", "true", "yes", "on", "t", "y"})
 _FALSOS = frozenset({"0", "false", "no", "off", "f", "n"})
 

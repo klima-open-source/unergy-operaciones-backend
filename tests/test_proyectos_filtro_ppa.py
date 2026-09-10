@@ -1,244 +1,262 @@
-"""Filtro por contrato PPA especifico en GET /proyectos (ver docs/API_PROYECTOS.md).
+"""Filtro por contrato PPA en GET /proyectos (ver docs/API_PROYECTOS.md).
 
-Antes de esto, "PPA" solo se podia filtrar como bandera de servicio contratado
-(`servicio=ppa`, columna booleana `srv_ppa`), no como vinculo a un contrato PPA
-real (tabla `ppa_contratos`, vinculada via `ppa_contrato_proyectos`). Este filtro
-nuevo (`ppa_id`, repetible, y `sin_ppa`) sigue el mismo patron de join que ya usa
-`app/api/v1/ppa.py::list_contratos` para el filtro inverso (`proyecto_id`).
+"PPA" se puede filtrar de dos formas distintas y no hay que confundirlas:
+`servicio=ppa` es la bandera de servicio contratado (columna booleana
+`srv_ppa`), mientras que `ppa_id` (repetible) y `sin_ppa` miran el vínculo a un
+contrato PPA real (tabla `ppa_contratos`, via `ppa_contrato_proyectos`).
+
+**El port a Django perdió los dos.** `api/v1/proyectos/views.py::list` solo
+implementaba `q`, `estado`, `tipo_proyecto`, `portafolio_id` y `servicio`, así
+que el MultiSelect de PPA de la página de Proyectos mandaba `ppa_id`/`sin_ppa`
+y el backend los ignoraba en silencio: 200 con el listado completo, como si el
+filtro no se hubiera tocado. Estas pruebas existían desde que el filtro se
+escribió, pero llamaban a `app/api/v1/proyectos.py` — el árbol FastAPI apagado
+—, así que seguían verdes mientras lo que corre en producción no filtraba nada.
+Ahora apuntan al ViewSet de Django, que es lo que se sirve.
+
+Mismo patrón de bug que documentan tests/test_fallas_django.py y
+tests/test_contratos_servicio_proyecto_anidado_django.py: algo que el frontend
+necesita, silenciosamente ausente en el port.
 """
-import pytest
 from datetime import datetime, timezone
-from sqlalchemy import create_engine, BigInteger
-from sqlalchemy.pool import StaticPool
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.ext.compiler import compiles
 
-from app.models.base import Base
-import app.models  # noqa: F401
-from app.models import Proyecto, PPAContrato
-from app.models.proyectos import (
-    ProyectoInversionista, ProyectoInfoTecnica, ProyectoInversor,
-)
-from app.models.contactos import ProyectoAreaContacto, Contacto
-from app.models.clientes import Cliente
-from app.models.fronteras import Frontera
-from app.models.operadores_red import OperadorRed
-from app.api.v1 import proyectos as proyectos_api
+import pytest
+
+django = pytest.importorskip("django", reason="requiere el entorno de Django (uv sync)")
 
 
-@compiles(JSONB, "sqlite")
-def _jsonb_as_text(element, compiler, **kw):
-    return "TEXT"
+@pytest.fixture(scope="module", autouse=True)
+def _base():
+    import os
 
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    os.environ.setdefault("SECRET_KEY", "x" * 40)
 
-@compiles(BigInteger, "sqlite")
-def _bigint_as_integer(element, compiler, **kw):
-    return "INTEGER"
+    from django.conf import settings
+
+    originales = settings.DATABASES
+    settings.DATABASES = {
+        "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}
+    }
+    django.setup()
+
+    from django.apps import apps as django_apps
+    from django.db import connections
+    from django.test.utils import setup_test_environment
+
+    connections.close_all()
+    connections.__dict__.pop("settings", None)
+    connections.__init__()
+
+    settings.MIGRATION_MODULES = {a.label: None for a in django_apps.get_app_configs()}
+    setup_test_environment()
+    connections["default"].creation.create_test_db(verbosity=0)
+    assert connections["default"].vendor == "sqlite", "no se aisló de la base real"
+    yield
+
+    from django.test.utils import teardown_test_environment
+
+    connections.close_all()
+    teardown_test_environment()
+    settings.DATABASES = originales
+    connections.__dict__.pop("settings", None)
+    connections.__init__()
 
 
 @pytest.fixture
-def db():
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(
-        engine,
-        tables=[
-            Proyecto.__table__, Cliente.__table__, ProyectoInversionista.__table__,
-            ProyectoInfoTecnica.__table__,
-            ProyectoInversor.__table__, ProyectoAreaContacto.__table__, Contacto.__table__,
-            Frontera.__table__, OperadorRed.__table__,
-            PPAContrato.__table__, Base.metadata.tables["ppa_contrato_proyectos"],
-            Base.metadata.tables["oportunidad_oferta_proyectos"],
-        ],
-    )
-    s = sessionmaker(bind=engine)()
-    yield s
-    s.close()
+def datos():
+    from django.db import transaction
+
+    from apps.plataforma.models import Usuario
+
+    atomica = transaction.atomic()
+    atomica.__enter__()
+    usuario = Usuario.objects.create(nombre="QA", email="qa@unergy.io", rol="admin", activo=True)
+    yield {"usuario": usuario}
+    transaction.set_rollback(True)
+    atomica.__exit__(None, None, None)
 
 
-_ids = iter(range(1, 10_000))
+def _listar(datos_usuario, querystring=""):
+    from rest_framework.test import APIRequestFactory, force_authenticate
+
+    from api.authentication import UsuarioAutenticado
+    from api.v1.proyectos.views import ProyectoViewSet
+
+    peticion = APIRequestFactory().get(f"/api/v1/proyectos{querystring}")
+    force_authenticate(peticion, user=UsuarioAutenticado(datos_usuario["usuario"]))
+    respuesta = ProyectoViewSet.as_view({"get": "list"})(peticion)
+    respuesta.render()
+    return respuesta
 
 
-def _proyecto(db, **kw):
-    p = Proyecto(id=next(_ids), nombre_comercial=kw.pop("nombre_comercial", "Proyecto"), **kw)
-    db.add(p)
-    db.commit()
-    return p
+def _ids(respuesta):
+    return {p["id"] for p in respuesta.data["items"]}
 
 
-def _contrato(db, **kw):
-    c = PPAContrato(id=next(_ids), **kw)
-    db.add(c)
-    db.commit()
-    return c
+def _proyecto(nombre_comercial="Proyecto", **kw):
+    from apps.proyectos.models import Proyecto
+
+    return Proyecto.objects.create(nombre_comercial=nombre_comercial, **kw)
 
 
-def _vincular(db, proyecto, contrato):
-    proyecto.ppa_contratos  # noqa: B018 -- fuerza el mapeo antes de usar la tabla puente
-    db.execute(
-        Base.metadata.tables["ppa_contrato_proyectos"].insert().values(
-            contrato_id=contrato.id, proyecto_id=proyecto.id,
-        )
-    )
-    db.commit()
+def _contrato(**kw):
+    from apps.ppa.models import PpaContrato
+
+    return PpaContrato.objects.create(**kw)
 
 
-def _listar(db, **kw):
-    kw.setdefault("page", 1)
-    kw.setdefault("size", 20)
-    kw.setdefault("ppa_id", None)
-    kw.setdefault("sin_ppa", None)
-    return proyectos_api.list_proyectos(db=db, _=None, **kw)
+def _vincular(proyecto, contrato):
+    from apps.ppa.models import PpaContratoProyecto
+
+    PpaContratoProyecto.objects.create(proyecto=proyecto, contrato=contrato)
 
 
-def test_filtra_por_un_contrato_ppa_especifico(db):
-    con_ppa = _proyecto(db, nombre_comercial="Con PPA")
-    sin_ppa = _proyecto(db, nombre_comercial="Sin PPA")
-    contrato = _contrato(db, nombre_interno="Contrato A")
-    _vincular(db, con_ppa, contrato)
+def test_filtra_por_un_contrato_ppa_especifico(datos):
+    con_ppa = _proyecto("Con PPA")
+    _proyecto("Sin PPA")
+    contrato = _contrato(nombre_interno="Contrato A")
+    _vincular(con_ppa, contrato)
 
-    out = _listar(db, ppa_id=[contrato.id])
+    respuesta = _listar(datos, f"?ppa_id={contrato.id}")
 
-    assert out["total"] == 1
-    assert [p.id for p in out["items"]] == [con_ppa.id]
-
-
-def test_filtra_por_varios_contratos_ppa(db):
-    p1 = _proyecto(db, nombre_comercial="Uno")
-    p2 = _proyecto(db, nombre_comercial="Dos")
-    p3 = _proyecto(db, nombre_comercial="Tres")
-    c1 = _contrato(db, nombre_interno="Contrato 1")
-    c2 = _contrato(db, nombre_interno="Contrato 2")
-    _vincular(db, p1, c1)
-    _vincular(db, p2, c2)
-
-    out = _listar(db, ppa_id=[c1.id, c2.id])
-
-    assert {p.id for p in out["items"]} == {p1.id, p2.id}
-    assert p3.id not in {p.id for p in out["items"]}
+    assert respuesta.status_code == 200, respuesta.data
+    assert respuesta.data["total"] == 1
+    assert _ids(respuesta) == {con_ppa.id}
 
 
-def test_filtra_proyectos_sin_ningun_ppa(db):
-    con_ppa = _proyecto(db, nombre_comercial="Con PPA")
-    sin_ppa = _proyecto(db, nombre_comercial="Sin PPA")
-    contrato = _contrato(db, nombre_interno="Contrato A")
-    _vincular(db, con_ppa, contrato)
+def test_filtra_por_varios_contratos_ppa(datos):
+    """El parámetro repetido: `?ppa_id=1&ppa_id=2`.
 
-    out = _listar(db, sin_ppa=True)
+    FastAPI lo parseaba por la firma (`list[int]`); en DRF hay que leerlo con
+    `getlist` — `query_params.get` devolvería SOLO el último y el filtro
+    quedaría a medias sin que se note.
+    """
+    p1 = _proyecto("Uno")
+    p2 = _proyecto("Dos")
+    p3 = _proyecto("Tres")
+    c1 = _contrato(nombre_interno="Contrato 1")
+    c2 = _contrato(nombre_interno="Contrato 2")
+    _vincular(p1, c1)
+    _vincular(p2, c2)
 
-    assert out["total"] == 1
-    assert [p.id for p in out["items"]] == [sin_ppa.id]
+    respuesta = _listar(datos, f"?ppa_id={c1.id}&ppa_id={c2.id}")
 
-
-def test_combina_contrato_especifico_con_sin_ppa_como_or(db):
-    con_ppa_seleccionado = _proyecto(db, nombre_comercial="Seleccionado")
-    con_otro_ppa = _proyecto(db, nombre_comercial="Otro PPA")
-    sin_ppa = _proyecto(db, nombre_comercial="Sin PPA")
-    c1 = _contrato(db, nombre_interno="Contrato 1")
-    c2 = _contrato(db, nombre_interno="Contrato 2")
-    _vincular(db, con_ppa_seleccionado, c1)
-    _vincular(db, con_otro_ppa, c2)
-
-    out = _listar(db, ppa_id=[c1.id], sin_ppa=True)
-
-    assert {p.id for p in out["items"]} == {con_ppa_seleccionado.id, sin_ppa.id}
+    assert _ids(respuesta) == {p1.id, p2.id}
+    assert p3.id not in _ids(respuesta)
 
 
-def test_un_proyecto_con_dos_contratos_seleccionados_no_se_duplica(db):
-    p = _proyecto(db, nombre_comercial="Doble PPA")
-    c1 = _contrato(db, nombre_interno="Contrato 1")
-    c2 = _contrato(db, nombre_interno="Contrato 2")
-    _vincular(db, p, c1)
-    _vincular(db, p, c2)
+def test_filtra_proyectos_sin_ningun_ppa(datos):
+    con_ppa = _proyecto("Con PPA")
+    sin_ppa = _proyecto("Sin PPA")
+    _vincular(con_ppa, _contrato(nombre_interno="Contrato A"))
 
-    out = _listar(db, ppa_id=[c1.id, c2.id])
+    respuesta = _listar(datos, "?sin_ppa=true")
 
-    assert out["total"] == 1
-    assert [item.id for item in out["items"]] == [p.id]
+    assert respuesta.data["total"] == 1
+    assert _ids(respuesta) == {sin_ppa.id}
 
 
-def test_sin_filtro_de_ppa_trae_todos_como_antes(db):
-    _proyecto(db, nombre_comercial="Con PPA")
-    _proyecto(db, nombre_comercial="Sin PPA")
+def test_combina_contrato_especifico_con_sin_ppa_como_or(datos):
+    seleccionado = _proyecto("Seleccionado")
+    con_otro = _proyecto("Otro PPA")
+    sin_ppa = _proyecto("Sin PPA")
+    c1 = _contrato(nombre_interno="Contrato 1")
+    c2 = _contrato(nombre_interno="Contrato 2")
+    _vincular(seleccionado, c1)
+    _vincular(con_otro, c2)
 
-    out = _listar(db)
+    respuesta = _listar(datos, f"?ppa_id={c1.id}&sin_ppa=true")
 
-    assert out["total"] == 2
-
-
-# ── Contratos borrados (borrado logico) ──────────────────────────────────────
-# Borrar un contrato PPA solo pone deleted_at (ver ppa.py::delete_contrato); la
-# fila de la tabla puente ppa_contrato_proyectos no se limpia. El resto de las
-# consultas a PPAContrato ya filtran deleted_at.is_(None) (ppa.py) y el propio
-# ProyectoOut.ppa_contratos lo hace vivo (solo_ppas_vivos en schemas/proyectos.py) --
-# este filtro debe tratar igual un contrato borrado: como si no existiera.
-
-def test_ppa_id_ignora_contrato_borrado(db):
-    proyecto = _proyecto(db, nombre_comercial="Vinculado a borrado")
-    contrato = _contrato(db, nombre_interno="Borrado", deleted_at=datetime.now(timezone.utc))
-    _vincular(db, proyecto, contrato)
-
-    out = _listar(db, ppa_id=[contrato.id])
-
-    assert out["total"] == 0
+    assert _ids(respuesta) == {seleccionado.id, sin_ppa.id}
+    assert con_otro.id not in _ids(respuesta)
 
 
-def test_sin_ppa_incluye_proyecto_cuyo_unico_contrato_esta_borrado(db):
-    proyecto = _proyecto(db, nombre_comercial="Solo tenia el borrado")
-    contrato = _contrato(db, nombre_interno="Borrado", deleted_at=datetime.now(timezone.utc))
-    _vincular(db, proyecto, contrato)
+def test_un_proyecto_con_dos_contratos_seleccionados_no_se_duplica(datos):
+    """Con un `join` + `distinct` esto sale una vez, pero el `total` de la
+    paginación cuenta dos: la fila se duplica antes del `distinct`. De ahí el
+    `Exists` del filtro."""
+    proyecto = _proyecto("Doble PPA")
+    c1 = _contrato(nombre_interno="Contrato 1")
+    c2 = _contrato(nombre_interno="Contrato 2")
+    _vincular(proyecto, c1)
+    _vincular(proyecto, c2)
 
-    out = _listar(db, sin_ppa=True)
+    respuesta = _listar(datos, f"?ppa_id={c1.id}&ppa_id={c2.id}")
 
-    assert out["total"] == 1
-    assert [p.id for p in out["items"]] == [proyecto.id]
-
-
-# ── Enrutamiento HTTP real ────────────────────────────────────────────────────
-# Los tests de arriba llaman list_proyectos() directo, así que no cubren si
-# FastAPI de verdad parsea "?ppa_id=1&ppa_id=2" como list[int] (Query(None) con
-# ese tipo requiere la sintaxis repetida, no "ppa_id[]=1&ppa_id[]=2").
-
-@pytest.fixture
-def client(db):
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
-    from app.core.database import get_db
-
-    app = FastAPI()
-    app.include_router(proyectos_api.router, prefix="/api/v1")
-    app.dependency_overrides[get_db] = lambda: db
-    return TestClient(app)
+    assert respuesta.data["total"] == 1
+    assert [p["id"] for p in respuesta.data["items"]] == [proyecto.id]
 
 
-def test_ruta_http_parsea_ppa_id_repetido_como_lista(db, client):
-    incluido = _proyecto(db, nombre_comercial="Incluido")
-    excluido = _proyecto(db, nombre_comercial="Excluido")
-    c1 = _contrato(db, nombre_interno="Contrato 1")
-    c2 = _contrato(db, nombre_interno="Contrato 2")
-    _vincular(db, incluido, c1)
-    _vincular(db, excluido, c2)
+def test_sin_filtro_de_ppa_trae_todos_como_antes(datos):
+    _proyecto("Con PPA")
+    _proyecto("Sin PPA")
 
-    r = client.get("/api/v1/proyectos", params={"ppa_id": [c1.id]})
+    respuesta = _listar(datos)
 
-    assert r.status_code == 200, r.text
-    cuerpo = r.json()
-    assert cuerpo["total"] == 1
-    assert cuerpo["items"][0]["id"] == incluido.id
+    assert respuesta.data["total"] == 2
 
 
-def test_ruta_http_sin_ppa(db, client):
-    con_ppa = _proyecto(db, nombre_comercial="Con PPA")
-    sin_ppa = _proyecto(db, nombre_comercial="Sin PPA")
-    _vincular(db, con_ppa, _contrato(db, nombre_interno="Contrato 1"))
+def test_se_combina_con_los_otros_filtros_del_listado(datos):
+    """El MultiSelect de PPA no es el único filtro de la vista: convive con
+    Estado, Tipo y Portafolio, que se aplican con AND."""
+    operando = _proyecto("Operando", estado="en_operacion")
+    desarrollo = _proyecto("En desarrollo", estado="en_desarrollo")
+    contrato = _contrato(nombre_interno="Contrato A")
+    _vincular(operando, contrato)
+    _vincular(desarrollo, contrato)
 
-    r = client.get("/api/v1/proyectos", params={"sin_ppa": True})
+    respuesta = _listar(datos, f"?ppa_id={contrato.id}&estado=en_operacion")
 
-    assert r.status_code == 200, r.text
-    cuerpo = r.json()
-    assert cuerpo["total"] == 1
-    assert cuerpo["items"][0]["id"] == sin_ppa.id
+    assert _ids(respuesta) == {operando.id}
+
+
+# ── Contratos borrados (borrado lógico) ──────────────────────────────────────
+# Borrar un contrato PPA solo pone deleted_at; la fila de la tabla puente
+# ppa_contrato_proyectos no se limpia. El resto de la API ya trata un PPA
+# borrado como inexistente (get_ppa_contratos en api/v1/proyectos/serializers.py),
+# y este filtro tiene que hacer lo mismo.
+
+def test_ppa_id_ignora_contrato_borrado(datos):
+    proyecto = _proyecto("Vinculado a borrado")
+    contrato = _contrato(nombre_interno="Borrado", deleted_at=datetime.now(timezone.utc))
+    _vincular(proyecto, contrato)
+
+    respuesta = _listar(datos, f"?ppa_id={contrato.id}")
+
+    assert respuesta.data["total"] == 0
+
+
+def test_sin_ppa_incluye_proyecto_cuyo_unico_contrato_esta_borrado(datos):
+    proyecto = _proyecto("Solo tenía el borrado")
+    contrato = _contrato(nombre_interno="Borrado", deleted_at=datetime.now(timezone.utc))
+    _vincular(proyecto, contrato)
+
+    respuesta = _listar(datos, "?sin_ppa=true")
+
+    assert respuesta.data["total"] == 1
+    assert _ids(respuesta) == {proyecto.id}
+
+
+# ── Parámetros inválidos ─────────────────────────────────────────────────────
+
+def test_ppa_id_no_numerico_da_422_y_no_500(datos):
+    """`[int(v) for v in getlist(...)]` levantaría un ValueError, y eso sale
+    como 500: parece una caída del servidor y no un parámetro mal escrito."""
+    _proyecto("Cualquiera")
+
+    respuesta = _listar(datos, "?ppa_id=doce")
+
+    assert respuesta.status_code == 422, respuesta.data
+
+
+def test_ppa_id_vacio_no_filtra(datos):
+    """`?ppa_id=` es lo que manda un select en "Todos" mal serializado: cuenta
+    como ausente, no como "el contrato de id vacío"."""
+    _proyecto("Uno")
+    _proyecto("Dos")
+
+    respuesta = _listar(datos, "?ppa_id=")
+
+    assert respuesta.status_code == 200, respuesta.data
+    assert respuesta.data["total"] == 2

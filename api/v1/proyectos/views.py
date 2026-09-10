@@ -15,6 +15,7 @@ conserva por consistencia y porque el router las resuelve primero igual.
 from datetime import datetime, timezone
 
 from django.db import IntegrityError, transaction
+from django.db.models import Exists, OuterRef, Q
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, ValidationError
@@ -27,6 +28,7 @@ from api.permissions import RolePermission
 from api.v1.cumplimiento import parametros as par
 from apps.clientes.models import Cliente, ProyectoAreaContacto
 from apps.fronteras.models import Frontera
+from apps.ppa.models import PpaContratoProyecto
 from apps.proyectos import models as py_models
 from apps.proyectos.services import gen_promedio, gestion, pendientes as pendientes_svc
 from apps.proyectos.services.operador_red import sincronizar_operador_red
@@ -62,6 +64,42 @@ def _con_relaciones():
             "fronteras__operador_red",
         )
     )
+
+
+def _filtro_ppa(request):
+    """`ppa_id` (repetible) y `sin_ppa`, o `None` si no se pidió ninguno.
+
+    Son dos preguntas distintas sobre la misma relación —"vinculado a alguno de
+    estos contratos" y "sin ningún contrato"— y se combinan con **OR**, porque
+    el MultiSelect de PPA del frontend permite mezclar contratos puntuales con
+    el centinela "sin PPA" (ver ProyectosListView.vue). Están documentados en
+    `docs/API_PROYECTOS.md`.
+
+    Un contrato **borrado no cuenta**: borrarlo solo pone `deleted_at` y la fila
+    de `ppa_contrato_proyectos` no se limpia, así que sin ese filtro un
+    `ppa_id` de un contrato borrado seguiría encontrando proyectos y `sin_ppa`
+    excluiría a uno cuyo único contrato ya está borrado. El resto de la API
+    trata un PPA borrado como inexistente (ver `get_ppa_contratos` en
+    `serializers.py`) y acá se hace igual.
+
+    `Exists` y no un `join` + `distinct`: un proyecto con dos de los contratos
+    seleccionados saldría duplicado, y el `total` de la paginación lo contaría
+    dos veces.
+    """
+    ppa_ids = par.enteros(request, "ppa_id")
+    sin_ppa = par.bandera(request, "sin_ppa")
+    if not ppa_ids and not sin_ppa:
+        return None
+
+    vinculos_vivos = PpaContratoProyecto.objects.filter(
+        proyecto_id=OuterRef("pk"), contrato__deleted_at__isnull=True,
+    )
+    condicion = Q()
+    if ppa_ids:
+        condicion |= Q(Exists(vinculos_vivos.filter(contrato_id__in=ppa_ids)))
+    if sin_ppa:
+        condicion |= ~Q(Exists(vinculos_vivos))
+    return condicion
 
 
 @class_logger_wrapper(name="Operaciones | Proyectos")
@@ -131,6 +169,9 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         servicio = request.query_params.get("servicio")
         if servicio in SERVICIOS:
             qs = qs.filter(**{f"srv_{servicio}": True})
+        filtro_ppa = _filtro_ppa(request)
+        if filtro_ppa is not None:
+            qs = qs.filter(filtro_ppa)
 
         pagina = self.paginate_queryset(qs.order_by("nombre_comercial"))
         return self.get_paginated_response(
