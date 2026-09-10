@@ -958,6 +958,48 @@ def redividir(periodo: str, tipo: str, proyecto_id: int | None = None,
     }
 
 
+def _periodos_y_tipos_de(proyecto_id: int) -> list[tuple[str, str]]:
+    """Los (periodo, tipo) de los paneles que tiene un proyecto, ordenados."""
+    return sorted(
+        PanelContable.objects.filter(proyecto_id=proyecto_id)
+        .values_list("periodo", "tipo")
+        .distinct()
+    )
+
+
+def redividir_proyecto(proyecto_id: int) -> dict:
+    """Redivide TODOS los paneles de un proyecto con los inversionistas actuales.
+
+    Se llama cuando cambian los inversionistas del proyecto. Las líneas de un
+    panel son un snapshot repartido al armarlo, así que sin esto el panel del mes
+    del cambio sigue mostrando al inversionista viejo hasta que alguien se
+    acuerde de redividir a mano — y acordarse no es un mecanismo.
+
+    Se recorren todos los períodos porque `redividir` ya decide solo cuáles
+    tocar: compara por ID de inversionista contra lo guardado y salta los que ya
+    están bien. Un cambio con fechas solo afecta a los meses de su vigencia.
+
+    **No propaga errores**: el cambio de inversionista es lo que pidió quien
+    edita, y el reparto es su consecuencia. Si esto falla, se informa y el cambio
+    se conserva.
+    """
+    resumen = {"n_redivididos": 0, "n_saltados": 0, "paneles": []}
+    try:
+        for periodo, tipo in _periodos_y_tipos_de(proyecto_id):
+            r = redividir(periodo=periodo, tipo=tipo, proyecto_id=proyecto_id)
+            resumen["n_redivididos"] += r.get("n_redivididos", 0)
+            resumen["n_saltados"] += r.get("n_saltados", 0)
+            if r.get("n_redivididos"):
+                resumen["paneles"].append({"periodo": periodo, "tipo": tipo})
+    except Exception as exc:  # noqa: BLE001 — ver docstring
+        logger.exception(
+            "No se pudieron redividir los paneles del proyecto %s tras cambiar "
+            "sus inversionistas", proyecto_id,
+        )
+        resumen["error"] = str(exc)
+    return resumen
+
+
 # ── Soportes en Drive ────────────────────────────────────────────────────────────
 
 SOPORTE_MAX = 20 * 1024 * 1024  # 20 MB
