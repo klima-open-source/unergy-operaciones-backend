@@ -380,6 +380,25 @@ class LiquidacionesApiViewSet(viewsets.GenericViewSet):
             return resultado
         return Response(agregados.build_ipp_historico(resultado))
 
+    @action(detail=False, methods=["post"], url_path="ipp/sincronizar")
+    @log_endpoint(name="Operaciones | Liquidaciones | Sincronizar IPP")
+    def ipp_sincronizar(self, request):
+        """Trae el IPP del DANE de la API y lo guarda en nuestro `ipp_mensual`.
+
+        Es el mismo número que ya usa Facturación, pero se llenaba a mano y se
+        quedaba corto: el 2026-09-10 la API tenía 15 meses que nosotros no,
+        incluido el que se iba a facturar.
+
+        A mano y no por horario, a propósito: el IPP sale una vez al mes y quien
+        liquida decide cuándo traerlo.
+        """
+        from apps.ppa.services import ipp as ipp_svc
+
+        try:
+            return Response(ipp_svc.sincronizar())
+        except api.LiquidacionesAPIError as exc:
+            return Response({"detail": str(exc)}, status=HTTP_API_EXTERNA)
+
     @action(detail=False, methods=["get"], url_path="costos")
     def costos(self, request):
         try:
