@@ -124,7 +124,7 @@ def frontera(proyecto) -> dict:
         gaia=gaia, proyecto_id=proyecto.id, db_proyecto_frt_map=mapa
     )
 
-    capacidad_kwp = float(proyecto.potencia_instalada_kwp or 0) or None
+    capacidad_kwp = float(proyecto.potencia_ac_kw or 0) or None
     resultado = {
         "principal": _instantanea(gaia, nodo_principal, capacidad_kwp),
         "respaldo": _instantanea(gaia, nodo_respaldo, capacidad_kwp),

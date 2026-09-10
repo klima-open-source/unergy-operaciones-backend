@@ -24,7 +24,13 @@ class Proyecto(Timer):
     clasificacion_regulatoria = models.CharField(max_length=4, choices=[("AGP", "AGP"), ("AGPE", "AGPE"), ("AGGE", "AGGE"), ("GD", "GD"), ("DER", "DER"), ("otra", "otra")], null=True, blank=True)
     tipo_tecnologia = models.CharField(max_length=10, choices=[("solar", "solar"), ("eolica", "eolica"), ("hidraulica", "hidraulica"), ("biomasa", "biomasa"), ("otra", "otra")], null=True, blank=True)
     tipo_proyecto = models.CharField(max_length=19, choices=[("minigranja", "minigranja"), ("autoconsumo", "autoconsumo"), ("gd", "gd"), ("movilidad_electrica", "movilidad_electrica"), ("otro", "otro")], null=True, blank=True)
-    potencia_instalada_kwp = models.DecimalField(max_digits=12, decimal_places=3, null=True, blank=True)
+    # Potencia AC. Se llamó `potencia_instalada_kwp` hasta el 2026-09-10: el
+    # nombre decía kWp (pico, DC) y el dato siempre fue AC, lo que costó dos
+    # bugs de corrupción ya documentados (la edición manual copiaba acá la
+    # capacidad DC; el backfill de Solenium hacía lo mismo). Es la ÚNICA
+    # potencia AC del sistema: `proyecto_info_tecnica.potencia_ac_kw` guardaba
+    # una copia espejada y se eliminó en la misma migración.
+    potencia_ac_kw = models.DecimalField(max_digits=12, decimal_places=3, null=True, blank=True)
     potencia_con_cen_mw = models.DecimalField(max_digits=12, decimal_places=3, null=True, blank=True)
     produccion_especifica_kwh_kwp = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     codigo_cnd = models.CharField(max_length=50, null=True, blank=True)
@@ -88,7 +94,10 @@ class ProyectoInfoTecnica(Timer):
     id = models.BigAutoField(primary_key=True)
     proyecto = models.ForeignKey("Proyecto", on_delete=models.DO_NOTHING, db_column="proyecto_id", related_name="info_tecnica")
     voltaje_red = models.CharField(max_length=50, null=True, blank=True)
-    potencia_ac_kw = models.DecimalField(max_digits=12, decimal_places=3, null=True, blank=True)
+    # La potencia AC NO vive acá: es `Proyecto.potencia_ac_kw`. Esta tabla tenía
+    # una copia (`potencia_ac_kw`) que se mantenía espejada a mano en dos
+    # lugares y coincidía en 101 de 101 proyectos -- se eliminó el 2026-09-10.
+    # Lo que sí es de acá es la capacidad PICO (DC), que es otro dato.
     capacidad_instalada_kwp = models.DecimalField(max_digits=12, decimal_places=3, null=True, blank=True)
     tipo_tracker = models.CharField(max_length=2, choices=[("1P", "1P"), ("2P", "2P")], null=True, blank=True)
     cantidad_total_paneles = models.IntegerField(null=True, blank=True)

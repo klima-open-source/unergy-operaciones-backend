@@ -258,7 +258,7 @@ def generacion_hoy() -> dict:
             if "results" in gen:
                 gen = gen["results"]
             kwh = _suma_kwh_inversor_hoy(
-                gen.get("generation_kwh") or {}, hoy_str, p.potencia_instalada_kwp)
+                gen.get("generation_kwh") or {}, hoy_str, p.potencia_ac_kw)
             if kwh > 0:
                 fuente = "inversor"
         except Exception as exc:
@@ -320,7 +320,7 @@ def resumen_dia() -> dict:
             if "results" in gen:
                 gen = gen["results"]
             kwh_inv = _suma_kwh_inversor_hoy(
-                gen.get("generation_kwh") or {}, hoy_str, p.potencia_instalada_kwp)
+                gen.get("generation_kwh") or {}, hoy_str, p.potencia_ac_kw)
         except Exception as exc:
             logger.warning("resumen-dia inversor sol_id=%s: %s", sol_id, exc)
         try:
@@ -418,7 +418,7 @@ def monitoreo_flota() -> dict:
         sol_id = _sv_id(p)
         disp = disponibilidad.get(sol_id, {}) if sol_id else {}
         categoria = disp.get("category")
-        capacidad = float(p.potencia_instalada_kwp or 0)
+        capacidad = float(p.potencia_ac_kw or 0)
 
         estado = _estado_de(categoria)
         cuenta[estado] = cuenta.get(estado, 0) + 1
@@ -559,7 +559,7 @@ def monitoreo_detalle(proyecto_id: int, incluir_snapshot: bool = False) -> dict:
     desde30 = (hoy - timedelta(days=29)).isoformat()
 
     node_principal, node_respaldo = _nodos_gaia(gaia, p.id)
-    capacidad_mw = float(p.potencia_instalada_kwp or 0) / 1000 or None
+    capacidad_mw = float(p.potencia_ac_kw or 0) / 1000 or None
 
     with ThreadPoolExecutor(max_workers=6) as pool:
         f_pot = pool.submit(cliente.get_power, sol_id, hoy_str, hoy_str) if sol_id else None
@@ -580,11 +580,11 @@ def monitoreo_detalle(proyecto_id: int, incluir_snapshot: bool = False) -> dict:
     # espurios adentro. Se recalcula sumando solo las horas plausibles.
     gen_hoy_res = gen_hoy.get("results", gen_hoy) if isinstance(gen_hoy, dict) else {}
     mapa_gen = (gen_hoy_res or {}).get("generation_kwh") or {}
-    kwh_hoy = _suma_kwh_inversor_hoy(mapa_gen, hoy_str, p.potencia_instalada_kwp) or None
+    kwh_hoy = _suma_kwh_inversor_hoy(mapa_gen, hoy_str, p.potencia_ac_kw) or None
 
     # Hasta qué hora cubre ese total, para poder decirlo igual que el medidor:
     # son horas sumadas, no una lectura del último instante.
-    limite = _limite_hora_kwh(p.potencia_instalada_kwp)
+    limite = _limite_hora_kwh(p.potencia_ac_kw)
     horas_ok = [
         k for k, v in mapa_gen.items()
         if str(k).startswith(hoy_str) and _es_hora_plausible(v, limite)
@@ -618,7 +618,7 @@ def monitoreo_detalle(proyecto_id: int, incluir_snapshot: bool = False) -> dict:
         "gaia_node_id": mejor_nodo,
         "gaia_node_principal": node_principal,
         "gaia_node_respaldo": node_respaldo,
-        "capacity_kwp": float(p.potencia_instalada_kwp or 0),
+        "capacity_kwp": float(p.potencia_ac_kw or 0),
         # El array de inversores no lo consume nadie: la vista móvil que los
         # muestra los saca de /monitoring/{id}/inverters-power, que es otro
         # endpoint. Se dejó de pedir el detalle POR INVERSOR (hasta 11 llamadas

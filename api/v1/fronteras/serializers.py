@@ -50,7 +50,7 @@ class FronteraSerializer(serializers.ModelSerializer):
     def get_proyecto_potencia_instalada_mw(self, obj):
         # La base guarda kWp; la ficha de frontera muestra MW.
         return self._proyecto(
-            obj, "potencia_instalada_kwp", lambda v: float(v) / 1000
+            obj, "potencia_ac_kw", lambda v: float(v) / 1000
         )
 
     def get_proyecto_departamento(self, obj):

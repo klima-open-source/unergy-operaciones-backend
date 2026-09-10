@@ -240,12 +240,12 @@ def test_un_ppa_borrado_no_pone_el_rol_ni_la_planta(datos):
 # ── La potencia ──────────────────────────────────────────────────────────────
 
 def test_la_potencia_viaja_como_potencia_ac_kw(datos):
-    """El front leia `potencia_instalada_kwp` --el nombre de la columna-- y lo
+    """El front leia `potencia_ac_kw` --el nombre de la columna-- y lo
     que llegaba se llamaba `potencia_kwp`: la potencia no se mostraba en ninguna
     planta. El nombre nuevo dice lo que el dato es (AC), aunque la columna siga
     llamandose `..._kwp`."""
     cliente = _cliente("Con Potencia")
-    _inversionista(cliente, _proyecto("Con Potencia", potencia_instalada_kwp=1500))
+    _inversionista(cliente, _proyecto("Con Potencia", potencia_ac_kw=1500))
 
     respuesta = _pedir(datos, cliente.id, "proyectos")
 

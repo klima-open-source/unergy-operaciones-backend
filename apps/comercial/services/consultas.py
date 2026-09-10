@@ -230,7 +230,7 @@ def listar_oportunidades(estado=None, tipo_servicio=None, cliente_id=None,
         pid: float(kwp) if kwp is not None else 0.0
         for pid, kwp in Proyecto.objects
         .filter(id__in=todos_los_pid, deleted_at__isnull=True)
-        .values_list("id", "potencia_instalada_kwp")
+        .values_list("id", "potencia_ac_kw")
     } if todos_los_pid else {}
 
     salida = []

@@ -107,9 +107,9 @@ def _datos_proyectos_para_resumen(gaia, fronteras: list[Frontera]) -> dict[int, 
         )
         if f.tipo_frontera == "generacion" and f.codigo_frontera:
             datos["frt_gen"] = f.codigo_frontera
-            if f.proyecto.potencia_instalada_kwp is not None:
+            if f.proyecto.potencia_ac_kw is not None:
                 datos["capacidad_efectiva_mw"] = (
-                    float(f.proyecto.potencia_instalada_kwp) / 1000
+                    float(f.proyecto.potencia_ac_kw) / 1000
                 )
             if meta:
                 datos["main_meter_gen"] = meta.get("main_meter")

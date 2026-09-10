@@ -182,7 +182,7 @@ def energia_transada(year: int, month: int, incluir_todos: bool = False) -> dict
                 "id": p.id,
                 "nombre": p.nombre_comercial,
                 "sub_project": p.sub_project,
-                "potencia_kwp": float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
+                "potencia_kwp": float(p.potencia_ac_kw) if p.potencia_ac_kw else None,
                 "gen_mwh": None, "ppa_mwh": None, "bolsa_mwh": None,
                 "modo": "sin_datos", "contratos": contratos_planta, "ultimo_dia": None,
             })
@@ -216,7 +216,7 @@ def energia_transada(year: int, month: int, incluir_todos: bool = False) -> dict
             "id": p.id,
             "nombre": p.nombre_comercial,
             "sub_project": p.sub_project,
-            "potencia_kwp": float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp else None,
+            "potencia_kwp": float(p.potencia_ac_kw) if p.potencia_ac_kw else None,
             "gen_mwh": round(gen, 3),
             "ppa_mwh": ppa,
             "bolsa_mwh": bolsa,

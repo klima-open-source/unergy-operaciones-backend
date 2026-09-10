@@ -520,8 +520,8 @@ def sync_tsf_projects(enrich_dates: bool = True) -> dict:
                     # Sun Factory PISABA lo cargado, contra lo que dice el
                     # comentario de arriba y contra los otros ocho campos. Ahora
                     # rellena solo si esta vacia.
-                    "potencia_instalada_kwp": Coalesce(
-                        F("potencia_instalada_kwp"), Value(p.get("installed_power_kwp"))),
+                    "potencia_ac_kw": Coalesce(
+                        F("potencia_ac_kw"), Value(p.get("installed_power_kwp"))),
                     "origina_code": Coalesce(F("origina_code"), Value(code)),
                     "codigo_tsf": Coalesce(F("codigo_tsf"), Value(tsf_code)),
                     "sunfactory_project_id": Coalesce(

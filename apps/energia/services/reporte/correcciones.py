@@ -95,8 +95,8 @@ def _curva_respaldo_en_vivo(front: Frontera, fecha: date, es_generacion: bool) -
         # Solo Generación -- Consumo no tiene un concepto de capacidad
         # efectiva definido todavía (mismo criterio que drift_medidores.py).
         capacidad_efectiva_mw = (
-            float(front.proyecto.potencia_instalada_kwp) / 1000
-            if es_generacion and front.proyecto_id and front.proyecto.potencia_instalada_kwp is not None else None
+            float(front.proyecto.potencia_ac_kw) / 1000
+            if es_generacion and front.proyecto_id and front.proyecto.potencia_ac_kw is not None else None
         )
         var_name = "eae" if es_generacion else "iae"
         _, curva_r = curvas.curva_medidor_en_vivo(
@@ -364,8 +364,8 @@ def rellenar_horario(frontera_id: int, fecha: date) -> dict:
                     frontera_id=frontera_id, curva_solarview=curva_solarview, fp=fp,
                     curva_reconectador_conocida=curva_reconectador_conocida,
                     capacidad_efectiva_mw=(
-                        float(proyecto.potencia_instalada_kwp) / 1000
-                        if proyecto and proyecto.potencia_instalada_kwp is not None else None
+                        float(proyecto.potencia_ac_kw) / 1000
+                        if proyecto and proyecto.potencia_ac_kw is not None else None
                     ),
                 )
             )

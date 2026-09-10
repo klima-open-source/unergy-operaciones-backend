@@ -158,7 +158,7 @@ def _fronteras_con_reporte(codigos_quoia: set[str]) -> list[tuple[Frontera, str 
         (
             f,
             f.proyecto.project_id_solarview if f.proyecto_id else None,
-            f.proyecto.potencia_instalada_kwp if f.proyecto_id else None,
+            f.proyecto.potencia_ac_kw if f.proyecto_id else None,
         )
         for f in filas
         if f.codigo_frontera.strip().lower() in codigos_quoia
@@ -360,7 +360,7 @@ def ejecutar_dia(fecha: date, cancelable: bool = False) -> dict:
         _cache_borrar("cancelar", fecha)
     cancelado = False
 
-    for i, (frontera, project_id_solarview, potencia_instalada_kwp) in enumerate(fronteras, start=1):
+    for i, (frontera, project_id_solarview, potencia_ac_kw) in enumerate(fronteras, start=1):
         if cancelable and _cache_leer("cancelar", fecha):
             print(f"[reporte_energia] ejecutar_dia fecha={fecha}: detenido manualmente en {i}/{len(fronteras)}")
             cancelado = True
@@ -411,7 +411,7 @@ def ejecutar_dia(fecha: date, cancelable: bool = False) -> dict:
                 resultado = clasificador.clasificar_generacion(
                     gaia, sv, frontera.id, frt_code, border_meta, pid_solarview, mapa_medidor_nodo, fecha,
                     capacidad_efectiva_mw=(
-                        float(potencia_instalada_kwp) / 1000 if potencia_instalada_kwp is not None else None
+                        float(potencia_ac_kw) / 1000 if potencia_ac_kw is not None else None
                     ),
                 )
                 _upsert_generacion(frontera.id, fecha, resultado)

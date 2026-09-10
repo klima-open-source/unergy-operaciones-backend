@@ -58,8 +58,8 @@ def proyecto_out(p) -> dict:
     return {
         "id": p.id,
         "nombre_comercial": p.nombre_comercial,
-        "potencia_instalada_kwp": (
-            float(p.potencia_instalada_kwp) if p.potencia_instalada_kwp is not None else None
+        "potencia_ac_kw": (
+            float(p.potencia_ac_kw) if p.potencia_ac_kw is not None else None
         ),
         "departamento": p.departamento,
         "municipio": p.municipio,

@@ -31,7 +31,7 @@ class ProyectoRefSerializer(serializers.ModelSerializer):
         model = py_models.Proyecto
         fields = [
             "id", "nombre_comercial", "municipio", "departamento",
-            "potencia_instalada_kwp", "codigo_cnd", "fecha_entrada_operacion",
+            "potencia_ac_kw", "codigo_cnd", "fecha_entrada_operacion",
         ]
 
 
@@ -42,7 +42,7 @@ class ListItemSerializer(serializers.Serializer):
     nombre_comercial = serializers.CharField(allow_null=True)
     municipio = serializers.CharField(allow_null=True)
     departamento = serializers.CharField(allow_null=True)
-    potencia_instalada_kwp = serializers.FloatField(allow_null=True)
+    potencia_ac_kw = serializers.FloatField(allow_null=True)
     tiene_ficha = serializers.BooleanField()
     estado_global = serializers.CharField()
 

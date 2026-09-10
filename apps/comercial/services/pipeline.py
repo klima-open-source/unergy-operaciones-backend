@@ -1114,7 +1114,9 @@ def _ficha_tecnica(proyecto) -> dict:
         "voltaje_red": _it("voltaje_red"),
         # Potencia AC (la del punto de conexión) contra kWp instalados (DC): no
         # son el mismo número y la relación entre las dos es el sobredimensionado.
-        "potencia_ac_kw": _num(_it("potencia_ac_kw")),
+        # Del proyecto, no de la info técnica: es su única casa desde el
+        # 2026-09-10 (antes había una copia espejada en las dos tablas).
+        "potencia_ac_kw": _num(proyecto.potencia_ac_kw),
         "capacidad_instalada_kwp": _num(_it("capacidad_instalada_kwp")),
         "produccion_especifica_kwh_kwp": _num(proyecto.produccion_especifica_kwh_kwp),
         "tipo_tracker": _valor_enum(_it("tipo_tracker")),
@@ -1188,8 +1190,8 @@ def _fronteras_planta(proyecto) -> list[dict]:
     del dict -- confirmado que no tienen consumidor externo.
     """
     cap_mw = (
-        float(proyecto.potencia_instalada_kwp) / 1000
-        if proyecto.potencia_instalada_kwp is not None else None
+        float(proyecto.potencia_ac_kw) / 1000
+        if proyecto.potencia_ac_kw is not None else None
     )
     fronteras = sorted(
         (f for f in proyecto.fronteras.all() if f.deleted_at is None),
@@ -1354,7 +1356,7 @@ def _nodo_proyecto(proyecto, ofertas, operadores=None) -> dict:
         "detalles": {
             "estado_proyecto": estado,
             "estado_proyecto_label": ESTADO_PROYECTO_LABELS.get(estado),
-            "potencia_instalada_kwp": _num(proyecto.potencia_instalada_kwp),
+            "potencia_ac_kw": _num(proyecto.potencia_ac_kw),
             # Potencia con CEN, en MW. Va aparte de la instalada y no se convierte
             # a una sola unidad: no son el mismo número ni salen del mismo papel.
             "potencia_con_cen_mw": _num(proyecto.potencia_con_cen_mw),

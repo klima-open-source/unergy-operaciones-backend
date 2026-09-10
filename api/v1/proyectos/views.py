@@ -332,28 +332,26 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         return proyecto
 
     def _sembrar_info_tecnica(self, proyecto, potencia_ac_kw, capacidad_kwp) -> None:
-        """Rellena la info técnica con lo que trajo el candidato, sin pisar nada.
+        """Rellena con lo que trajo el candidato, sin pisar nada.
 
-        **Espeja `potencia_ac_kw` en `proyectos.potencia_instalada_kwp`**: pese al
-        nombre, esa columna guarda históricamente la potencia AC. Sin el espejo,
-        un proyecto creado por este camino quedaba con `potencia_instalada_kwp`
-        en NULL para siempre a menos que alguien volviera a editar Información
-        técnica a mano (auditoría 2026-08-27: 35 proyectos con ese vacío, la
-        mayoría creados justo así).
+        Cada dato va a su única casa: la potencia AC al proyecto, la capacidad
+        pico (DC) a la info técnica. Antes la AC se escribía en la info técnica y
+        se ESPEJABA al proyecto, porque hasta el 2026-09-10 vivía en las dos
+        tablas; sin ese espejo, un proyecto creado por este camino quedaba con la
+        potencia en NULL para siempre a menos que alguien volviera a editar
+        Información técnica a mano (auditoría 2026-08-27: 35 proyectos con ese
+        vacío, la mayoría creados justo así). Con una sola columna el espejo
+        sobra y el modo de fallo tampoco puede volver.
         """
+        if proyecto.potencia_ac_kw is None and potencia_ac_kw is not None:
+            proyecto.potencia_ac_kw = potencia_ac_kw
+            proyecto.save(update_fields=["potencia_ac_kw"])
+        if capacidad_kwp is None:
+            return
         it, _ = py_models.ProyectoInfoTecnica.objects.get_or_create(proyecto_id=proyecto.id)
-        campos = []
-        if it.potencia_ac_kw is None and potencia_ac_kw is not None:
-            it.potencia_ac_kw = potencia_ac_kw
-            campos.append("potencia_ac_kw")
-        if it.capacidad_instalada_kwp is None and capacidad_kwp is not None:
+        if it.capacidad_instalada_kwp is None:
             it.capacidad_instalada_kwp = capacidad_kwp
-            campos.append("capacidad_instalada_kwp")
-        if campos:
-            it.save(update_fields=campos)
-        if proyecto.potencia_instalada_kwp is None and it.potencia_ac_kw is not None:
-            proyecto.potencia_instalada_kwp = it.potencia_ac_kw
-            proyecto.save(update_fields=["potencia_instalada_kwp"])
+            it.save(update_fields=["capacidad_instalada_kwp"])
 
     @action(
         detail=False, methods=["post"],
@@ -648,23 +646,30 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         if request.method == "GET":
             if not it:
                 raise NotFound("Info técnica no encontrada")
-            return Response(py_serializers.ProyectoInfoTecnicaSerializer(it).data)
+            return Response(py_serializers.ProyectoInfoTecnicaSerializer(
+                it, context={"proyecto": proyecto},
+            ).data)
 
         entrada = py_serializers.ProyectoInfoTecnicaSerializer(
             it, data=request.data, partial=bool(it),
         )
         entrada.is_valid(raise_exception=True)
+        # La potencia AC se edita desde este formulario pero se GUARDA en el
+        # proyecto, su única casa desde el 2026-09-10. Se saca ANTES de guardar
+        # la info técnica porque ya no es un campo de esa tabla.
+        #
+        # Un `null` no borra: igual que el espejo que esto reemplaza, solo
+        # escribe cuando viene un valor. Para dejar la potencia en blanco está
+        # PATCH /proyectos/{id}.
+        ac = entrada.validated_data.pop("potencia_ac_kw", None)
         with transaction.atomic():
             it = entrada.save(proyecto_id=int(pk))
-            # Pese al nombre, `proyectos.potencia_instalada_kwp` guarda
-            # históricamente la potencia AC (coincide con `potencia_ac_kw` en 56
-            # de 66 proyectos verificados), NO la capacidad DC. Antes este espejo
-            # copiaba `capacidad_instalada_kwp` por error y corrompió el campo en
-            # los proyectos editados mientras existió ese bug.
-            if it.potencia_ac_kw is not None:
-                proyecto.potencia_instalada_kwp = it.potencia_ac_kw
-                proyecto.save(update_fields=["potencia_instalada_kwp"])
-        return Response(py_serializers.ProyectoInfoTecnicaSerializer(it).data)
+            if ac is not None:
+                proyecto.potencia_ac_kw = ac
+                proyecto.save(update_fields=["potencia_ac_kw"])
+        return Response(py_serializers.ProyectoInfoTecnicaSerializer(
+            it, context={"proyecto": proyecto},
+        ).data)
 
     # ── Inversores ────────────────────────────────────────────────────────
 
@@ -679,8 +684,11 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         """
         if nuevo_kw is None:
             return
-        it = py_models.ProyectoInfoTecnica.objects.filter(proyecto_id=proyecto_id).first()
-        ac = float(it.potencia_ac_kw) if it and it.potencia_ac_kw is not None else None
+        proyecto = py_models.Proyecto.objects.filter(pk=proyecto_id).only("potencia_ac_kw").first()
+        ac = (
+            float(proyecto.potencia_ac_kw)
+            if proyecto and proyecto.potencia_ac_kw is not None else None
+        )
         if ac is None or ac <= 0:
             return
         qs = py_models.ProyectoInversor.objects.filter(proyecto_id=proyecto_id, activo=True)

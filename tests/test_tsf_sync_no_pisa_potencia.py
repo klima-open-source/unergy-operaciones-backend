@@ -3,7 +3,7 @@
 `sync_tsf_projects` enlaza cada proyecto de Sun Factory con el nuestro y rellena
 lo que falte. Su propio comentario dice la regla: "COALESCE(existente, nuevo):
 enlaza y rellena sin pisar lo que el operador ya tenga", y ocho de los diez
-campos la cumplen. `potencia_instalada_kwp` estaba al reves --el valor de Sun
+campos la cumplen. `potencia_ac_kw` estaba al reves --el valor de Sun
 Factory ganaba-- asi que cada corrida deshacia una correccion manual.
 
 Importa mas de lo que parece porque esa columna, pese al nombre, guarda la
@@ -130,12 +130,12 @@ def test_no_pisa_la_potencia_que_ya_tenia_el_proyecto(base_limpia, monkeypatch):
     de la sincronizacion la devolvia al valor de Sun Factory."""
     from apps.proyectos.models import Proyecto
 
-    proyecto = _proyecto_de_sunfactory(potencia_instalada_kwp=1300)
+    proyecto = _proyecto_de_sunfactory(potencia_ac_kw=1300)
 
     stats = _sincronizar(monkeypatch, _payload(installed_power_kwp=990))
 
     assert stats["actualizados"] == 1
-    assert float(Proyecto.objects.get(pk=proyecto.id).potencia_instalada_kwp) == 1300.0
+    assert float(Proyecto.objects.get(pk=proyecto.id).potencia_ac_kw) == 1300.0
 
 
 def test_rellena_la_potencia_cuando_esta_vacia(base_limpia, monkeypatch):
@@ -143,21 +143,21 @@ def test_rellena_la_potencia_cuando_esta_vacia(base_limpia, monkeypatch):
     pisar."""
     from apps.proyectos.models import Proyecto
 
-    proyecto = _proyecto_de_sunfactory(potencia_instalada_kwp=None)
+    proyecto = _proyecto_de_sunfactory(potencia_ac_kw=None)
 
     _sincronizar(monkeypatch, _payload(installed_power_kwp=990))
 
-    assert float(Proyecto.objects.get(pk=proyecto.id).potencia_instalada_kwp) == 990.0
+    assert float(Proyecto.objects.get(pk=proyecto.id).potencia_ac_kw) == 990.0
 
 
 def test_una_potencia_ausente_en_sun_factory_no_borra_la_nuestra(base_limpia, monkeypatch):
     from apps.proyectos.models import Proyecto
 
-    proyecto = _proyecto_de_sunfactory(potencia_instalada_kwp=1300)
+    proyecto = _proyecto_de_sunfactory(potencia_ac_kw=1300)
 
     _sincronizar(monkeypatch, _payload(installed_power_kwp=None))
 
-    assert float(Proyecto.objects.get(pk=proyecto.id).potencia_instalada_kwp) == 1300.0
+    assert float(Proyecto.objects.get(pk=proyecto.id).potencia_ac_kw) == 1300.0
 
 
 def test_el_avance_de_obra_si_se_actualiza(base_limpia, monkeypatch):

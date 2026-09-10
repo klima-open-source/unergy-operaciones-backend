@@ -70,7 +70,7 @@ def _cambios_info_tecnica(proyecto: Proyecto, it: ProyectoInfoTecnica, detalle: 
     cambios: dict = {}
 
     # `installed_capacity` de Solenium es capacidad DC. Antes esto también
-    # pisaba `proyecto.potencia_instalada_kwp` (que es AC, pese al nombre --
+    # pisaba `proyecto.potencia_ac_kw` (que es AC, pese al nombre --
     # ver fix 2026-08-19 en upsert_info_tecnica) con este mismo valor DC, el
     # mismo error que ya se corrigió del lado manual. Este endpoint de
     # Solenium no expone un valor AC separado, así que simplemente no se

@@ -21,7 +21,7 @@ from apps.proyectos import models as py_models
 CAMPOS_CREACION = [
     "nombre_comercial", "portafolio_id", "sub_project", "topico_liquidaciones",
     "clasificacion_regulatoria", "tipo_tecnologia", "tipo_proyecto",
-    "potencia_instalada_kwp", "potencia_con_cen_mw", "produccion_especifica_kwh_kwp",
+    "potencia_ac_kw", "potencia_con_cen_mw", "produccion_especifica_kwh_kwp",
     "codigo_cnd", "estado", "fecha_entrada_operacion", "fecha_fin_representacion",
     "fecha_inicio_comercializacion", "fecha_comercializacion_editada_manual",
     "gen_mensual_promedio_mwh", "gen_promedio_origen",
@@ -48,6 +48,13 @@ class _CurvaMensual(serializers.JSONField):
 
 
 class ProyectoCrearSerializer(serializers.ModelSerializer):
+    # Mismo alias de transición que en la salida, para el lado de la escritura:
+    # un frontend todavía sin promover manda `potencia_instalada_kwp` al
+    # guardar, y sin esto ese campo se descartaría en silencio.
+    potencia_instalada_kwp = serializers.DecimalField(
+        source="potencia_ac_kw", max_digits=12, decimal_places=3,
+        required=False, allow_null=True, write_only=True,
+    )
     portafolio_id = serializers.IntegerField(required=False, allow_null=True)
     operador_red_id = serializers.IntegerField(required=False, allow_null=True)
     latitud = serializers.FloatField(required=False, allow_null=True, min_value=-90, max_value=90)
@@ -59,7 +66,7 @@ class ProyectoCrearSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = py_models.Proyecto
-        fields = CAMPOS_CREACION
+        fields = CAMPOS_CREACION + ["potencia_instalada_kwp"]  # alias, ver arriba
         extra_kwargs = {
             c: {"required": False, "allow_null": True}
             for c in CAMPOS_CREACION if c != "nombre_comercial"
@@ -113,12 +120,39 @@ class ProyectoInversionistaSerializer(serializers.ModelSerializer):
 
 
 class ProyectoInfoTecnicaSerializer(serializers.ModelSerializer):
+    """La info técnica de la planta.
+
+    `potencia_ac_kw` NO es una columna de esta tabla desde el 2026-09-10: vive
+    en `Proyecto`, que es su única casa. Se declara acá porque el formulario de
+    Información técnica es donde se edita --es un dato técnico y ahí lo busca
+    quien lo llena--, así que entra por este serializer y la vista lo guarda en
+    el proyecto. `write_only` porque el valor de salida no sale del modelo de
+    esta tabla sino del proyecto: lo agrega `to_representation`.
+    """
+
     proyecto_id = serializers.IntegerField(read_only=True)
+    potencia_ac_kw = serializers.DecimalField(
+        max_digits=12, decimal_places=3,
+        required=False, allow_null=True, write_only=True,
+    )
 
     class Meta:
         model = py_models.ProyectoInfoTecnica
         exclude = ["proyecto"]
         extra_kwargs = {"id": {"read_only": True}}
+
+    def to_representation(self, instance):
+        datos = super().to_representation(instance)
+        # Del contexto cuando quien serializa ya tiene el proyecto en la mano
+        # (el detalle y el listado lo pasan): `instance.proyecto` seria una
+        # consulta por fila, o sea 100 consultas de mas en un listado de 100.
+        proyecto = self.context.get("proyecto") or getattr(instance, "proyecto", None)
+        datos["potencia_ac_kw"] = (
+            float(proyecto.potencia_ac_kw)
+            if proyecto is not None and proyecto.potencia_ac_kw is not None
+            else None
+        )
+        return datos
 
     def get_fields(self):
         campos = super().get_fields()
@@ -178,6 +212,16 @@ class PpaResumenSerializer(serializers.Serializer):
 class ProyectoSerializer(serializers.ModelSerializer):
     """El detalle completo, con sus cinco relaciones anidadas."""
 
+    # ALIAS DE TRANSICIÓN, se quita en el próximo despliegue. `potencia_ac_kw`
+    # se llamaba `potencia_instalada_kwp` hasta el 2026-09-10 y el frontend lo
+    # lee con el nombre viejo en 12 archivos. Entre el push del backend y el
+    # promote del front hay una ventana en la que el front viejo habla con el
+    # backend nuevo: sin este alias, la potencia sale en blanco en toda la
+    # plataforma durante ese rato.
+    potencia_instalada_kwp = serializers.DecimalField(
+        source="potencia_ac_kw", max_digits=12, decimal_places=3,
+        read_only=True, allow_null=True,
+    )
     portafolio_id = serializers.IntegerField(allow_null=True)
     operador_red_id = serializers.IntegerField(allow_null=True)
     operador_red_legal = serializers.SerializerMethodField()
@@ -190,7 +234,8 @@ class ProyectoSerializer(serializers.ModelSerializer):
     class Meta:
         model = py_models.Proyecto
         fields = CAMPOS_CREACION + [
-            "id", "operador_red_legal", "ppa_contratos", "inversionistas",
+            "id", "potencia_instalada_kwp",   # alias de transición, ver arriba
+            "operador_red_legal", "ppa_contratos", "inversionistas",
             "info_tecnica", "inversores", "area_contactos",
             "created_at", "updated_at",
         ]
@@ -211,7 +256,12 @@ class ProyectoSerializer(serializers.ModelSerializer):
 
     def get_info_tecnica(self, obj):
         it = next(iter(obj.info_tecnica.all()), None)
-        return ProyectoInfoTecnicaSerializer(it).data if it else None
+        # El proyecto va por contexto porque `potencia_ac_kw` sale de él: sin
+        # esto, cada fila del listado consultaria su propio proyecto otra vez.
+        return (
+            ProyectoInfoTecnicaSerializer(it, context={"proyecto": obj}).data
+            if it else None
+        )
 
     def get_area_contactos(self, obj) -> list:
         return [
@@ -234,7 +284,7 @@ class ProyectoListaSerializer(serializers.ModelSerializer):
         model = py_models.Proyecto
         fields = [
             "id", "nombre_comercial", "estado", "tipo_proyecto", "municipio",
-            "departamento", "potencia_instalada_kwp", "sub_project", "codigo_tsf",
+            "departamento", "potencia_ac_kw", "sub_project", "codigo_tsf",
         ]
 
 

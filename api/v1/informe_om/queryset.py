@@ -34,9 +34,9 @@ def build_listado() -> list[dict]:
             "nombre_comercial": proyecto.nombre_comercial,
             "municipio": proyecto.municipio,
             "departamento": proyecto.departamento,
-            "potencia_instalada_kwp": (
-                float(proyecto.potencia_instalada_kwp)
-                if proyecto.potencia_instalada_kwp is not None else None
+            "potencia_ac_kw": (
+                float(proyecto.potencia_ac_kw)
+                if proyecto.potencia_ac_kw is not None else None
             ),
             "tiene_ficha": proyecto.id in fichas,
             "estado_global": checklist.kpis(fichas.get(proyecto.id))["estado_global"],

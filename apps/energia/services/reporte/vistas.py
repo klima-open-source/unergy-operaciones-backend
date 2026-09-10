@@ -448,8 +448,8 @@ def _construir_detalle(frontera_id: int, fecha: date) -> dict:
     # directo lo que quedó persistido; si la fila es de antes del fix de
     # persistencia, simplemente no hay curva de Solenium que mostrar acá.
     capacidad_efectiva_mw = (
-        float(front.proyecto.potencia_instalada_kwp) / 1000
-        if es_generacion and front.proyecto_id and front.proyecto.potencia_instalada_kwp is not None else None
+        float(front.proyecto.potencia_ac_kw) / 1000
+        if es_generacion and front.proyecto_id and front.proyecto.potencia_ac_kw is not None else None
     )
 
     curva_medidor_ppal_viva = curva_medidor_resp_viva = None

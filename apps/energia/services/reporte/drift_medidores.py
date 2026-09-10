@@ -48,8 +48,8 @@ def _revisar_tabla(
         # Solo Generación -- Consumo no tiene un concepto de capacidad
         # efectiva definido todavía (decidido con Sara 2026-08-26).
         capacidad_efectiva_mw = (
-            float(proyecto.potencia_instalada_kwp) / 1000
-            if es_generacion and proyecto and proyecto.potencia_instalada_kwp is not None else None
+            float(proyecto.potencia_ac_kw) / 1000
+            if es_generacion and proyecto and proyecto.potencia_ac_kw is not None else None
         )
         try:
             curva_p, curva_r = curvas.curva_medidor_en_vivo(

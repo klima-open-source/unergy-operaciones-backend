@@ -64,7 +64,10 @@ class PolizaFilaSerializer(serializers.Serializer):
     voltaje_red = _CampoDeInfoTecnica("voltaje_red")
     potencia_panel_kwp = _CampoDeInfoTecnica("potencia_panel_kwp")
     potencia_inversores_kwp = _CampoDeInfoTecnica("potencia_inversores_kwp")
-    potencia_ac_kw = _CampoDeInfoTecnica("potencia_ac_kw", numerico=True)
+    # Del PROYECTO y no de la info técnica: la potencia AC dejó de estar
+    # duplicada en las dos tablas el 2026-09-10. Es el valor asegurable, así
+    # que leerlo de la copia que ya no existe lo dejaría en blanco.
+    potencia_ac_kw = serializers.FloatField(allow_null=True)
 
     numero_poliza = _CampoDePoliza("numero_poliza")
     poliza_om = _CampoDePoliza("poliza_om", defecto=False)

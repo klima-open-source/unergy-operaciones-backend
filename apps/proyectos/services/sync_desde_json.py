@@ -94,9 +94,9 @@ def _rellenar(proyecto, fila: dict) -> bool:
         cambios.append("municipio")
 
     kwp = fila.get("potencia_instalada_dc_kwp")
-    if kwp is not None and not proyecto.potencia_instalada_kwp:
-        proyecto.potencia_instalada_kwp = kwp
-        cambios.append("potencia_instalada_kwp")
+    if kwp is not None and not proyecto.potencia_ac_kw:
+        proyecto.potencia_ac_kw = kwp
+        cambios.append("potencia_ac_kw")
 
     if cambios:
         proyecto.save(update_fields=cambios)

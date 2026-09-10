@@ -224,7 +224,7 @@ def panel_360(cliente: Cliente, hoy: date | None = None) -> dict:
             "proyecto_id": pid,
             "nombre": p.nombre_comercial,
             "estado": p.estado,
-            "potencia_kwp": _num(p.potencia_instalada_kwp),
+            "potencia_kwp": _num(p.potencia_ac_kw),
             "fecha_fin_contrato": _fecha(max(fechas_fin) if fechas_fin else None),
             "renovacion_automatica": renovacion_combinada(
                 [c.renovacion_automatica for c in serv_planta + ppa_planta]

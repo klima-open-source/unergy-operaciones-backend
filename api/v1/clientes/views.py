@@ -458,14 +458,14 @@ class ClienteViewSet(viewsets.GenericViewSet):
                 "nombre_comercial": p.nombre_comercial,
                 "estado": p.estado,
                 # `potencia_ac_kw` y no `potencia_kwp`: la columna se llama
-                # `potencia_instalada_kwp` pero lo que guarda es potencia AC
+                # `potencia_ac_kw` pero lo que guarda es potencia AC
                 # (revisado con Sara el 2026-09-10). Renombrar la columna son
                 # 171 usos entre los dos repos y una migración; el nombre del
                 # campo de ESTA respuesta se corrige sin costo. El front leía
-                # `potencia_instalada_kwp`, que nunca llegó: la potencia no se
+                # `potencia_ac_kw`, que nunca llegó: la potencia no se
                 # mostraba en ninguna planta.
-                "potencia_ac_kw": float(p.potencia_instalada_kwp)
-                if p.potencia_instalada_kwp else None,
+                "potencia_ac_kw": float(p.potencia_ac_kw)
+                if p.potencia_ac_kw else None,
                 "departamento": p.departamento,
                 "municipio": p.municipio,
                 "roles": roles.get(p.id, []),

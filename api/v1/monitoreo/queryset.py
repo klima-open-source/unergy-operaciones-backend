@@ -43,9 +43,9 @@ def build_projects() -> dict:
                 "nombre_comercial": p.nombre_comercial,
                 "municipio": p.municipio or "—",
                 "departamento": p.departamento or "—",
-                "potencia_instalada_kwp": (
-                    float(p.potencia_instalada_kwp)
-                    if p.potencia_instalada_kwp else None
+                "potencia_ac_kw": (
+                    float(p.potencia_ac_kw)
+                    if p.potencia_ac_kw else None
                 ),
                 "estado": p.estado,
                 "project_id_solenium": p.project_id_solenium or "",
