@@ -93,6 +93,21 @@ def _crear(datos_usuario, cuerpo, querystring=""):
     return respuesta
 
 
+def _editar(datos_usuario, cliente_id, cuerpo, querystring=""):
+    from rest_framework.test import APIRequestFactory, force_authenticate
+
+    from api.authentication import UsuarioAutenticado
+    from api.v1.clientes.views import ClienteViewSet
+
+    peticion = APIRequestFactory().patch(
+        f"/api/v1/clientes/{cliente_id}{querystring}", cuerpo, format="json"
+    )
+    force_authenticate(peticion, user=UsuarioAutenticado(datos_usuario["usuario"]))
+    respuesta = ClienteViewSet.as_view({"patch": "partial_update"})(peticion, pk=cliente_id)
+    respuesta.render()
+    return respuesta
+
+
 def _cliente(**kw):
     from apps.clientes.models import Cliente
 
@@ -145,7 +160,7 @@ def test_crear_cliente_con_nit_duplicado_lo_explica_en_castellano(datos):
     validador que DRF armaba solo decia "Los campos nit_cedula deben formar un
     conjunto único", y con eso el usuario no sabe que arreglar.
     """
-    _cliente(razon_social_nombre="Cliente Uno", nit_cedula="900123456-7")
+    _cliente(razon_social_nombre="Cliente Uno", nit_cedula="9001234567")
 
     respuesta = _crear(
         datos,
@@ -160,7 +175,7 @@ def test_crear_cliente_con_nit_duplicado_lo_explica_en_castellano(datos):
 def test_el_cliente_no_queda_creado_cuando_el_nit_choca(datos):
     from apps.clientes.models import Cliente
 
-    _cliente(razon_social_nombre="Cliente Uno", nit_cedula="900123456-7")
+    _cliente(razon_social_nombre="Cliente Uno", nit_cedula="9001234567")
 
     _crear(
         datos,
@@ -173,25 +188,118 @@ def test_el_cliente_no_queda_creado_cuando_el_nit_choca(datos):
 
 def test_editar_un_cliente_sin_tocarle_el_nit_no_choca_consigo_mismo(datos):
     """El validador por campo excluye la fila que se esta editando; si no, un
-    PATCH de cualquier campo se caeria por el NIT que el cliente ya tenia."""
-    from rest_framework.test import APIRequestFactory, force_authenticate
+    PATCH de cualquier campo se caeria por el NIT que el cliente ya tenia.
 
-    from api.authentication import UsuarioAutenticado
-    from api.v1.clientes.views import ClienteViewSet
+    El NIT va escrito de otra forma a proposito: normalizado es el mismo, y
+    tiene que reconocerse como el suyo.
+    """
+    cliente = _cliente(razon_social_nombre="Cliente Uno", nit_cedula="9001234567")
 
-    cliente = _cliente(razon_social_nombre="Cliente Uno", nit_cedula="900123456-7")
-
-    peticion = APIRequestFactory().patch(
-        f"/api/v1/clientes/{cliente.id}",
-        {"razon_social_nombre": "Cliente Uno S.A.S.", "nit_cedula": "900123456-7"},
-        format="json",
-    )
-    force_authenticate(peticion, user=UsuarioAutenticado(datos["usuario"]))
-    respuesta = ClienteViewSet.as_view({"patch": "partial_update"})(peticion, pk=cliente.id)
-    respuesta.render()
+    respuesta = _editar(datos, cliente.id, {
+        "razon_social_nombre": "Cliente Uno S.A.S.",
+        "nit_cedula": "900-123.456 7",
+    }, "?forzar=true")
 
     assert respuesta.status_code == 200, respuesta.data
     assert respuesta.data["razon_social_nombre"] == "Cliente Uno S.A.S."
+
+
+# ── NIT normalizado ──────────────────────────────────────────────────────────
+
+def test_el_nit_se_guarda_solo_con_digitos(datos):
+    from apps.clientes.models import Cliente
+
+    respuesta = _crear(datos, {
+        "razon_social_nombre": "Cliente Con Puntos",
+        "nit_cedula": "900.123.456-7",
+    })
+
+    assert respuesta.status_code == 201, respuesta.data
+    assert Cliente.objects.get(pk=respuesta.data["id"]).nit_cedula == "9001234567"
+
+
+def test_el_mismo_nit_escrito_distinto_choca(datos):
+    """El hueco que esto cierra: el UNIQUE compara texto, asi que
+    "900.123.456-7" y "900123456-7" entraban como dos clientes distintos."""
+    _cliente(razon_social_nombre="Cliente Uno", nit_cedula="9001234567")
+
+    respuesta = _crear(datos, {
+        "razon_social_nombre": "Otro Cliente Cualquiera",
+        "nit_cedula": "900.123.456-7",
+    }, "?forzar=true")
+
+    assert respuesta.status_code == 400, respuesta.data
+    assert respuesta.data["nit_cedula"] == ["Ya existe un cliente con ese NIT/cédula."]
+
+
+def test_dos_clientes_sin_nit_no_chocan_entre_si(datos):
+    """En Postgres los NULL no colisionan, y la mayoria de los clientes no
+    tienen NIT cargado: si el validador tratara el vacio como un valor, el alta
+    mas comun quedaria bloqueada."""
+    from apps.clientes.models import Cliente
+
+    _cliente(razon_social_nombre="Sin NIT Uno")
+
+    respuesta = _crear(
+        datos,
+        {"razon_social_nombre": "Sin NIT Dos", "nit_cedula": ""},
+        "?forzar=true",
+    )
+
+    assert respuesta.status_code == 201, respuesta.data
+    assert Cliente.objects.get(pk=respuesta.data["id"]).nit_cedula is None
+
+
+# ── Nombre parecido al EDITAR ────────────────────────────────────────────────
+
+def test_renombrar_un_cliente_para_dejarlo_igual_a_otro_avisa(datos):
+    """Antes solo se revisaba al crear: la proteccion se saltaba con dos clics
+    --crear con un nombre cualquiera y renombrarlo despues."""
+    _cliente(razon_social_nombre="Quantum Energy Ingenieria S.A.S.")
+    otro = _cliente(razon_social_nombre="Cliente Sin Relacion")
+
+    respuesta = _editar(datos, otro.id, {"razon_social_nombre": "Quantum"})
+
+    assert respuesta.status_code == 409, respuesta.data
+    assert respuesta.data["detail"]["candidato_nombre"] == "Quantum Energy Ingenieria S.A.S."
+
+
+def test_al_editar_tambien_se_puede_forzar(datos):
+    from apps.clientes.models import Cliente
+
+    _cliente(razon_social_nombre="Quantum Energy Ingenieria S.A.S.")
+    otro = _cliente(razon_social_nombre="Cliente Sin Relacion")
+
+    respuesta = _editar(datos, otro.id, {"razon_social_nombre": "Quantum"}, "?forzar=true")
+
+    assert respuesta.status_code == 200, respuesta.data
+    assert Cliente.objects.get(pk=otro.id).razon_social_nombre == "Quantum"
+
+
+def test_editar_otro_campo_no_dispara_el_aviso_de_nombre(datos):
+    """Un PATCH que no toca el nombre no tiene por que revisarlo: si lo
+    revisara, el cliente se compararia contra si mismo o contra un parecido
+    viejo y no se podria editar ni el telefono."""
+    _cliente(razon_social_nombre="Quantum Energy Ingenieria S.A.S.")
+    cliente = _cliente(razon_social_nombre="Quantum")
+
+    respuesta = _editar(datos, cliente.id, {"ciudad": "Medellín"})
+
+    assert respuesta.status_code == 200, respuesta.data
+    assert respuesta.data["ciudad"] == "Medellín"
+
+
+def test_guardar_un_cliente_con_su_mismo_nombre_no_avisa(datos):
+    """Se excluye a si mismo: sin `excluir_id`, todo cliente seria su propio
+    duplicado y no se podria guardar el formulario sin cambiarle el nombre."""
+    cliente = _cliente(razon_social_nombre="Quantum Energy Ingenieria S.A.S.")
+
+    respuesta = _editar(datos, cliente.id, {
+        "razon_social_nombre": "Quantum Energy Ingenieria S.A.S.",
+        "ciudad": "Bogotá",
+    })
+
+    assert respuesta.status_code == 200, respuesta.data
 
 
 # ── Contactos ────────────────────────────────────────────────────────────────

@@ -102,6 +102,28 @@ class ClienteViewSet(viewsets.GenericViewSet):
             cl_serializers.ClienteListSerializer(pagina, many=True).data
         )
 
+    def _avisar_nombre_parecido(self, request, nombre, excluir_id=None):
+        """409 estructurado si ya hay un cliente con nombre muy parecido.
+
+        `forzar=true` lo salta. El aviso NO bloquea —hay razones reales para dos
+        nombres parecidos— pero tiene que aparecer: el algoritmo es el mismo de
+        proyectos y fronteras, y detecta lo que un match exacto no ve
+        ("Quantum" contra "Quantum Energy Ingenieria S.A.S.").
+        """
+        if request.query_params.get("forzar", "").strip().lower() in ("1", "true", "yes", "on"):
+            return
+        duplicado = gestion.buscar_duplicado(nombre, excluir_id=excluir_id)
+        if duplicado:
+            raise Conflict({
+                "mensaje": (
+                    f"Ya existe un cliente con un nombre muy parecido: "
+                    f"'{duplicado.razon_social_nombre}' (ID {duplicado.id})."
+                ),
+                "duplicado_nombre": True,
+                "candidato_id": duplicado.id,
+                "candidato_nombre": duplicado.razon_social_nombre,
+            })
+
     def create(self, request, *args, **kwargs):
         """`forzar=true` crea igual aunque exista un cliente con nombre parecido."""
         entrada = self.get_serializer(data=request.data)
@@ -109,18 +131,7 @@ class ClienteViewSet(viewsets.GenericViewSet):
         datos = dict(entrada.validated_data)
         contactos = datos.pop("contactos", [])
 
-        if request.query_params.get("forzar", "").strip().lower() not in ("1", "true", "yes", "on"):
-            duplicado = gestion.buscar_duplicado(datos.get("razon_social_nombre"))
-            if duplicado:
-                raise Conflict({
-                    "mensaje": (
-                        f"Ya existe un cliente con un nombre muy parecido: "
-                        f"'{duplicado.razon_social_nombre}' (ID {duplicado.id})."
-                    ),
-                    "duplicado_nombre": True,
-                    "candidato_id": duplicado.id,
-                    "candidato_nombre": duplicado.razon_social_nombre,
-                })
+        self._avisar_nombre_parecido(request, datos.get("razon_social_nombre"))
 
         # Dos filas con el mismo (email, tipo) son la misma persona repetida en
         # el formulario, no un error que valga tumbar el alta: `contactos` tiene
@@ -171,6 +182,17 @@ class ClienteViewSet(viewsets.GenericViewSet):
         entrada.is_valid(raise_exception=True)
         datos = dict(entrada.validated_data)
         datos.pop("contactos", None)   # solo se leen al crear
+
+        # El nombre se revisa también al editar. Antes solo se revisaba al
+        # crear, así que renombrar un cliente y dejarlo igual a otro pasaba en
+        # silencio -- la protección se saltaba con dos clics. `buscar_duplicado`
+        # ya aceptaba `excluir_id` justo para esto y nadie se lo pasaba: sin
+        # excluirse, todo cliente sería su propio duplicado.
+        if datos.get("razon_social_nombre"):
+            self._avisar_nombre_parecido(
+                request, datos["razon_social_nombre"], excluir_id=cliente.id,
+            )
+
         for campo, valor in datos.items():
             setattr(cliente, campo, valor)
         cliente.save()

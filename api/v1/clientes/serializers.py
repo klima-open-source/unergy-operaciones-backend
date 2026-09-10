@@ -9,6 +9,8 @@ el `field_validator` de Pydantic — si no, el UNIQUE de `(cliente_id, email,
 tipo)` deja pasar "Juan@X.com" y "juan@x.com" como dos contactos distintos.
 """
 
+import re
+
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 
@@ -18,6 +20,54 @@ from apps.clientes import models as cl_models
 class _EmailNormalizado(serializers.EmailField):
     def to_internal_value(self, data):
         return super().to_internal_value((data or "").strip().lower())
+
+
+class _NitNormalizado(serializers.CharField):
+    """El NIT, solo con sus dígitos.
+
+    El UNIQUE de la base compara TEXTO, así que "900.123.456-7",
+    "900123456-7" y "9001234567" eran tres valores distintos: el mismo cliente
+    podía entrar tres veces sin que nada avisara. Guardar siempre los dígitos
+    hace que las tres escrituras choquen entre sí.
+
+    **Lo que esto NO resuelve:** "900123456" (sin el dígito de verificación) y
+    "9001234567" (con él) siguen siendo distintos. No se puede decidir sin
+    adivinar — el último dígito de una cédula de 10 cifras es parte del número,
+    no un verificador —, y adivinar acá significa rechazar un cliente legítimo.
+    """
+
+    def run_validation(self, data=serializers.empty):
+        # `CharField.run_validation` devuelve "" tal cual --antes de
+        # `to_internal_value` y antes de los validadores-- cuando `allow_blank`
+        # está puesto, así que la cadena vacía hay que traducirla acá.
+        # Importa: en Postgres "" SÍ colisiona con otra "" (a diferencia de
+        # NULL), así que guardarla haría que el segundo cliente sin NIT chocara
+        # contra el primero al escribir.
+        if data == "":
+            return None
+        return super().run_validation(data)
+
+    def to_internal_value(self, data):
+        digitos = re.sub(r"\D", "", super().to_internal_value(data) or "")
+        # Vacío es "sin NIT", no un NIT que sea la cadena vacía.
+        return digitos or None
+
+
+class _UnicoSiVieneDato(UniqueValidator):
+    """Igual que `UniqueValidator`, pero un valor vacío no choca con nada.
+
+    Sin esto, un cliente sin NIT consultaba `nit_cedula IS NULL` y el segundo
+    cliente sin NIT se rechazaba como duplicado. En Postgres los NULL no
+    colisionan entre sí y la mayoría de los clientes no tienen NIT cargado, así
+    que habría bloqueado el alta más común. (`UniqueTogetherValidator`, el que
+    DRF armaba solo, ya saltaba los None; al pasar al validador por campo hay
+    que replicarlo a mano.)
+    """
+
+    def __call__(self, value, serializer_field):
+        if value in (None, ""):
+            return
+        super().__call__(value, serializer_field)
 
 
 class ContactoParaClienteSerializer(serializers.Serializer):
@@ -72,9 +122,13 @@ class ClienteEntradaSerializer(serializers.ModelSerializer):
     # perdio. El validador por campo devuelve el mismo error con el texto de
     # antes, y sigue cubriendo el PATCH -- que por este camino nunca llega a
     # tocar la base, asi que no puede reventar con un 500.
-    nit_cedula = serializers.CharField(
+    nit_cedula = _NitNormalizado(
         max_length=20, required=False, allow_null=True, allow_blank=True,
-        validators=[UniqueValidator(
+        validators=[_UnicoSiVieneDato(
+            # `.all()` y no los vivos: el UNIQUE de la base tampoco sabe de
+            # borrado lógico, así que un cliente eliminado sigue ocupando su
+            # NIT. Filtrar acá daría un mensaje de "ya existe" que la vista de
+            # clientes no puede explicar, y un 500 al escribir.
             queryset=cl_models.Cliente.objects.all(),
             message="Ya existe un cliente con ese NIT/cédula.",
         )],
