@@ -39,9 +39,10 @@ from apps.proyectos.services.unicidad import (
 
 from . import serializers as py_serializers
 
-# Los seis flags de servicio, por si el listado quiere filtrar por uno.
+# Los flags de servicio, por si el listado quiere filtrar por uno. Los mismos
+# que acepta el PATCH de /proyectos/{id}/servicios.
 SERVICIOS = (
-    "operacion", "representacion", "cgm", "ppa", "promotor",
+    "operacion", "representacion", "cgm", "ppa",
 )
 
 

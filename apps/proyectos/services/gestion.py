@@ -30,7 +30,6 @@ RELACIONES_BLOQUEANTES = [
     ("liquidaciones", "liquidaciones_por_proyecto_id"),
     ("asic_solicitudes", "asic_solicitudes_por_proyecto_id"),
     ("rec_procesos", "rec_procesos_por_proyecto_id"),
-    ("promotor_seguimientos", "promotor_seguimientos_por_proyecto_id"),
     ("contratos_servicio", "contratos_servicio_por_proyecto_id"),
     ("fronteras", "fronteras"),
     ("generacion_diaria", "generacion_diaria_por_proyecto_id"),
@@ -70,7 +69,6 @@ MERGE_SIMPLE = [
 MERGE_COMPUESTO = [
     ("generacion_diaria", ["fecha"]),
     ("liquidaciones", ["periodo"]),
-    ("promotor_seguimientos", ["requisito_id"]),
     ("panel_contable", ["periodo", "tipo"]),
     ("clasificacion_liquidacion", ["periodo"]),
     ("mapeo_celda_concepto", ["concepto"]),

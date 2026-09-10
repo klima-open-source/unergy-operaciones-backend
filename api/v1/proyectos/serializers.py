@@ -28,7 +28,7 @@ CAMPOS_CREACION = [
     "departamento", "municipio", "direccion_vereda", "latitud", "longitud",
     "altitud_msnm", "operador_red_id", "project_id_solenium",
     "p90_mensual_kwh", "p50_mensual_kwh", "p99_mensual_kwh", "codigo_tsf",
-    "srv_operacion", "srv_representacion", "srv_cgm", "srv_ppa", "srv_promotor",
+    "srv_operacion", "srv_representacion", "srv_cgm", "srv_ppa",
     "es_comunidad_energetica", "nombre_comunidad",
     "origina_code", "sunfactory_project_id", "fase_construccion",
     "fecha_estimada_energizacion", "avance_obra_pct", "origen",

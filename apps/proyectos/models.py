@@ -54,7 +54,6 @@ class Proyecto(Timer):
     srv_representacion = models.BooleanField(default=False)
     srv_cgm = models.BooleanField(default=False)
     srv_ppa = models.BooleanField(default=False)
-    srv_promotor = models.BooleanField(default=False)
     p90_mensual_kwh = models.JSONField(null=True, blank=True)
     p50_mensual_kwh = models.JSONField(null=True, blank=True)
     p99_mensual_kwh = models.JSONField(null=True, blank=True)
@@ -198,33 +197,6 @@ class VerificacionCosto(Timer):
 
     class Meta:
         db_table = "verificacion_costos"
-
-
-class PromotorCatalogoRequisito(models.Model):
-    id = models.CharField(primary_key=True, max_length=10)
-    nombre = models.CharField(max_length=500)
-    plazo_dias = models.IntegerField(null=True, blank=True)
-    descripcion = models.TextField(null=True, blank=True)
-
-    class Meta:
-        db_table = "promotor_catalogo_requisitos"
-
-
-class PromotorSeguimiento(Timer):
-    id = models.BigAutoField(primary_key=True)
-    proyecto = models.ForeignKey("Proyecto", on_delete=models.DO_NOTHING, db_column="proyecto_id", related_name="promotor_seguimientos_por_proyecto_id")
-    requisito = models.ForeignKey("PromotorCatalogoRequisito", on_delete=models.DO_NOTHING, db_column="requisito_id", related_name="promotor_seguimientos_por_requisito_id")
-    estado = models.CharField(max_length=11, choices=[("pendiente", "pendiente"), ("en_revision", "en_revision"), ("cumplido", "cumplido")], default="pendiente")
-    estado_instancia = models.CharField(max_length=8, choices=[("activo", "activo"), ("inactivo", "inactivo")], default="activo")
-    fecha_primer_documento = models.DateField(null=True, blank=True)
-    fecha_limite_calculada = models.DateField(null=True, blank=True)
-    descripcion_observaciones = models.TextField(null=True, blank=True)
-    responsable = models.CharField(max_length=255, null=True, blank=True)
-    fecha_ultima_actualizacion = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        db_table = "promotor_seguimientos"
-        unique_together = [("proyecto", "requisito")]
 
 
 class GeneracionDiaria(Timer):
