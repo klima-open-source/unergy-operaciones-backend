@@ -238,9 +238,13 @@ class LiquidacionesApiViewSet(viewsets.GenericViewSet):
                 archivo.content_type or "application/pdf",
             ))
 
+        # La clave de Gemini puede venir del formulario cuando la del servidor
+        # no sirve o no está puesta. No se guarda, no se registra y no vuelve en
+        # la respuesta: solo se reenvía a la API que lee los PDF.
         resultado = self._llamar(
             api.subir_facturas_xm, preparados,
             request.data.get("version", "txf"),
+            api_key=request.data.get("api_key"),
         )
         if isinstance(resultado, Response):
             return resultado

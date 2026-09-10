@@ -507,10 +507,15 @@ def listar_facturas_xm(**filtros: Any) -> dict[str, Any]:
 def subir_facturas_xm(
     archivos: list[tuple[str, bytes, str]],
     version: str,
+    api_key: str | None = None,
 ) -> dict[str, Any]:
     """Sube un lote de facturas en PDF. El mes y el año los extrae la IA del PDF.
 
     ``archivos`` son tuplas ``(nombre, contenido, content_type)``.
+
+    ``api_key`` es la clave de Gemini con la que esa API leerá los PDF. Si viene,
+    **manda sobre la del servidor**: la escribió alguien a propósito en el
+    momento. Si no viene ninguna, la API externa usa la suya.
     """
     if not archivos:
         raise LiquidacionesAPIError("No se enviaron archivos")
@@ -522,9 +527,13 @@ def subir_facturas_xm(
     # La API acepta una clave de Gemini propia para leer los PDF (§ campo
     # `api_key`, opcional). Solo se manda si está configurada en el servidor; si
     # no, esa API usa la suya. Nunca viaja desde el navegador: es un secreto.
+    # `.strip()`: pegar una clave suele arrastrar un espacio o un salto de línea,
+    # y un campo vacío del formulario llega como "" — que NO debe borrar la del
+    # servidor.
     formulario: dict[str, str] = {"version": version}
-    if settings.LIQUIDACIONES_GEMINI_API_KEY:
-        formulario["api_key"] = settings.LIQUIDACIONES_GEMINI_API_KEY
+    clave = (api_key or "").strip() or settings.LIQUIDACIONES_GEMINI_API_KEY
+    if clave:
+        formulario["api_key"] = clave
 
     data = _request(
         "POST",
@@ -534,7 +543,10 @@ def subir_facturas_xm(
     )
     if not isinstance(data, dict):
         raise LiquidacionesAPIError("La API de Liquidaciones no confirmó la subida")
-    return data
+    # La clave no vuelve al navegador ni aunque la API la devuelva: lo que se
+    # responde acaba en un log, en una captura de pantalla o en un reporte de
+    # error.
+    return {k: v for k, v in data.items() if k != "api_key"}
 
 
 # ── Datos maestros y catálogos ───────────────────────────────────────────────
