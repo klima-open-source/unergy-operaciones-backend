@@ -1,5 +1,9 @@
 """ViewSet de facturación de energía."""
 
+from collections import defaultdict
+from io import BytesIO
+
+from django.http import HttpResponse
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -11,13 +15,16 @@ from api.logging import class_logger_wrapper, log_endpoint
 from api.permissions import RolePermission
 from apps.facturacion import models as fa_models
 from apps.facturacion.services import ajustes, calculo, cumplimiento, despacho
-from apps.facturacion.services import despacho_xm, vs_despachos
+from apps.facturacion.services import cumplimiento_export, despacho_xm, vs_despachos
 from apps.liquidaciones.services import api_externa as api_liquidaciones
 from apps.liquidaciones.services import proxy
 from apps.mercado_xm import models as mx_models
 from apps.mercado_xm.services import simem
+from apps.ppa import models as ppa_models
 
 from . import serializers as fa_serializers
+
+MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 # El cálculo nuestro está bien: lo que falló es la API de Liquidaciones.
 HTTP_API_EXTERNA = 502
@@ -144,6 +151,33 @@ class FacturacionViewSet(viewsets.GenericViewSet):
         return Response(cumplimiento.build(
             calculo.periodo(periodo), anio, mes, precio_bolsa=precio_bolsa,
         ))
+
+    @action(detail=False, methods=["get"], url_path="cumplimiento/export")
+    def cumplimiento_export(self, request):
+        """Excel del cálculo de indemnización, todo formulado (3 hojas)."""
+        periodo = _periodo(request)
+        anio, mes = int(periodo[:4]), int(periodo[5:7])
+        datos = calculo.periodo(periodo)
+
+        despacho_dia: dict = defaultdict(dict)
+        for f in mx_models.DespachoContratoDia.objects.filter(periodo=periodo):
+            despacho_dia[f.codigo_sic_contrato][f.fecha.isoformat()] = float(f.kwh)
+
+        compromisos = {
+            c.contrato_id: float(c.energia_minima)
+            for c in ppa_models.PpaCompromisoEnergia.objects.filter(**{"año": anio, "mes": mes})
+            if c.energia_minima is not None
+        }
+        bolsa = simem.bolsa_mensual(anio, mes)
+
+        wb = cumplimiento_export.build_workbook(
+            periodo, datos["lineas"], dict(despacho_dia), compromisos, bolsa,
+        )
+        buf = BytesIO()
+        wb.save(buf)
+        resp = HttpResponse(buf.getvalue(), content_type=MIME_XLSX)
+        resp["Content-Disposition"] = f'attachment; filename="Indemnizacion_{periodo}.xlsx"'
+        return resp
 
     # ── Ingresos vs. despachos liquidados ─────────────────────────────────
 
