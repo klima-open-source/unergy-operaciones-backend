@@ -9,6 +9,13 @@ de `contratos_servicio`, que es lo que la plataforma muestra y deja editar, así
 que un cambio de tarifa o de fecha de firma hecho en la UI se refleja en la
 alerta.
 
+**El IPC también sale de la tabla.** Antes eran tres tasas en un dict con un
+5,1% por defecto para todo lo demás, así que un aniversario de 2027 se indexaba
+a un número inventado sin decirlo. Ahora sale de `om_ipc_tasas`, filtrando
+`confirmado=True`, y lo que no está confirmado se reporta como pendiente en vez
+de rellenarse. Ver `tasas_ipc_confirmadas` e `ipc_de` para por qué la búsqueda
+va por el año del aniversario pero el correo muestra el anterior.
+
 Los destinatarios son los mismos que los de vencimiento de PPA, a propósito
 (confirmado con negocio el 2026-08-25): `ppa.services.vencimientos.correos_de_alerta`.
 
@@ -24,24 +31,33 @@ import logging
 import os
 from datetime import date
 
-from apps.contratos.models import ContratoServicio
+from apps.contratos.models import AlertaAniversario, ContratoServicio
+from apps.om.models import OmIpcTasa
 from apps.plataforma.services.fechas import hoy_col
-from apps.ppa.services.vencimientos import correos_de_alerta
+from apps.ppa.services.vencimientos import correos_de_alerta, elegir_umbral
 
 logger = logging.getLogger("operaciones.contratos.alertas")
 
-# Días antes del aniversario en que se avisa.
+# Ventanas de aviso, en días antes del aniversario. Se CRUZAN (`<=`), no se
+# aciertan: ver `revisar_aniversarios`.
 AVISOS = (30, 15)
 
-# IPC de diciembre por año, para indexar la tarifa. El del año ANTERIOR al
-# aniversario es el que aplica: el IPC de dic-2024 indexa el aniversario de 2025.
-# Fuera de tabla se asume el último conocido.
-IPC_POR_ANIO = {2023: 0.0928, 2024: 0.052, 2025: 0.051}
-IPC_POR_DEFECTO = 0.051
+# Un contrato terminado o vencido no indexa nada, así que avisar de su
+# aniversario es ruido. `en_renovacion` sí avisa: es justo cuando la tarifa
+# nueva importa.
+ESTADOS_QUE_AVISAN = ("vigente", "en_renovacion")
 
 FILA_TARIFA = (
     '<tr><td style="padding:6px 0;color:#6B5F80">Nueva tarifa {etiqueta}</td>'
     '<td style="padding:6px 0;font-weight:600;color:{color}">{valor} $/kWh</td></tr>'
+)
+
+# Se muestra cuando la tarifa se pudo calcular pero algún aniversario viejo cayó
+# en un año sin tasa: el número queda por debajo del real y hay que decirlo.
+NOTA_PARCIAL = (
+    '<tr><td style="padding:6px 0;color:#6B5F80">Proyección</td>'
+    '<td style="padding:6px 0;font-weight:600;color:#b45309">'
+    'parcial — sin IPC confirmado de {anios}</td></tr>'
 )
 
 PLANTILLA = """
@@ -65,8 +81,9 @@ PLANTILLA = """
       <tr><td style="padding:6px 0;color:#6B5F80">Fecha aniversario</td>
           <td style="padding:6px 0;font-weight:600">{aniversario}</td></tr>
       <tr><td style="padding:6px 0;color:#6B5F80">IPC aplicado</td>
-          <td style="padding:6px 0;font-weight:600">{ipc_pct}% (IPC dic {anio_ipc})</td></tr>
+          <td style="padding:6px 0;font-weight:600">{ipc_texto}</td></tr>
       {filas_tarifa}
+      {nota_parcial}
     </table>
     <p style="color:#6B5F80;font-size:12px;margin-top:20px">
       Este es un mensaje automatico del sistema de Operaciones Unergy.<br>
@@ -94,27 +111,76 @@ def proximo_aniversario(firma: date, hoy: date) -> tuple[date, int] | None:
     return None
 
 
-def ipc_de(anio_aniversario: int) -> tuple[float, int]:
-    """`(tasa, año del IPC)` que aplica a ese aniversario."""
-    anio_ipc = anio_aniversario - 1
-    return IPC_POR_ANIO.get(anio_ipc, IPC_POR_DEFECTO), anio_ipc
+def tasas_ipc_confirmadas() -> dict[int, float]:
+    """Las tasas de IPC que alguien ya confirmó, por año de APLICACIÓN.
+
+    Sale de `om_ipc_tasas` —la única de las dos tablas de IPC con mantenimiento:
+    `om.revisar_ipc_del_anio` le crea la fila cada 1-enero y hay pantalla para
+    confirmarla— y no de un dict escrito a mano, que se quedaba viejo en silencio.
+
+    `confirmado=True` no es opcional: la tarea del 1-enero deja la fila del año
+    nuevo en `tasa=0.0, confirmado=False` esperando el dato del DANE, y leerla
+    sin filtrar aplicaría 0% de indexación sin que nada lo dijera.
+    """
+    return {fila.año: float(fila.tasa)
+            for fila in OmIpcTasa.objects.filter(confirmado=True)}
 
 
-def tarifa_indexada(tarifa: float | None, anio_aniversario: int,
-                    numero: int) -> float | None:
-    """La tarifa capitalizada por el IPC tantas veces como aniversarios pasaron."""
-    if not tarifa:
+def ipc_de(anio_aniversario: int, tasas: dict[int, float]) -> tuple[float | None, int]:
+    """`(tasa, año que se muestra)` para ese aniversario. `None` si nadie la confirmó.
+
+    La búsqueda es por el año del aniversario, directo, porque la tabla indexa por
+    año de aplicación. El año que se MUESTRA es el anterior: el número es el IPC de
+    dic-2025 aunque sea la fila 2026 la que indexa el aniversario de 2026.
+    """
+    return tasas.get(anio_aniversario), anio_aniversario - 1
+
+
+def factor_ipc(anio_aniversario: int, numero: int,
+               tasas: dict[int, float]) -> tuple[float, list[int]]:
+    """`(factor acumulado, años sin tasa)` de todos los aniversarios cumplidos.
+
+    Es el producto de `(1 + tasa)` año por año, no una sola tasa elevada a
+    `numero`: los años reales fueron distintos (9,28% en 2024, 5,20% en 2025,
+    5,10% en 2026) y capitalizar el último tres veces da otro número. Mismo
+    criterio que `factor_acumulado` de O&M.
+
+    Los años sin tasa se saltan y se devuelven aparte, para poder avisar que la
+    proyección quedó corta en vez de inventarles un valor.
+    """
+    factor = 1.0
+    faltantes: list[int] = []
+    for anio in range(anio_aniversario - numero + 1, anio_aniversario + 1):
+        tasa = tasas.get(anio)
+        if tasa is None:
+            faltantes.append(anio)
+        else:
+            factor *= 1 + tasa
+    return factor, faltantes
+
+
+def tarifa_indexada(tarifa: float | None, anio_aniversario: int, numero: int,
+                    tasas: dict[int, float]) -> float | None:
+    """La tarifa indexada al aniversario, o `None` si no se puede calcular.
+
+    Sin la tasa del propio aniversario no hay número que dar: la tarifa nueva es
+    justamente la que ese aniversario estrena, así que conocer las de años
+    anteriores no alcanza.
+    """
+    if not tarifa or tasas.get(anio_aniversario) is None:
         return None
-    ipc, _ = ipc_de(anio_aniversario)
-    return round(tarifa * ((1 + ipc) ** numero), 4)
+    factor, _ = factor_ipc(anio_aniversario, numero, tasas)
+    return round(tarifa * factor, 4)
 
 
 def contratos_de_representacion() -> list[dict]:
-    """Los contratos con servicio de representación y fecha de firma."""
+    """Los contratos de representación vivos y con fecha de firma."""
     filas = ContratoServicio.objects.filter(
         servicio_aplica="representacion", fecha_firma_contrato__isnull=False,
+        estado__in=ESTADOS_QUE_AVISAN,
     ).select_related("proyecto")
     return [{
+        "id": r.id,
         "firma": r.fecha_firma_contrato,
         "proyecto": (r.nombre_proyecto_ref
                      or (r.proyecto.nombre_comercial if r.proyecto else "")).strip(),
@@ -125,11 +191,13 @@ def contratos_de_representacion() -> list[dict]:
     } for r in filas]
 
 
-def construir_html(contrato: dict, aniversario: date, numero: int, dias: int) -> str:
-    ipc, anio_ipc = ipc_de(aniversario.year)
-    nueva_cgm = tarifa_indexada(contrato["tarifa_cgm"], aniversario.year, numero)
+def construir_html(contrato: dict, aniversario: date, numero: int, dias: int,
+                   tasas: dict[int, float]) -> str:
+    tasa, anio_ipc = ipc_de(aniversario.year, tasas)
+    _, faltantes = factor_ipc(aniversario.year, numero, tasas)
+    nueva_cgm = tarifa_indexada(contrato["tarifa_cgm"], aniversario.year, numero, tasas)
     nueva_rep = tarifa_indexada(contrato["tarifa_representacion"],
-                                aniversario.year, numero)
+                                aniversario.year, numero, tasas)
 
     filas = ""
     if nueva_cgm:
@@ -137,27 +205,64 @@ def construir_html(contrato: dict, aniversario: date, numero: int, dias: int) ->
     if nueva_rep:
         filas += FILA_TARIFA.format(etiqueta="Rep.", color="#3b82f6", valor=nueva_rep)
 
+    # Sin tasa la alerta sale igual: avisar del aniversario es el objetivo, y la
+    # tarifa es lo secundario. Decir "pendiente" es lo que antes se tapaba con el
+    # 5,1% por defecto.
+    ipc_texto = (f"{tasa * 100:.2f}% (IPC dic {anio_ipc})" if tasa is not None
+                 else f"pendiente de confirmación (IPC dic {anio_ipc})")
+
     return PLANTILLA.format(
         dias=dias,
         proyecto=contrato["proyecto"],
         inversionista=contrato["inversionista"] or "—",
         aniversario=aniversario.strftime("%d/%m/%Y"),
-        ipc_pct=f"{ipc * 100:.2f}",
-        anio_ipc=anio_ipc,
+        ipc_texto=ipc_texto,
         filas_tarifa=filas,
+        nota_parcial=(NOTA_PARCIAL.format(anios=", ".join(str(a) for a in faltantes))
+                      if filas and faltantes else ""),
+    )
+
+
+def avisos_ya_enviados(contratos: list[dict]) -> set[tuple[int, date, int]]:
+    """Las ventanas ya avisadas, en una sola consulta para toda la corrida."""
+    return set(
+        AlertaAniversario.objects
+        .filter(contrato_id__in=[c["id"] for c in contratos])
+        .values_list("contrato_id", "aniversario", "dias_aviso")
     )
 
 
 def revisar_aniversarios() -> int:
-    """Manda las alertas que correspondan hoy. Devuelve cuántas salieron."""
+    """Manda las alertas que correspondan hoy. Devuelve cuántas salieron.
+
+    **Cruce por umbral (`<=`) y no coincidencia exacta (`==`)**, igual que las
+    alertas de vencimiento de PPA y por el mismo motivo: así el job tolera
+    corridas perdidas —un deploy, una caída, el worker reiniciando a las 8:00— y
+    contratos dados de alta ya dentro de una ventana. Con `==`, un contrato a 22
+    días del aniversario no disparaba ni la ventana de 30 ni la de 15: no avisaba
+    nunca.
+
+    Lo que hace seguro el `<=` es el libro de `AlertaAniversario`: sin él, cruzar
+    la ventana mandaría el correo los 30 días seguidos. La fila se escribe
+    después del envío, así que un SMTP caído se reintenta mañana.
+
+    Se avisa la ventana MÁS AJUSTADA ya cruzada, no todas: un contrato que
+    aparece a 5 días recibe un correo (el de 15), no dos.
+    """
     if not os.environ.get("SMTP_HOST"):
         logger.info("SMTP sin configurar — alertas de representación omitidas")
         return 0
 
     hoy = hoy_col()
+    contratos = contratos_de_representacion()
+    if not contratos:
+        return 0
+
+    tasas = tasas_ipc_confirmadas()
+    ya_avisados = avisos_ya_enviados(contratos)
     enviadas = 0
 
-    for contrato in contratos_de_representacion():
+    for contrato in contratos:
         if not contrato["firma"] or not contrato["proyecto"]:
             continue
         proximo = proximo_aniversario(contrato["firma"], hoy)
@@ -165,17 +270,26 @@ def revisar_aniversarios() -> int:
             continue
         aniversario, numero = proximo
         dias = (aniversario - hoy).days
-        if dias not in AVISOS:
+        umbral = elegir_umbral(dias, list(AVISOS))
+        if umbral is None or (contrato["id"], aniversario, umbral) in ya_avisados:
             continue
-        if _enviar(contrato, aniversario, numero, dias):
-            enviadas += 1
+
+        # El correo lleva los días REALES que faltan ("En 22 dias"), no el
+        # umbral de la ventana: el umbral solo identifica el aviso.
+        if not _enviar(contrato, aniversario, numero, dias, tasas):
+            continue
+        AlertaAniversario.objects.create(
+            contrato_id=contrato["id"], aniversario=aniversario, dias_aviso=umbral,
+        )
+        enviadas += 1
 
     if enviadas:
         logger.info("alertas de renovación CGM enviadas: %d", enviadas)
     return enviadas
 
 
-def _enviar(contrato: dict, aniversario: date, numero: int, dias: int) -> bool:
+def _enviar(contrato: dict, aniversario: date, numero: int, dias: int,
+            tasas: dict[int, float]) -> bool:
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
 
@@ -191,7 +305,7 @@ def _enviar(contrato: dict, aniversario: date, numero: int, dias: int) -> bool:
     msg["Subject"] = asunto
     msg["From"] = os.environ.get("SMTP_FROM", "operaciones@unergy.io")
     msg["To"] = ", ".join(destinatarios)
-    msg.attach(MIMEText(construir_html(contrato, aniversario, numero, dias),
+    msg.attach(MIMEText(construir_html(contrato, aniversario, numero, dias, tasas),
                         "html", "utf-8"))
 
     filas = [{"email": e, "tipo": "to"} for e in destinatarios]

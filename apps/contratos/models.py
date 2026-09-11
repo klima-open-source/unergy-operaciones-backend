@@ -107,3 +107,40 @@ class Poliza(Timer):
 
     class Meta:
         db_table = "polizas"
+
+
+class AlertaAniversario(Timer):
+    """Libro de avisos de aniversario ya enviados, uno por ventana.
+
+    NO es una tabla generada: nace acá (2026-09-10) para que
+    `contratos.alertas_representacion` sea idempotente y tolere corridas
+    perdidas. Antes el disparo era coincidencia exacta (`dias in (30, 15)`), sin
+    registro de nada: una corrida perdida perdía el aviso para siempre y dos
+    corridas el mismo día mandaban dos correos.
+
+    La existencia de la fila ES la marca de "ya avisé"; no hay columna de
+    estado. Se escribe DESPUÉS de que el correo salió bien, así que un SMTP
+    caído no consume el aviso: la ventana sigue cruzada y la corrida siguiente
+    reintenta.
+
+    `aniversario` va en la llave, y no basta `(contrato, dias_aviso)` como en
+    `alertas` (la de PPA): un PPA tiene una sola `fecha_fin`, pero un contrato
+    de representación cumple aniversario todos los años. Sin la fecha en la
+    llave, el aviso saldría una única vez en la vida del contrato.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    contrato = models.ForeignKey(
+        "contratos.ContratoServicio", on_delete=models.CASCADE,
+        db_column="contrato_id", related_name="alertas_aniversario",
+    )
+    # La fecha concreta del aniversario avisado, no el año: es la que distingue
+    # un aniversario del siguiente.
+    aniversario = models.DateField()
+    # El umbral cruzado (30 o 15), no los días reales que faltaban: es lo que
+    # identifica la ventana. Los días reales van en el texto del correo.
+    dias_aviso = models.IntegerField()
+
+    class Meta:
+        db_table = "contrato_alertas_aniversario"
+        unique_together = [("contrato", "aniversario", "dias_aviso")]
