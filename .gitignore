@@ -30,3 +30,4 @@ scripts/_tmp_*
 # Golden de /comercial/proyectos-operando: trae datos de clientes y contratos,
 # y este repo es publico. Se captura con scripts/capturar_golden_operando.py.
 tests/golden/
+.DS_Store

@@ -54,7 +54,7 @@ class PolizaFilaSerializer(serializers.Serializer):
     municipio = serializers.CharField(allow_null=True)
     departamento = serializers.CharField(allow_null=True)
     direccion_vereda = serializers.CharField(allow_null=True)
-    operador_red = serializers.CharField(allow_null=True)
+    operador_red = serializers.CharField(source="operador_red_nombre", allow_null=True)
 
     marca_paneles = _CampoDeInfoTecnica("marca_paneles")
     cantidad_total_paneles = _CampoDeInfoTecnica("cantidad_total_paneles")
