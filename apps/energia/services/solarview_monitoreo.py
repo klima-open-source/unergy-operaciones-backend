@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
+from calendar import monthrange
 from datetime import datetime, timedelta
 
 from django.db import close_old_connections, connection
@@ -219,6 +220,27 @@ def historial(proyecto_id: int, fecha_inicio: str, fecha_fin: str,
         "puntos": puntos,
         "total_kwh": round(sum(pt["kwh"] for pt in puntos), 1),
     }
+
+
+def _p90_del_dia(proyecto) -> float | None:
+    """El P90 del mes en curso repartido entre sus días, en kWh.
+
+    `p90_mensual_kwh` son 12 valores, uno por mes. `None` --y no 0-- cuando la
+    planta no tiene curva cargada: 0 se vería como "la meta es cero" y haría que
+    el porcentaje de cumplimiento saliera absurdo.
+    """
+    curva = proyecto.p90_mensual_kwh
+    if not curva:
+        return None
+    hoy = hoy_col()
+    try:
+        mensual = float(curva[hoy.month - 1] or 0)
+    except (IndexError, TypeError, ValueError):
+        return None
+    if mensual <= 0:
+        return None
+    dias = monthrange(hoy.year, hoy.month)[1]
+    return round(mensual / dias, 1)
 
 
 def _proyectos_en_operacion() -> list[tuple[Proyecto, int]]:
@@ -433,6 +455,15 @@ def monitoreo_flota() -> dict:
             "availability_pct": disp.get("availability"),
             "capacity_kwp": round(capacidad, 1),
             "energy_today_kwh": gen_hoy.get(p.id),
+            # La meta del día según el P90 del mes. Va acá porque el proyecto ya
+            # está cargado en este bucle: no cuesta ni una consulta más.
+            #
+            # Antes lo calculaba el frontend, y para eso se traía TODO el
+            # listado de proyectos (~188, con las cinco relaciones anidadas del
+            # serializer de /proyectos) para leer un array de 12 números de las
+            # ~47 plantas de esta vista. Era la petición más pesada de la
+            # pantalla y existía para eso.
+            "p90_diario_kwh": _p90_del_dia(p),
         })
 
     filas.sort(key=lambda x: (ORDEN_ESTADO.get(x["status"], 5), x["nombre"] or ""))
