@@ -1,10 +1,9 @@
-"""Techo de bolsa (PTB) de SIMEM (dataset 709b84) y el capping día a día.
+"""Precio de bolsa mensual (SIMEM 709b84) para el valor a indemnizar.
 
-`ptb_diario` es puro; `precio_bolsa_techado` combina el techo con nuestro precio de
-bolsa diario — se le inyecta un cliente httpx (MockTransport) y se sustituye la
-consulta a `precios_bolsa_diario`, así no toca ni red ni base.
+Réplica del Excel de Compensación: versión más nueva disponible (TXF gana, TXR si
+TXF aún no salió), redondeo 2 dec por hora, promedio de todas las horas.
+`bolsa_mensual` se prueba con un cliente httpx inyectado (MockTransport), sin red.
 """
-import json
 import os
 
 import httpx
@@ -18,85 +17,70 @@ django.setup()
 from apps.mercado_xm.services import simem
 
 
-def _rec(dia_hora, valor, version="TX1", variable="PB_Nal"):
-    return {"CodigoVariable": variable, "FechaHora": dia_hora, "Version": version,
+def _rec(fecha_hora, valor, version="TXF", variable="PB_Nal"):
+    return {"CodigoVariable": variable, "FechaHora": fecha_hora, "Version": version,
             "UnidadMedida": "COP/kWh", "Valor": valor}
 
 
-# ── ptb_diario (puro) ──────────────────────────────────────────────────────
-
-def test_ptb_diario_promedia_horas_de_la_mejor_version():
-    recs = [
-        _rec("2026-07-01 00:00:00", 100, "TX1"),
-        _rec("2026-07-01 01:00:00", 200, "TX1"),
-        # TX2 es más definitiva: gana y descarta las TX1 de ese día
-        _rec("2026-07-01 00:00:00", 500, "TX2"),
-        _rec("2026-07-01 01:00:00", 700, "TX2"),
-    ]
-    assert simem.ptb_diario(recs) == {"2026-07-01": 600.0}   # (500+700)/2
-
-
-def test_ptb_diario_ignora_otras_variables():
-    recs = [_rec("2026-07-01 00:00:00", 100), _rec("2026-07-01 01:00:00", 999, variable="OTRA")]
-    assert simem.ptb_diario(recs) == {"2026-07-01": 100.0}
-
-
-# ── precio_bolsa_techado (con cliente y DB inyectados) ─────────────────────
-
-def _cliente_simem(records):
+def _cliente(records):
     payload = {"result": {"records": records}}
-    return httpx.Client(transport=httpx.MockTransport(
-        lambda req: httpx.Response(200, json=payload)))
+    return httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(200, json=payload)))
 
 
-def test_techado_recorta_solo_los_dias_donde_el_ptb_es_menor(monkeypatch):
-    monkeypatch.setattr(simem, "_nuestro_bolsa_diario",
-                        lambda a, m: {"2026-07-01": 600.0, "2026-07-02": 800.0})
-    # PTB: día 1 = 500 (techa 600→500); día 2 = 900 (no techa, 800<900)
-    recs = [_rec("2026-07-01 00:00:00", 500), _rec("2026-07-02 00:00:00", 900)]
-    out = simem.precio_bolsa_techado(2026, 7, client=_cliente_simem(recs))
+# ── bolsa_horaria (puro) ───────────────────────────────────────────────────
 
+def test_bolsa_horaria_redondea_y_txf_gana_a_txr():
+    recs = [
+        _rec("2026-08-01 00:00:00", 988.9669, "TXR"),   # más preliminar
+        _rec("2026-08-01 00:00:00", 988.9617, "TXF"),   # gana TXF, redondea a 988.96
+        _rec("2026-08-01 01:00:00", 649.4617, "TXF"),
+    ]
+    h = simem.bolsa_horaria(recs)
+    assert h[("2026-08-01", "00")] == 988.96
+    assert h[("2026-08-01", "01")] == 649.46
+
+
+def test_bolsa_horaria_usa_txr_si_no_hay_txf():
+    # Mes reciente: TXF aún no salió → se usa TXR.
+    recs = [_rec("2026-08-01 00:00:00", 900.005, "TXR")]
+    assert simem.bolsa_horaria(recs) == {("2026-08-01", "00"): 900.0}
+
+
+# ── bolsa_mensual ──────────────────────────────────────────────────────────
+
+def test_bolsa_mensual_promedia_todas_las_horas():
+    recs = [
+        _rec("2026-08-01 00:00:00", 900.00),
+        _rec("2026-08-01 01:00:00", 800.00),
+        _rec("2026-08-02 00:00:00", 700.00),
+    ]
+    out = simem.bolsa_mensual(2026, 8, client=_cliente(recs))
+    assert out["precio_bolsa"] == 800.0        # (900+800+700)/3
+    assert out["horas"] == 3
     assert out["dias"] == 2
-    assert out["dias_techados"] == 1
-    assert out["ptb_disponible"] is True
-    assert out["precio_bolsa"] == 650.0          # (500 + 800) / 2
+    assert out["horas_techadas"] == 0
+    assert out["detalle"]["2026-08-01"] == {"00": 900.0, "01": 800.0}
 
 
-def test_sin_bolsa_propia_usa_promedio_mensual_de_simem(monkeypatch):
-    # El backend nuevo no tiene `precios_bolsa_diario` (EVO vacío): el promedio
-    # mensual de SIMEM es la "bolsa de todo el mes".
-    monkeypatch.setattr(simem, "_nuestro_bolsa_diario", lambda a, m: {})
-    recs = [_rec("2026-07-01 00:00:00", 700), _rec("2026-07-02 00:00:00", 900)]
-    out = simem.precio_bolsa_techado(2026, 7, client=_cliente_simem(recs))
-    assert out["precio_bolsa"] == 800.0          # (700 + 900) / 2
-    assert out["fuente"] == "simem"
-    assert out["ptb_disponible"] is True
+def test_bolsa_mensual_aplica_techo_por_hora():
+    recs = [
+        _rec("2026-08-01 00:00:00", 1000.00),  # > techo → se recorta a 850
+        _rec("2026-08-01 01:00:00", 800.00),   # < techo → queda
+    ]
+    out = simem.bolsa_mensual(2026, 8, techo=850.0, client=_cliente(recs))
+    assert out["precio_bolsa"] == 825.0        # (850 + 800) / 2
+    assert out["horas_techadas"] == 1
+    assert out["detalle"]["2026-08-01"]["00"] == 850.0
 
 
-def test_sin_bolsa_propia_y_sin_simem_devuelve_none(monkeypatch):
-    monkeypatch.setattr(simem, "_nuestro_bolsa_diario", lambda a, m: {})
-    out = simem.precio_bolsa_techado(2026, 7, client=_cliente_simem([]))
+def test_bolsa_mensual_sin_datos_devuelve_none():
+    out = simem.bolsa_mensual(2026, 8, client=_cliente([]))
     assert out["precio_bolsa"] is None
-    assert out["fuente"] == "ninguna"
+    assert out["horas"] == 0
 
 
-def test_techado_sin_ptb_no_recorta_y_marca_no_disponible(monkeypatch):
-    monkeypatch.setattr(simem, "_nuestro_bolsa_diario",
-                        lambda a, m: {"2026-07-01": 600.0, "2026-07-02": 800.0})
-    # SIMEM sin registros → no hay techo → promedio sin recortar
-    out = simem.precio_bolsa_techado(2026, 7, client=_cliente_simem([]))
-    assert out["precio_bolsa"] == 700.0          # (600 + 800) / 2
-    assert out["dias_techados"] == 0
-    assert out["ptb_disponible"] is False
-
-
-def test_techado_tolera_caida_de_simem(monkeypatch):
-    monkeypatch.setattr(simem, "_nuestro_bolsa_diario", lambda a, m: {"2026-07-01": 600.0})
-
+def test_bolsa_mensual_tolera_caida_de_simem():
     def _boom(req):
         raise httpx.ConnectError("SIMEM caído")
-
-    cli = httpx.Client(transport=httpx.MockTransport(_boom))
-    out = simem.precio_bolsa_techado(2026, 7, client=cli)
-    assert out["precio_bolsa"] == 600.0          # sin techo, no rompe
-    assert out["ptb_disponible"] is False
+    out = simem.bolsa_mensual(2026, 8, client=httpx.Client(transport=httpx.MockTransport(_boom)))
+    assert out["precio_bolsa"] is None

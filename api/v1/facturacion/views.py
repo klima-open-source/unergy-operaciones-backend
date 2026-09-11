@@ -137,10 +137,10 @@ class FacturacionViewSet(viewsets.GenericViewSet):
     def cumplimiento(self, request):
         periodo = _periodo(request)
         anio, mes = int(periodo[:4]), int(periodo[5:7])
-        # Precio de bolsa del mes (COP/kWh) para valorar la energía incumplida,
-        # TECHADO por el PTB de SIMEM (dataset 709b84) día a día: nuestro precio de
-        # bolsa se recorta a min(bolsa, PTB) y se promedia el mes.
-        precio_bolsa = simem.precio_bolsa_techado(anio, mes)["precio_bolsa"]
+        # Precio de bolsa del mes (COP/kWh) para valorar la energía incumplida:
+        # SIMEM 709b84 horario (versión TXF, redondeo 2dec, promedio de todas las
+        # horas), igual que el Excel de Compensación de la usuaria.
+        precio_bolsa = simem.bolsa_mensual(anio, mes)["precio_bolsa"]
         return Response(cumplimiento.build(
             calculo.periodo(periodo), anio, mes, precio_bolsa=precio_bolsa,
         ))
