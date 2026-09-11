@@ -107,12 +107,14 @@ def precio_bolsa_techado(anio: int, mes: int, *, client: httpx.Client | None = N
     Cada día se recorta nuestro precio de bolsa al PTB (`min(bolsa, PTB)`) y se
     promedian los días. Si SIMEM no responde, se devuelve el promedio SIN techo y
     `ptb_disponible=False` (no se rompe la vista por una caída de SIMEM).
+
+    Si NO tenemos precio de bolsa diario propio (la tabla `precios_bolsa_diario` de
+    EVO está vacía — el caso del backend nuevo), el PTB de SIMEM ES el precio de
+    bolsa del mes: se usa su promedio mensual directamente ("bolsa de todo el mes").
     """
     nuestro = _nuestro_bolsa_diario(anio, mes)
-    if not nuestro:
-        return {"precio_bolsa": None, "dias": 0, "dias_techados": 0,
-                "ptb_disponible": False, "ptb_promedio": None}
 
+    # El techo se trae SIEMPRE: es el precio de bolsa mismo cuando no hay dato propio.
     techo: dict[str, float] = {}
     try:
         ultimo = calendar.monthrange(anio, mes)[1]
@@ -120,6 +122,19 @@ def precio_bolsa_techado(anio: int, mes: int, *, client: httpx.Client | None = N
         techo = ptb_diario(registros)
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("SIMEM PTB no disponible para %s-%02d: %s", anio, mes, exc)
+
+    ptb_prom = round(mean(techo.values()), 2) if techo else None
+
+    # Sin bolsa propia: el promedio mensual de SIMEM es la bolsa del mes.
+    if not nuestro:
+        return {
+            "precio_bolsa": ptb_prom,
+            "dias": len(techo),
+            "dias_techados": 0,
+            "ptb_disponible": bool(techo),
+            "ptb_promedio": ptb_prom,
+            "fuente": "simem" if techo else "ninguna",
+        }
 
     capados, dias_techados = [], 0
     for dia, bolsa in nuestro.items():
@@ -130,11 +145,11 @@ def precio_bolsa_techado(anio: int, mes: int, *, client: httpx.Client | None = N
         else:
             capados.append(bolsa)
 
-    ptb_prom = round(mean(techo.values()), 2) if techo else None
     return {
         "precio_bolsa": round(mean(capados), 2),
         "dias": len(capados),
         "dias_techados": dias_techados,
         "ptb_disponible": bool(techo),
         "ptb_promedio": ptb_prom,
+        "fuente": "evo_techado",
     }

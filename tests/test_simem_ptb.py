@@ -62,11 +62,22 @@ def test_techado_recorta_solo_los_dias_donde_el_ptb_es_menor(monkeypatch):
     assert out["precio_bolsa"] == 650.0          # (500 + 800) / 2
 
 
-def test_techado_sin_datos_nuestros_devuelve_none(monkeypatch):
+def test_sin_bolsa_propia_usa_promedio_mensual_de_simem(monkeypatch):
+    # El backend nuevo no tiene `precios_bolsa_diario` (EVO vacío): el promedio
+    # mensual de SIMEM es la "bolsa de todo el mes".
+    monkeypatch.setattr(simem, "_nuestro_bolsa_diario", lambda a, m: {})
+    recs = [_rec("2026-07-01 00:00:00", 700), _rec("2026-07-02 00:00:00", 900)]
+    out = simem.precio_bolsa_techado(2026, 7, client=_cliente_simem(recs))
+    assert out["precio_bolsa"] == 800.0          # (700 + 900) / 2
+    assert out["fuente"] == "simem"
+    assert out["ptb_disponible"] is True
+
+
+def test_sin_bolsa_propia_y_sin_simem_devuelve_none(monkeypatch):
     monkeypatch.setattr(simem, "_nuestro_bolsa_diario", lambda a, m: {})
     out = simem.precio_bolsa_techado(2026, 7, client=_cliente_simem([]))
-    assert out == {"precio_bolsa": None, "dias": 0, "dias_techados": 0,
-                   "ptb_disponible": False, "ptb_promedio": None}
+    assert out["precio_bolsa"] is None
+    assert out["fuente"] == "ninguna"
 
 
 def test_techado_sin_ptb_no_recorta_y_marca_no_disponible(monkeypatch):
