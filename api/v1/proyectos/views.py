@@ -103,6 +103,21 @@ def _filtro_ppa(request):
     return condicion
 
 
+def _redividir_paneles(proyecto_id) -> dict:
+    """Redivide los paneles del proyecto tras cambiar sus inversionistas.
+
+    Las líneas de un panel son un snapshot repartido al armarlo: sin esto, el
+    panel del mes en que cambió el inversionista sigue mostrando al viejo hasta
+    que alguien se acuerde de redividir a mano.
+
+    Se importa aquí adentro y no arriba para no crear un ciclo entre `proyectos`
+    y `contabilidad`. Nunca levanta: ver `redividir_proyecto`.
+    """
+    from apps.contabilidad.services.panel import redividir_proyecto
+
+    return redividir_proyecto(int(proyecto_id))
+
+
 @class_logger_wrapper(name="Operaciones | Proyectos")
 class ProyectoViewSet(viewsets.GenericViewSet):
     """Proyectos: las plantas de la plataforma.
@@ -835,11 +850,12 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         ).exists():
             raise Conflict("Este cliente ya es inversionista de este proyecto")
         inv = entrada.save(proyecto_id=int(pk))
+        datos = py_serializers.ProyectoInversionistaSerializer(
+            py_models.ProyectoInversionista.objects
+            .select_related("cliente").get(pk=inv.id)
+        ).data
         return Response(
-            py_serializers.ProyectoInversionistaSerializer(
-                py_models.ProyectoInversionista.objects
-                .select_related("cliente").get(pk=inv.id)
-            ).data,
+            {**datos, "paneles_redivididos": _redividir_paneles(pk)},
             status=status.HTTP_201_CREATED,
         )
 
@@ -855,6 +871,7 @@ class ProyectoViewSet(viewsets.GenericViewSet):
             raise NotFound("Inversionista no encontrado")
         if request.method == "DELETE":
             inv.delete()
+            _redividir_paneles(pk)
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         entrada = py_serializers.ProyectoInversionistaSerializer(
@@ -862,9 +879,8 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         )
         entrada.is_valid(raise_exception=True)
         entrada.save()
-        return Response(
-            py_serializers.ProyectoInversionistaSerializer(
-                py_models.ProyectoInversionista.objects
-                .select_related("cliente").get(pk=inv_id)
-            ).data
-        )
+        datos = py_serializers.ProyectoInversionistaSerializer(
+            py_models.ProyectoInversionista.objects
+            .select_related("cliente").get(pk=inv_id)
+        ).data
+        return Response({**datos, "paneles_redivididos": _redividir_paneles(pk)})

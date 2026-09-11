@@ -117,8 +117,12 @@ RUTAS_RETIRADAS = {
 #               contratos; corregir uno obligaba a entrar al Django de
 #               Liquidaciones. La API externa si lo permite (`OPTIONS` sobre el
 #               detalle responde GET, PUT, PATCH), solo faltaba exponerlo.
+#   2026-09-10  POST /ipp/sincronizar. El IPP del DANE se consultaba en dos
+#               sitios que no se hablaban: la API de Liquidaciones y nuestro
+#               `ipp_mensual`, que se llenaba a mano y estaba 15 meses corto.
 RUTAS_NUEVAS = {
     ("/api/v1/liquidaciones-api/contratos-energia/{}", "PATCH"),
+    ("/api/v1/liquidaciones-api/ipp/sincronizar", "POST"),
 }
 
 
