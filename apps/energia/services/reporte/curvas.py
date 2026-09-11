@@ -35,10 +35,61 @@ HORAS = list(range(24))
 # frío) sin perder nada de precisión real (los VALORES de medición se
 # siguen consultando frescos siempre, solo el mapeo de IDs se reusa más).
 _CACHE_TTL = 1800  # segundos
-_mapa_medidor_nodo_cache: dict[int, int] | None = None
-_mapa_medidor_nodo_ts = 0.0
-_borders_crudos_cache: list[dict] | None = None
-_borders_crudos_ts = 0.0
+
+# **El cache vive en Redis, no en el proceso.** Estos catalogos se guardaban en
+# variables globales del modulo, y eso alcanzaba cuando `WORKERS` tenia que ser
+# 1 (el BackgroundScheduler vivia dentro del proceso web). Al levantar esa
+# restriccion, gunicorn corre con `--workers 3` y cada worker quedo con su
+# propia copia: abrir tres fronteras seguidas caia tipicamente en tres procesos
+# distintos y cada uno pagaba el fetch completo (~5-9s) por separado. El TTL de
+# 30 minutos daba una falsa sensacion de barato.
+#
+# Redis ya estaba puesto para esto: `CACHES` en config/settings.py apunta al
+# mismo Redis del compose y su comentario dice, textualmente, que es para
+# "estado efimero (que es lo que era antes: memoria de un proceso)".
+#
+# Se conserva un primer nivel EN EL PROCESO porque no es redundante: evita
+# deserializar el catalogo completo de fronteras en cada apertura del panel.
+# Redis es el segundo nivel, el que comparten los tres workers.
+_CLAVE_MAPA_NODO = "reporte_energia:mapa_medidor_nodo"
+_CLAVE_BORDERS = "reporte_energia:borders_crudos"
+
+_local: dict[str, tuple[float, object]] = {}
+
+
+def _cacheado(clave: str, construir, usar_cache: bool = True):
+    """Devuelve el valor de `clave`, construyendolo solo si hace falta.
+
+    Tres capas, de la mas barata a la mas cara: memoria del proceso, Redis, y
+    la llamada real a Quoia. `usar_cache=False` las saltea las dos primeras y
+    refresca ambas -- lo usa la corrida diaria, que quiere el catalogo fresco.
+
+    **Si Redis no responde, no se rompe nada**: se cae al comportamiento
+    anterior (cache por proceso y, en el peor caso, el fetch). Un catalogo de
+    IDs no vale una caida del panel.
+    """
+    from django.core.cache import cache
+
+    now = time.monotonic()
+    if usar_cache:
+        guardado = _local.get(clave)
+        if guardado is not None and (now - guardado[0]) < _CACHE_TTL:
+            return guardado[1]
+        try:
+            de_redis = cache.get(clave)
+        except Exception:
+            de_redis = None
+        if de_redis is not None:
+            _local[clave] = (now, de_redis)
+            return de_redis
+
+    valor = construir()
+    _local[clave] = (now, valor)
+    try:
+        cache.set(clave, valor, _CACHE_TTL)
+    except Exception:
+        pass  # sin Redis el cache queda por proceso, como antes
+    return valor
 
 UMBRAL_GENERACION_KWH = 0.5   # kWh por hora mínimo para considerar la hora "generando"
 HORA_MINIMA_CIERRE    = 18    # el medidor debe seguir reportando al menos hasta esta hora
@@ -66,21 +117,17 @@ def construir_mapa_medidor_nodo(gaia: GaiaClient, usar_cache: bool = True) -> di
     la corrida real del día usa esto una sola vez, así que no le hace falta,
     pero no le molesta tampoco).
     """
-    global _mapa_medidor_nodo_cache, _mapa_medidor_nodo_ts
-    now = time.monotonic()
-    if usar_cache and _mapa_medidor_nodo_cache is not None and (now - _mapa_medidor_nodo_ts) < _CACHE_TTL:
-        return _mapa_medidor_nodo_cache
+    def construir() -> dict[int, int]:
+        mapa: dict[int, int] = {}
+        for node in gaia.get_all_nodes():
+            meter = node.get("meter") or {}
+            nid = node.get("id")
+            mid = meter.get("id") if isinstance(meter, dict) else None
+            if mid is not None and nid is not None:
+                mapa[int(mid)] = int(nid)
+        return mapa
 
-    mapa: dict[int, int] = {}
-    for node in gaia.get_all_nodes():
-        meter = node.get("meter") or {}
-        nid = node.get("id")
-        mid = meter.get("id") if isinstance(meter, dict) else None
-        if mid is not None and nid is not None:
-            mapa[int(mid)] = int(nid)
-
-    _mapa_medidor_nodo_cache = mapa
-    _mapa_medidor_nodo_ts = now
+    mapa = _cacheado(_CLAVE_MAPA_NODO, construir, usar_cache)
     return mapa
 
 
@@ -97,15 +144,7 @@ def obtener_borders_crudos(gaia: GaiaClient, usar_cache: bool = True) -> list[di
     misma request (ej. "Cliente" que además dispara el resumen mensual) y
     pagar el fetch completo dos veces (~5-9s cada uno, auditoría CGM
     2026-08-26, finding #2)."""
-    global _borders_crudos_cache, _borders_crudos_ts
-    now = time.monotonic()
-    if usar_cache and _borders_crudos_cache is not None and (now - _borders_crudos_ts) < _CACHE_TTL:
-        return _borders_crudos_cache
-
-    borders = gaia.get_all_borders()
-    _borders_crudos_cache = borders
-    _borders_crudos_ts = now
-    return borders
+    return _cacheado(_CLAVE_BORDERS, gaia.get_all_borders, usar_cache)
 
 
 def construir_mapa_borders(gaia: GaiaClient, usar_cache: bool = True) -> dict[str, dict]:

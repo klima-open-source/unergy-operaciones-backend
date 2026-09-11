@@ -1,99 +1,193 @@
-"""La curva del CGM se guarda al clasificar; el panel no vuelve a pedirla.
+"""La curva del CGM se guarda al clasificar; el panel NUNCA la pide en vivo.
 
 `curva_cgm_referencia` es la cuarta curva de referencia de la fila, junto a las
-de medidor principal/respaldo, Solenium y reconectador, y por la misma razon:
-se consulta UNA vez en la corrida de madrugada (donde 2 segundos por frontera
-no le importan a nadie) y el panel la lee de la base, que se abre muchas veces
-al dia. Este mismo archivo existe porque en ese archivo hay un precedente
-explicito -- Solenium dejo de consultarse en vivo en `_construir_detalle`
-justamente porque costaba ~2s por apertura.
+de medidor principal/respaldo, Solenium y reconectador, y por la misma razon: se
+consulta UNA vez en la corrida de madrugada (donde 2 segundos por frontera no le
+importan a nadie) y el panel la lee de la base, que se abre muchas veces al dia.
+Hay precedente explicito: Solenium dejo de consultarse en vivo en
+`_construir_detalle` justamente porque costaba ~2s por apertura.
 
-Lo que se prueba aca es la GUARDA, `_pedir_cgm_en_vivo()`, que es lo que puede
-regresar en silencio: si alguien la quita, el panel vuelve a pagar una llamada
-de red en cada apertura de cada frontera; si alguien invierte una condicion, la
-opcion de adoptar el CGM deja de aparecer y nadie se entera hasta que la
-necesita.
+**Cambio del 2026-09-11: se elimino el ultimo resto de consulta en vivo.** Antes
+quedaba una guarda, `_pedir_cgm_en_vivo()`, que permitia pedirsela a Quoia en un
+caso: filas anteriores a la columna, con reporte automatico valido y otra fuente
+elegida. La razon para quitarla es que el dato NO CAMBIA -- a diferencia de los
+medidores y los inversores, que si se corrigen despues del cierre, el reporte
+CGM de un dia ya cerrado es el que es. Si no cambia, no hay nada que refrescar.
 
-Sin base de datos: la funcion solo lee tres atributos de la fila.
+Consecuencia asumida: en una fila anterior a la columna (existe desde el
+2026-09-07), "Reportar con otra fuente" no ofrece el CGM. El dato sigue en Quoia
+para quien lo necesite; lo que se dejo de pagar es una llamada de red en cada
+apertura de cada frontera.
+
+Lo que se prueba aca es lo que puede volver en silencio: que nadie reintroduzca
+la llamada. Por eso el Quoia falso REVIENTA si se la piden -- una prueba que
+mira el resultado no veria la diferencia, porque el detalle se sigue
+construyendo igual.
 """
-from types import SimpleNamespace
-
 import pytest
 
 django = pytest.importorskip("django", reason="requiere el entorno de Django (uv sync)")
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _django_listo():
+def _base():
     import os
 
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
     os.environ.setdefault("SECRET_KEY", "x" * 40)
+
+    from django.conf import settings
+
+    originales = settings.DATABASES
+    settings.DATABASES = {
+        "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}
+    }
     django.setup()
+
+    from django.apps import apps as django_apps
+    from django.db import connections
+    from django.test.utils import setup_test_environment
+
+    connections.close_all()
+    connections.__dict__.pop("settings", None)
+    connections.__init__()
+
+    settings.MIGRATION_MODULES = {a.label: None for a in django_apps.get_app_configs()}
+    setup_test_environment()
+    connections["default"].creation.create_test_db(verbosity=0)
+    assert connections["default"].vendor == "sqlite", "no se aisló de la base real"
+    yield
+
+    from django.test.utils import teardown_test_environment
+
+    connections.close_all()
+    teardown_test_environment()
+    settings.DATABASES = originales
+    connections.__dict__.pop("settings", None)
+    connections.__init__()
+
+
+@pytest.fixture
+def base_limpia():
+    from django.db import transaction
+
+    atomica = transaction.atomic()
+    atomica.__enter__()
+    yield
+    transaction.set_rollback(True)
+    atomica.__exit__(None, None, None)
+
+
+class _QuoiaQueNoAceptaPedidosDeCGM:
+    """Responde el catalogo y las curvas, pero revienta si le piden el CGM.
+
+    Es la unica forma de ver el cambio: el detalle se construye igual con o sin
+    la llamada, asi que una prueba sobre el resultado no distinguiria nada.
+    """
+
+    def get_all_nodes(self):
+        return [{"id": 10, "meter": {"id": 1}}]
+
+    def get_all_borders(self):
+        return [{"frt_generation": {"frt_code": "FRT001", "id": 7,
+                                    "main_meter": 1, "backup_meter": None}}]
+
+    def get_border_report_status(self, *a, **k):
+        raise AssertionError(
+            "el panel volvio a pedirle el reporte CGM a Quoia en vivo: ese dato "
+            "no cambia despues del cierre y la llamada estaba en una ruta que se "
+            "abre muchas veces al dia"
+        )
+
+    def get_border_report_status_con_estado(self, *a, **k):
+        raise AssertionError("idem, por la variante con estado")
+
+    def __getattr__(self, nombre):
+        # Cualquier otra llamada (curvas de medicion) devuelve vacio: esta
+        # prueba es sobre el CGM, no sobre las curvas.
+        def _vacio(*a, **k):
+            return []
+        return _vacio
 
 
 def _fila(**kw):
-    """Una fila como la de Paso Norte Consumo 2026-09-07: reporte automatico
-    valido en Quoia, pero la clasificacion se fue por el historico."""
-    base = dict(
+    """Una frontera de generacion con su reporte del dia."""
+    from datetime import date
+
+    from apps.energia.models import ReporteEnergiaGeneracion
+    from apps.fronteras.models import Frontera
+    from apps.proyectos.models import Proyecto
+
+    proyecto = Proyecto.objects.create(nombre_comercial="MGS Prueba", potencia_ac_kw=990)
+    frontera = Frontera.objects.create(
+        proyecto=proyecto, codigo_frontera="FRT001",
+        nombre_frontera="Frontera de prueba", tipo_frontera="generacion",
+    )
+    datos = dict(
+        frontera_id=frontera.id,
+        fecha=date(2026, 9, 7),
+        caso=5,                      # obligatorio en el modelo; cual sea da igual acá
         curva_cgm_referencia=None,
         estado_reporte="OK",
         medidor_usado="historico",
     )
-    base.update(kw)
-    return SimpleNamespace(**base)
+    datos.update(kw)
+    ReporteEnergiaGeneracion.objects.create(**datos)
+    return frontera, datos["fecha"]
 
 
-# ── Cuando SI hay que preguntarle a Quoia ────────────────────────────────────
+def _detalle(frontera, fecha, monkeypatch):
+    from apps.energia.services.reporte import vistas
 
-def test_fila_vieja_con_reporte_valido_y_otra_fuente_si_pide():
-    """El unico caso que justifica la llamada: no hay curva guardada (fila
-    anterior a la columna), Quoia si reporto, y reportamos otra cosa."""
-    from apps.energia.services.reporte.vistas import _pedir_cgm_en_vivo
-
-    assert _pedir_cgm_en_vivo(_fila()) is True
+    monkeypatch.setattr(vistas, "GaiaClient", _QuoiaQueNoAceptaPedidosDeCGM)
+    return vistas._construir_detalle(frontera.id, fecha)
 
 
-def test_warning_tambien_cuenta_como_reporte_valido():
-    """Mismos estados que ESTADOS_AUTOMATICO en los clasificadores."""
-    from apps.energia.services.reporte.vistas import _pedir_cgm_en_vivo
+def test_la_fila_vieja_ya_no_dispara_la_llamada(base_limpia, monkeypatch):
+    """El caso que la guarda permitia: sin curva guardada, reporte valido y
+    otra fuente elegida. Antes preguntaba; ahora no."""
+    frontera, fecha = _fila()
 
-    assert _pedir_cgm_en_vivo(_fila(estado_reporte="WARNING")) is True
+    detalle = _detalle(frontera, fecha, monkeypatch)
 
-
-# ── Cuando NO, que es casi siempre ───────────────────────────────────────────
-
-def test_con_la_curva_ya_guardada_no_pide():
-    """El caso normal a partir de la primera corrida con la columna: se lee de
-    la base y no se toca la red."""
-    from apps.energia.services.reporte.vistas import _pedir_cgm_en_vivo
-
-    assert _pedir_cgm_en_vivo(_fila(curva_cgm_referencia=[1.0] * 24)) is False
+    assert detalle["curva_cgm"] is None
 
 
-def test_si_el_cgm_ya_gano_no_pide():
-    """Sus horas SON curva_final, y el desplegable ni aparece (caso confiado)."""
-    from apps.energia.services.reporte.vistas import _pedir_cgm_en_vivo
+def test_una_fila_con_la_curva_guardada_la_devuelve(base_limpia, monkeypatch):
+    """El caso normal desde que existe la columna: sale de la base."""
+    curva = [1.5] * 24
+    frontera, fecha = _fila(curva_cgm_referencia=curva)
 
-    assert _pedir_cgm_en_vivo(_fila(medidor_usado="cgm", estado_reporte="OK")) is False
+    detalle = _detalle(frontera, fecha, monkeypatch)
 
-
-@pytest.mark.parametrize("estado", [None, "", "ERROR", "PENDING", "FAILED"])
-def test_sin_reporte_automatico_valido_no_pide(estado):
-    """No hubo reporte que adoptar: la opcion sale deshabilitada igual, asi que
-    la llamada seria a cambio de nada."""
-    from apps.energia.services.reporte.vistas import _pedir_cgm_en_vivo
-
-    assert _pedir_cgm_en_vivo(_fila(estado_reporte=estado)) is False
+    assert detalle["curva_cgm"] == curva
 
 
-def test_una_curva_guardada_manda_incluso_sin_estado_reporte():
-    """El orden de los chequeos importa: si ya esta guardada no se pregunta
-    nada mas, ni siquiera por el estado."""
-    from apps.energia.services.reporte.vistas import _pedir_cgm_en_vivo
+@pytest.mark.parametrize("estado", [None, "", "OK", "WARNING", "ERROR"])
+def test_ningun_estado_del_reporte_dispara_la_llamada(base_limpia, monkeypatch, estado):
+    """Antes el estado decidia si preguntar. Ahora no decide nada: no se
+    pregunta nunca."""
+    frontera, fecha = _fila(estado_reporte=estado)
 
-    fila = _fila(curva_cgm_referencia=[1.0] * 24, estado_reporte=None)
-    assert _pedir_cgm_en_vivo(fila) is False
+    detalle = _detalle(frontera, fecha, monkeypatch)
+
+    assert detalle["curva_cgm"] is None
+
+
+def test_con_el_cgm_como_medidor_usado_tampoco(base_limpia, monkeypatch):
+    frontera, fecha = _fila(medidor_usado="cgm", curva_cgm_referencia=[2.0] * 24)
+
+    detalle = _detalle(frontera, fecha, monkeypatch)
+
+    assert detalle["curva_cgm"] == [2.0] * 24
+
+
+def test_la_guarda_vieja_ya_no_existe():
+    """`_pedir_cgm_en_vivo` se elimino con la llamada. Si alguien la reintroduce
+    sin leer esto, que sea a la vista."""
+    from apps.energia.services.reporte import vistas
+
+    assert not hasattr(vistas, "_pedir_cgm_en_vivo")
 
 
 # ── La columna existe en las dos tablas ──────────────────────────────────────

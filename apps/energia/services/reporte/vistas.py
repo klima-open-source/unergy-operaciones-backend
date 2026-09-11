@@ -398,30 +398,6 @@ def _fila_por_id(frontera_id: int, fecha: date):
     return front, rep, Modelo
 
 
-def _pedir_cgm_en_vivo(rep) -> bool:
-    """Si hay que preguntarle a Quoia por la curva del CGM al abrir el panel.
-
-    Solo cuando puede servir de algo, porque es una llamada de red en una ruta
-    que se abre muchas veces al día -- el mismo costo por el que Solenium dejó
-    de consultarse en vivo acá. Tres condiciones, todas necesarias:
-
-      · `curva_cgm_referencia` en NULL -- si la corrida de madrugada ya la
-        guardó, se usa esa y no hay nada que pedir. Solo pasa con filas
-        anteriores a esa columna.
-      · `estado_reporte` en OK/WARNING -- sin reporte automático válido no hay
-        curva de CGM que ofrecer (mismos estados que ESTADOS_AUTOMATICO en los
-        clasificadores).
-      · `medidor_usado != 'cgm'` -- si el CGM ya ganó, sus horas SON
-        `curva_final`; además el desplegable ni aparece (caso confiado), así
-        que la curva no se usaría para nada.
-    """
-    if rep.curva_cgm_referencia is not None:
-        return False
-    if (rep.estado_reporte or "").upper() not in ("OK", "WARNING"):
-        return False
-    return (rep.medidor_usado or "") != "cgm"
-
-
 def _construir_detalle(frontera_id: int, fecha: date) -> dict:
     front, rep, Modelo = _fila_por_id(frontera_id, fecha)
     es_generacion = Modelo is ReporteEnergiaGeneracion
@@ -461,22 +437,18 @@ def _construir_detalle(frontera_id: int, fecha: date) -> dict:
     # revisar, y no había salida -- validar tal cual mandaba la matriz encima
     # del reporte oficial, y no validar bloqueaba el día entero).
     #
-    # Se PREFIERE la guardada al clasificar, igual que las de medidor: la
-    # corrida de madrugada ya la consultó, y este panel se abre muchas veces al
-    # día. Solo se pide a Quoia en vivo si la fila es anterior a la columna, y
-    # ni siquiera entonces si no puede servir de nada:
+    # Se usa SIEMPRE la guardada al clasificar, nunca se pide en vivo: la curva
+    # del CGM de un día ya cerrado no cambia -- a diferencia de los medidores,
+    # que sí se corrigen después (por eso esos sí se consultan frescos). La
+    # corrida de madrugada ya la consultó y la persistió.
     #
-    #   · sin `estado_reporte` en OK/WARNING no hubo reporte automático válido,
-    #     así que no hay nada que ofrecer;
-    #   · con `medidor_usado == 'cgm'` el CGM ya ganó y sus horas SON
-    #     `curva_final` (el desplegable ni aparece: es un caso confiado).
-    #
-    # Esas dos guardas evitan agregarle una llamada de red a cada apertura del
-    # panel -- el mismo costo por el que Solenium dejó de consultarse en vivo
-    # acá (ver más abajo).
+    # Antes se pedía en vivo para las filas anteriores a
+    # `curva_cgm_referencia`, con dos guardas para acotar el costo. Esas filas
+    # son cada vez menos (la columna existe desde 2026-09-07) y la llamada
+    # estaba en una ruta que se abre muchas veces al día. Consecuencia asumida:
+    # en una fila vieja sin la columna, "Reportar con otra fuente" no ofrece el
+    # CGM; el dato sigue estando en Quoia para quien lo necesite.
     curva_cgm_bd = rep.curva_cgm_referencia
-    pedir_cgm_en_vivo = _pedir_cgm_en_vivo(rep)
-    curva_cgm_viva = None
     try:
         gaia = GaiaClient()
         # Cacheados (ver curvas._CACHE_TTL) -- esta vista se abre repetidas
@@ -506,26 +478,6 @@ def _construir_detalle(frontera_id: int, fecha: date) -> dict:
             )
             curva_medidor_ppal_viva = curva_a_lista(curva_p)
             curva_medidor_resp_viva = curva_a_lista(curva_r)
-
-            # Solo para filas anteriores a la columna (ver pedir_cgm_en_vivo).
-            # Mismo origen que usa el clasificador (ver clasificador_consumo:
-            # `reporte["reported_data_main"]`), en su propio try: si esta
-            # llamada falla, las curvas de medidor que ya se resolvieron arriba
-            # no se pierden -- solo queda sin ofrecerse la opción de CGM.
-            if pedir_cgm_en_vivo:
-                try:
-                    border_id = meta.get("border_id")
-                    reporte = (
-                        gaia.get_border_report_status(int(border_id), str(fecha))
-                        if border_id else None
-                    )
-                    if reporte and reporte.get("reported_data_main"):
-                        crudo = list(reporte["reported_data_main"])[:24]
-                        curva_cgm_viva = [
-                            None if v is None else round(float(v), 4) for v in crudo
-                        ] + [None] * (24 - len(crudo))
-                except Exception:
-                    pass
     except Exception:
         pass  # las curvas de referencia son informativas -- si fallan, se muestra igual el resultado ya guardado
 
@@ -623,7 +575,7 @@ def _construir_detalle(frontera_id: int, fecha: date) -> dict:
         # En vivo, no persistida (ver el bloque de arriba). None si Quoia no
         # respondió o si ese día no hubo reporte -- ahí la opción de reportar
         # con CGM queda deshabilitada en el front.
-        "curva_cgm": curva_cgm_bd if curva_cgm_bd is not None else curva_cgm_viva,
+        "curva_cgm": curva_cgm_bd,
         "curva_solenium": curva_sol,
         "curva_reconectador": curva_reconectador,
         "principal_actualizado_en_quoia": principal_actualizado_en_quoia,
