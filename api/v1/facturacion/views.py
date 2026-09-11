@@ -11,11 +11,16 @@ from api.logging import class_logger_wrapper, log_endpoint
 from api.permissions import RolePermission
 from apps.facturacion import models as fa_models
 from apps.facturacion.services import ajustes, calculo, cumplimiento, despacho
-from apps.facturacion.services import despacho_xm
+from apps.facturacion.services import despacho_xm, vs_despachos
+from apps.liquidaciones.services import api_externa as api_liquidaciones
+from apps.liquidaciones.services import proxy
 from apps.mercado_xm import models as mx_models
 from apps.mercado_xm.services import simem
 
 from . import serializers as fa_serializers
+
+# El cálculo nuestro está bien: lo que falló es la API de Liquidaciones.
+HTTP_API_EXTERNA = 502
 
 
 def _periodo(request, requerido=True) -> str:
@@ -139,6 +144,41 @@ class FacturacionViewSet(viewsets.GenericViewSet):
         return Response(cumplimiento.build(
             calculo.periodo(periodo), anio, mes, precio_bolsa=precio_bolsa,
         ))
+
+    # ── Ingresos vs. despachos liquidados ─────────────────────────────────
+
+    @action(detail=False, methods=["get"], url_path="vs-despachos")
+    def vs_despachos(self, request):
+        """Lo que DEBE entrar por proyecto contra lo que ya se liquidó.
+
+        Lo liquidado sale de `market_settlements` de la API de Liquidaciones:
+        `dispatch` (contrato) + `dispatch_fazni` (venta en bolsa), sumado de
+        todos los contratos del proyecto y **sin restar las compras en bolsa**
+        —esas se devuelven aparte, en `compras_bolsa`.
+        """
+        periodo = _periodo(request)
+        anio, mes = int(periodo[:4]), int(periodo[5:7])
+        resultado = calculo.periodo(periodo)
+        try:
+            despachos = api_liquidaciones.listar_liquidaciones_mercado(
+                year=anio, month=mes,
+                version=request.query_params.get("version", "txf"),
+            )
+        except api_liquidaciones.LiquidacionesAPIError as exc:
+            # 502: el cálculo nuestro está bien, lo que falló es el otro lado.
+            return Response({"detail": str(exc)}, status=HTTP_API_EXTERNA)
+
+        filas = vs_despachos.comparar(
+            resultado["lineas"], despachos,
+            bolsa=resultado.get("bolsa_precio"),
+            proyectos_por_topico=proxy.proyectos_por_topico(),
+        )
+        return Response({
+            "periodo": periodo,
+            "bolsa_precio": resultado.get("bolsa_precio"),
+            "resumen": vs_despachos.totales(filas),
+            "results": filas,
+        })
 
     # ── Ajustes manuales ──────────────────────────────────────────────────
 

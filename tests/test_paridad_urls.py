@@ -120,9 +120,13 @@ RUTAS_RETIRADAS = {
 #   2026-09-10  POST /ipp/sincronizar. El IPP del DANE se consultaba en dos
 #               sitios que no se hablaban: la API de Liquidaciones y nuestro
 #               `ipp_mensual`, que se llenaba a mano y estaba 15 meses corto.
+#   2026-09-11  GET /facturacion/vs-despachos. Cruza lo que DEBE entrar por
+#               proyecto (lo calcula Facturacion) contra lo ya liquidado en
+#               `market_settlements`. Nadie comparaba las dos cifras.
 RUTAS_NUEVAS = {
     ("/api/v1/liquidaciones-api/contratos-energia/{}", "PATCH"),
     ("/api/v1/liquidaciones-api/ipp/sincronizar", "POST"),
+    ("/api/v1/facturacion/vs-despachos", "GET"),
 }
 
 
