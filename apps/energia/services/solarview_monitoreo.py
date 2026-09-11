@@ -39,13 +39,25 @@ logger = logging.getLogger("operaciones.generacion_solar")
 _cliente = None
 _gaia = None
 
-# ── TTL cache en memoria ─────────────────────────────────────────────────────
-# Evita llamar a SolarView/Gaia en cada request; se invalida sola pasado el TTL.
+# ── TTL cache: memoria del proceso + Redis ───────────────────────────────────
+# Evita llamar a SolarView/Gaia en cada request; se invalida solo pasado el TTL.
 #
-# `ponytail: caché en un dict de módulo, no en django.core.cache`. Vale mientras
-# el despliegue corra con un solo proceso web (WORKERS=1). Al subir los workers,
-# cada proceso tendrá su propia copia y esto pasa a django.core.cache.
+# Eran DOS niveles desde el 2026-09-11. Antes era solo el dict de módulo, con
+# esta nota: "vale mientras el despliegue corra con un solo proceso web
+# (WORKERS=1)". Ya no corre con uno: gunicorn levanta `--workers 3`, así que
+# había tres caches independientes y una de cada tres recargas caía en un
+# proceso frío y pagaba las ~235 llamadas externas completas. El usuario lo veía
+# como "a veces carga al instante y a veces se demora", sin patrón.
+#
+# El nivel de proceso se conserva adelante porque es gratis y ahorra el viaje a
+# Redis dentro de la misma request.
+#
+# **Si Redis no responde no se rompe nada**: queda el cache por proceso, que es
+# exactamente el comportamiento anterior. Un panel de monitoreo no se cae porque
+# el cache no esté.
 _cache: dict[str, tuple[float, int, object]] = {}
+
+_PREFIJO_REDIS = "solar_monitoreo:"
 
 CACHE_TTL_FLOTA = 60     # segundos — monitoreo de flota
 CACHE_TTL_DETALLE = 90   # segundos — detalle por proyecto
@@ -58,11 +70,38 @@ def _cache_get(clave: str):
     entrada = _cache.get(clave)
     if entrada and time.monotonic() - entrada[0] < entrada[1]:
         return entrada[2]
-    return None
+
+    try:
+        from django.core.cache import cache
+
+        guardado = cache.get(_PREFIJO_REDIS + clave)
+    except Exception:
+        return None
+    if not guardado:
+        return None
+
+    # Lo que queda de vida, no el TTL entero: si se reiniciara acá, una entrada
+    # a punto de vencer viviría otro TTL completo en este proceso y el dato
+    # podría mostrarse hasta el doble de viejo de lo que dice CACHE_TTL_*.
+    restante = guardado["expira"] - time.time()
+    if restante <= 0:
+        return None
+    _cache[clave] = (time.monotonic(), restante, guardado["datos"])
+    return guardado["datos"]
 
 
 def _cache_set(clave: str, ttl: int, datos) -> None:
     _cache[clave] = (time.monotonic(), ttl, datos)
+    try:
+        from django.core.cache import cache
+
+        cache.set(
+            _PREFIJO_REDIS + clave,
+            {"expira": time.time() + ttl, "datos": datos},
+            ttl,
+        )
+    except Exception:
+        pass  # sin Redis el cache queda por proceso, como antes
 
 
 def _get_cliente():
@@ -558,7 +597,8 @@ def _generacion_30d(crudo: dict | None) -> list[dict]:
     return [{"date": d, "kwh": round(v, 1)} for d, v in sorted(diario.items())]
 
 
-def monitoreo_detalle(proyecto_id: int, incluir_snapshot: bool = False) -> dict:
+def monitoreo_detalle(proyecto_id: int, incluir_snapshot: bool = False,
+                      incluir_30d: bool = True) -> dict:
     """Detalle de un proyecto: curva de potencia de hoy, 30 días y medidores.
 
     Sin id de SolarView NO se corta: los inversores quedan sin dato, pero el
@@ -572,12 +612,25 @@ def monitoreo_detalle(proyecto_id: int, incluir_snapshot: bool = False) -> dict:
     variables del nodo. Va detrás de un flag porque cuesta una llamada por
     nodo: las ~47 tarjetas no lo usan y el fasorial se abre de a uno
     (2026-09-05 -- sin esto FasorialButton.vue quedó sin datos).
+
+    `incluir_30d` trae la serie diaria del último mes (`generation_30d` y
+    `total_30d_kwh`). Cuesta una llamada externa por tarjeta, y la vista web de
+    Generación Solar NO dibuja esa serie: la usa solo como tercera opción para
+    leer el kWh de HOY cuando `generation_today_kwh` viene vacío. Por eso puede
+    apagarla.
+
+    **Viene en True a propósito, al revés que `incluir_snapshot`.** Este dato ya
+    lo servía el endpoint, y quién más lo consume no se puede ver desde acá --
+    la app móvil está en otro repositorio. Un flag que hay que pedir para seguir
+    recibiendo lo de siempre rompe callado al que no se entere; uno que hay que
+    pedir para dejar de recibirlo, no rompe a nadie.
     """
     from app.services.mgs.medidor_tiempo_real import elegir_medidor, snapshot_medidor
 
     p = _proyecto_o_404(proyecto_id)
 
-    clave = f"detail:{proyecto_id}:{hoy_col().isoformat()}:{int(incluir_snapshot)}"
+    clave = (f"detail:{proyecto_id}:{hoy_col().isoformat()}"
+             f":{int(incluir_snapshot)}:{int(incluir_30d)}")
     if (cacheado := _cache_get(clave)) is not None:
         return cacheado
 
@@ -594,8 +647,10 @@ def monitoreo_detalle(proyecto_id: int, incluir_snapshot: bool = False) -> dict:
 
     with ThreadPoolExecutor(max_workers=6) as pool:
         f_pot = pool.submit(cliente.get_power, sol_id, hoy_str, hoy_str) if sol_id else None
-        f_gen = pool.submit(cliente.get_energy, sol_id, granularity="day",
-                            date_from=desde30, date_to=hoy_str) if sol_id else None
+        # Los 30 dias solo si los piden: ver `incluir_30d` en el docstring.
+        f_gen = (pool.submit(cliente.get_energy, sol_id, granularity="day",
+                             date_from=desde30, date_to=hoy_str)
+                 if (sol_id and incluir_30d) else None)
         f_hoy = pool.submit(cliente.get_generation, sol_id, hoy_str, hoy_str) if sol_id else None
         # Medidor: `ap` + `eae` por el mismo método que usa el pipeline del
         # ASIC, en vez del compuesto de 8 familias de variables (que para dos
@@ -641,6 +696,7 @@ def monitoreo_detalle(proyecto_id: int, incluir_snapshot: bool = False) -> dict:
     mejor_nodo = medidor["node_id"] if medidor else (node_principal or node_respaldo)
 
     generacion_30d = _generacion_30d((f_gen.result() or {}) if f_gen else {})
+    total_30d = round(sum(d["kwh"] for d in generacion_30d), 1) if incluir_30d else None
 
     datos = {
         "proyecto_id": p.id,
@@ -659,7 +715,7 @@ def monitoreo_detalle(proyecto_id: int, incluir_snapshot: bool = False) -> dict:
         "generation_today_kwh": round(kwh_hoy, 1) if kwh_hoy is not None else None,
         "generation_today_hasta": hasta,
         "generation_30d": generacion_30d,
-        "total_30d_kwh": round(sum(d["kwh"] for d in generacion_30d), 1),
+        "total_30d_kwh": total_30d,
         "has_strings": False,
         # Medidor ya elegido y resuelto — el frontend lo dibuja, no lo decide.
         "medidor": medidor,

@@ -18,6 +18,26 @@ from apps.proyectos import models as py_models
 
 GRANULARIDADES = ("day", "hour")
 
+_SI = ("1", "true", "yes", "si", "sí")
+_NO = ("0", "false", "no")
+
+
+def _bandera(request, nombre: str, *, por_defecto: bool) -> bool:
+    """Un flag de la query string, con el default explicito de cada uno.
+
+    Se lee en los dos sentidos (`=1` y `=0`) porque los flags de este ViewSet no
+    apuntan todos para el mismo lado: `incluir_snapshot` viene apagado y se
+    prende, `incluir_30d` viene prendido y se apaga. Un valor que no sea ninguno
+    de los dos deja el default -- son optimizaciones, no argumentos de negocio;
+    un typo no vale un 400 en una pantalla de monitoreo.
+    """
+    valor = (request.query_params.get(nombre) or "").strip().lower()
+    if valor in _SI:
+        return True
+    if valor in _NO:
+        return False
+    return por_defecto
+
 
 @class_logger_wrapper(name="Operaciones | Energía | Generación Solar")
 class GeneracionSolarViewSet(viewsets.GenericViewSet):
@@ -78,10 +98,15 @@ class GeneracionSolarViewSet(viewsets.GenericViewSet):
         # `incluir_snapshot` agrega el snapshot electrico del medidor (voltaje,
         # corriente y potencia por fase), que necesita el diagrama fasorial.
         # Cuesta una llamada por nodo, asi que las tarjetas no lo piden.
-        incluir = (request.query_params.get("incluir_snapshot") or "").strip().lower()
+        #
+        # `incluir_30d=0` apaga la serie diaria del ultimo mes: otra llamada
+        # externa por tarjeta, que la vista web no dibuja. Se apaga pidiendolo,
+        # no se prende pidiendolo, para no romper a quien hoy la recibe (ver el
+        # docstring de monitoreo_detalle).
         return Response(sv.monitoreo_detalle(
             int(proyecto_id),
-            incluir_snapshot=incluir in ("1", "true", "yes"),
+            incluir_snapshot=_bandera(request, "incluir_snapshot", por_defecto=False),
+            incluir_30d=_bandera(request, "incluir_30d", por_defecto=True),
         ))
 
     @action(
