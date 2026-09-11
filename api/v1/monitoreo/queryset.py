@@ -29,8 +29,18 @@ SERVICIO_OM = "mantenimiento"
 
 
 def proyectos_en_operacion():
+    """Las plantas que operan Y tienen `sub_project`, que es como las conoce la
+    API de Unergy.
+
+    `deleted_at__isnull=True` no es decorativo: `Proyecto` no tiene un manager
+    que filtre los borrados, asi que cada consulta tiene que excluirlos a mano y
+    es facil olvidarlo. Sin eso, una planta dada de baja seguia ofreciendose en
+    el selector del Historico de Generacion y contandose en el resumen de flota.
+    """
     return py_models.Proyecto.objects.filter(
-        sub_project__isnull=False, estado="en_operacion"
+        sub_project__isnull=False,
+        estado="en_operacion",
+        deleted_at__isnull=True,
     ).order_by("nombre_comercial")
 
 

@@ -283,8 +283,14 @@ def _p90_del_dia(proyecto) -> float | None:
 
 
 def _proyectos_en_operacion() -> list[tuple[Proyecto, int]]:
-    """`(proyecto, sol_id)` de los que operan Y tienen id reconciliado."""
-    proyectos = list(Proyecto.objects.filter(estado="en_operacion"))
+    """`(proyecto, sol_id)` de los que operan Y tienen id reconciliado.
+
+    Los borrados quedan fuera: `Proyecto` no tiene manager que los filtre y hay
+    que excluirlos en cada consulta.
+    """
+    proyectos = list(Proyecto.objects.filter(
+        estado="en_operacion", deleted_at__isnull=True,
+    ))
     emparejados = [(p, sid) for p in proyectos if (sid := _sv_id(p)) is not None]
     logger.info("proyectos con id de solarview: %d / %d",
                 len(emparejados), len(proyectos))
@@ -445,6 +451,7 @@ def monitoreo_flota() -> dict:
 
     proyectos = list(Proyecto.objects.filter(
         estado="en_operacion", tipo_proyecto="minigranja", srv_operacion=True,
+        deleted_at__isnull=True,
     ))
     if not proyectos:
         return {
