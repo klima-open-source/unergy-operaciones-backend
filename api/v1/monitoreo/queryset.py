@@ -165,13 +165,32 @@ def _lista_de_kwh(valor):
 
 
 def _simulacion(proyecto, desde: date) -> dict | None:
-    """Línea base del mes: los doce valores mensuales, indexados por mes."""
+    """Línea base P90/P50/P99 del proyecto.
+
+    Devuelve DOS cosas, y la diferencia importa:
+
+    - `p90_monthly` / `p50_monthly` / `p99_monthly` / `p90_daily`: el mes en que
+      ARRANCA el rango. Sirve cuando el rango es un mes --que es el caso de
+      `InformesMensualesPanel`, el consumidor original-- y engaña cuando no lo
+      es: pedir enero a diciembre daba la referencia de enero aplicada a los
+      doce, y el P90 varía fuerte por estación. Se conservan porque ya están en
+      producción.
+    - `curva_p90_kwh`: los doce valores. Con esto quien dibuja un rango que
+      cruza meses puede tomar el de cada uno, en vez de estirar el del primero.
+
+    Los doce valores son ENERGÍA DEL MES. Repartirlos por día es dividir entre
+    los días del mes (lo que hace `p90_daily`); repartirlos por hora no tiene
+    sentido --la generación solar no es plana-- y por eso el frontend no dibuja
+    línea base en la granularidad horaria.
+    """
     if proyecto is None or not (
         proyecto.p90_mensual_kwh or proyecto.p50_mensual_kwh
     ):
         return None
     try:
         mes = desde.month
+        curva_p90 = _lista_de_kwh(getattr(proyecto, "p90_mensual_kwh", None))
+
         def del_mes(campo):
             lista = _lista_de_kwh(getattr(proyecto, campo, None)) or [None] * 12
             return lista[mes - 1] if len(lista) >= mes else None
@@ -183,6 +202,10 @@ def _simulacion(proyecto, desde: date) -> dict | None:
             "p50_monthly": p50,
             "p99_monthly": p99,
             "p90_daily": round(p90 / dias, 1) if p90 else None,
+            # `None` y no una lista a medias: una curva corta o mal cargada
+            # daría meses sin meta mezclados con meses con meta, que se lee como
+            # "ese mes la planta no tenía que generar nada".
+            "curva_p90_kwh": curva_p90 if curva_p90 and len(curva_p90) == 12 else None,
         }
     except Exception:
         # No se silencia: con un P50/P90 corrupto el tablero mostraría la
