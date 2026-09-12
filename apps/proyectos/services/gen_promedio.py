@@ -200,7 +200,9 @@ def recalcular(dias: int = DIAS_POR_DEFECTO, dry_run: bool = True,
 
         def uno(p: Proyecto):
             try:
-                lecturas = unergy_api.lecturas_con_respaldo(
+                # La fuente (verificada o cruda) no se guarda: esto calcula un
+                # promedio historico y la etiqueta no tendria donde vivir.
+                lecturas, _fuente = unergy_api.lecturas_con_respaldo(
                     token, p.sub_project, pedir_desde, pedir_hasta
                 )
                 return p, unergy_api.deltas(lecturas, desde_dt, hasta_dt), None

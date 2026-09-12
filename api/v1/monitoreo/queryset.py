@@ -137,7 +137,7 @@ def build_generation(sub_project: str, desde: date, hasta: date) -> dict:
         desde, hasta
     )
     try:
-        lecturas = unergy_api.lecturas_con_respaldo(
+        lecturas, fuente = unergy_api.lecturas_con_respaldo(
             unergy_api.token(), sub_project, pedir_desde, pedir_hasta
         )
     except Exception as exc:
@@ -148,6 +148,11 @@ def build_generation(sub_project: str, desde: date, hasta: date) -> dict:
         "ok": True,
         "data": unergy_api.deltas(lecturas, desde_dt, hasta_dt),
         "simulation": _simulacion(proyecto, desde),
+        # De donde salio la curva: "verificada" (las que un operador reviso en
+        # la plataforma de Unergy), "cruda" (todas, porque esa planta no tiene
+        # ninguna verificada) o "sin_datos". Sin esto, dos plantas del mismo
+        # sitio podian salir una depurada y la otra no en el mismo grafico.
+        "fuente": fuente,
     }
 
 

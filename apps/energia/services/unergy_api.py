@@ -89,16 +89,33 @@ def lecturas_crudas(
     return cuerpo if isinstance(cuerpo, list) else cuerpo.get("results", [])
 
 
-def lecturas_con_respaldo(token_, sub_project, desde_iso, hasta_iso) -> list:
-    """Pide las verificadas y, si no hay ninguna, cae a todas.
+def lecturas_con_respaldo(
+    token_, sub_project, desde_iso, hasta_iso
+) -> tuple[list, str]:
+    """`(lecturas, fuente)`. Pide las verificadas y, si no hay ninguna, cae a todas.
 
-    Muchas plantas no tienen operador verificando a diario; sin el respaldo la
-    gráfica saldría vacía en vez de mostrar el dato crudo.
+    `verified_by_operator` es un campo de la API de Unergy --no nuestro, no hay
+    columna equivalente en ninguna base a la que lleguemos-- que marca las
+    lecturas que alguien reviso. El respaldo existe porque hay plantas sin nadie
+    verificando: sin el, su gráfica saldría vacía en vez de mostrar el dato
+    crudo.
+
+    **La fuente se devuelve porque las dos no son lo mismo y la diferencia no es
+    teórica.** Medido contra la API el 2026-09-12, sobre 20 plantas y seis
+    semanas: 19 tenían lecturas verificadas y una (GD Delta 2) ninguna de sus
+    1.002. Un grupo estaba al 100% y otro cerca del 74%, o sea que a esas se les
+    descarta una cuarta parte de lo que reportó el medidor. Dos plantas del
+    mismo sitio pueden salir una depurada y la otra cruda en el mismo gráfico, y
+    hasta ahora nada lo decía.
+
+    `"sin_datos"` cuando no hay ninguna lectura: no es lo mismo que "crudas y
+    vacías", y quien dibuje tiene que poder distinguirlo.
     """
     lecturas = lecturas_crudas(token_, sub_project, desde_iso, hasta_iso, True)
     if lecturas:
-        return lecturas
-    return lecturas_crudas(token_, sub_project, desde_iso, hasta_iso, False)
+        return lecturas, "verificada"
+    lecturas = lecturas_crudas(token_, sub_project, desde_iso, hasta_iso, False)
+    return lecturas, ("cruda" if lecturas else "sin_datos")
 
 
 def deltas(lecturas: list, desde_dt: datetime, hasta_dt: datetime) -> list[dict]:
@@ -179,7 +196,9 @@ def generacion_de_la_flota(proyectos, desde, hasta) -> dict:
 
     def uno(proyecto):
         try:
-            lecturas = lecturas_con_respaldo(
+            # La fuente no se usa acá: este endpoint agrega la flota entera
+            # en una curva sola, donde etiquetar planta por planta no cabe.
+            lecturas, _fuente = lecturas_con_respaldo(
                 token_, proyecto.sub_project, pedir_desde, pedir_hasta
             )
             return proyecto, deltas(lecturas, desde_dt, hasta_dt)
