@@ -67,7 +67,8 @@ def build_filas(proyectos):
         info = next(iter(proyecto.info_tecnica.all()), None)
         proyecto.info = info
         proyecto.poliza = next(iter(getattr(proyecto, "polizas_cargadas", [])), None)
-        proyecto.operador_red = _operador_red_legal(proyecto)
+        # Nombre aparte: `operador_red` es el FK y no acepta un string.
+        proyecto.operador_red_nombre = _operador_red_legal(proyecto)
         filas.append(proyecto)
     return filas
 
@@ -78,9 +79,9 @@ def _operador_red_legal(proyecto) -> str | None:
     Una frontera borrada no debe seguir prestando su operador: el caso existe
     porque hay proyectos cuyo vínculo aún no se sincronizó.
     """
-    if proyecto.operador:
-        return proyecto.operador.nombre_legal
+    if proyecto.operador_red_id and proyecto.operador_red:
+        return proyecto.operador_red.nombre_legal
     for frontera in getattr(proyecto, "fronteras_vivas", []):
-        if frontera.operador:
-            return frontera.operador.nombre_legal
+        if frontera.operador_red_id and frontera.operador_red:
+            return frontera.operador_red.nombre_legal
     return None

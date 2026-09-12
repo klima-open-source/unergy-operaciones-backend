@@ -34,6 +34,22 @@ def nombres_por_topico() -> dict[str, str]:
     }
 
 
+def proyectos_por_topico() -> dict[str, dict]:
+    """Igual que :func:`nombres_por_topico`, pero además con el `id`.
+
+    Quien cruza cifras necesita el id para agrupar (dos tópicos distintos pueden
+    ser el mismo proyecto) y el nombre para mostrarlo.
+    """
+    filas = py_models.Proyecto.objects.filter(
+        deleted_at__isnull=True
+    ).values_list("id", "sub_project", "topico_liquidaciones", "nombre_comercial")
+    return {
+        (liquidaciones or sub): {"id": pk, "nombre": nombre}
+        for pk, sub, liquidaciones, nombre in filas
+        if (liquidaciones or sub)
+    }
+
+
 def proyectos_vivos():
     return py_models.Proyecto.objects.filter(
         deleted_at__isnull=True
