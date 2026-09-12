@@ -162,6 +162,19 @@ def filtrar(params) -> QuerySet:
             estado__es_estado_final=False,
             fecha_identificacion__lte=hoy_col() - timedelta(days=7),
         )
+    # El rango sobre CUANDO SE IDENTIFICO la falla, que es la fecha por la que
+    # se mira un periodo hacia atras ("que paso en agosto"). Distinto de
+    # `fecha_programada_*`, que es cuando se planeo atenderla, y de
+    # `activa_en_fecha`, que pregunta que estaba abierto en un dia.
+    #
+    # Faltaba, y por eso el Historico de Generacion se traia el historial
+    # COMPLETO --6.400 fallas en 33 peticiones-- para despues filtrarlo por
+    # fecha en el navegador y mostrar las de un mes.
+    if params.get("fecha_identificacion_desde"):
+        qs = qs.filter(fecha_identificacion__gte=params["fecha_identificacion_desde"])
+    if params.get("fecha_identificacion_hasta"):
+        qs = qs.filter(fecha_identificacion__lte=params["fecha_identificacion_hasta"])
+
     if params.get("fecha_programada_desde"):
         qs = qs.filter(fecha_programada__gte=params["fecha_programada_desde"])
     if params.get("fecha_programada_hasta"):

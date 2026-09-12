@@ -228,6 +228,10 @@ class FallaViewSet(viewsets.GenericViewSet):
             # de DRF no traduce). FastAPI las declaraba `date | None` y devolvia
             # 422.
             "activa_en_fecha": par.fecha(request, "activa_en_fecha"),
+            "fecha_identificacion_desde": par.fecha(
+                request, "fecha_identificacion_desde"),
+            "fecha_identificacion_hasta": par.fecha(
+                request, "fecha_identificacion_hasta"),
             "fecha_programada_desde": par.fecha(request, "fecha_programada_desde"),
             "fecha_programada_hasta": par.fecha(request, "fecha_programada_hasta"),
             "con_fecha_programada": par.bandera(request, "con_fecha_programada"),
