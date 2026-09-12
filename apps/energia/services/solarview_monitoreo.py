@@ -26,7 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 from calendar import monthrange
 from datetime import datetime, timedelta
 
-from django.db import close_old_connections, connection
+from django.db import close_old_connections
 from rest_framework.exceptions import NotFound
 
 from api.exceptions import NoProcesable, ServicioNoDisponible
@@ -469,14 +469,6 @@ def monitoreo_flota() -> dict:
     # shape que el de Solenium a propósito, así que el mapeo de estado no cambia.
     disponibilidad = cliente.get_availability() or {}
 
-    with connection.cursor() as cur:
-        cur.execute(
-            "SELECT proyecto_id, kwh_real FROM generacion_diaria "
-            "WHERE fecha = %s AND kwh_real IS NOT NULL",
-            [hoy_col().isoformat()],
-        )
-        gen_hoy = {int(pid): float(kwh) for pid, kwh in cur.fetchall()}
-
     filas = []
     capacidad_total = 0.0
     cuenta = {"online": 0, "caido": 0, "degradado": 0, "sin_comunicacion": 0,
@@ -500,7 +492,6 @@ def monitoreo_flota() -> dict:
             "availability_category": categoria,
             "availability_pct": disp.get("availability"),
             "capacity_kwp": round(capacidad, 1),
-            "energy_today_kwh": gen_hoy.get(p.id),
             # La meta del día según el P90 del mes. Va acá porque el proyecto ya
             # está cargado en este bucle: no cuesta ni una consulta más.
             #
@@ -713,11 +704,6 @@ def monitoreo_detalle(proyecto_id: int, incluir_snapshot: bool = False,
         "gaia_node_principal": node_principal,
         "gaia_node_respaldo": node_respaldo,
         "capacity_kwp": float(p.potencia_ac_kw or 0),
-        # El array de inversores no lo consume nadie: la vista móvil que los
-        # muestra los saca de /monitoring/{id}/inverters-power, que es otro
-        # endpoint. Se dejó de pedir el detalle POR INVERSOR (hasta 11 llamadas
-        # externas más por tarjeta) para llenar campos que nadie mira.
-        "inverters": [],
         "power_curve": _curva_potencia((f_pot.result() or {}) if f_pot else {}),
         "generation_today_kwh": round(kwh_hoy, 1) if kwh_hoy is not None else None,
         "generation_today_hasta": hasta,
