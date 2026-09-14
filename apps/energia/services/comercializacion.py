@@ -54,6 +54,61 @@ def unergy_token() -> str:
         return data.get("access") or data.get("token") or data.get("key") or ""
 
 
+# Cuanto vale el listado de proyectos de Unergy antes de volver a pedirlo.
+#
+# 30 minutos: es un catalogo de plantas, no un dato operativo -- cambia cuando
+# entra una planta nueva, no durante el dia. El mismo criterio y el mismo TTL
+# que el catalogo de Quoia en `reporte/curvas.py`.
+TTL_PROYECTOS_UNERGY = 1800
+
+_CLAVE_PROYECTOS_UNERGY = "unergy_api:proyectos"
+
+_cache_proyectos: dict[str, tuple[float, list[dict]]] = {}
+
+
+def fetch_unergy_projects_cacheado(token: str) -> list[dict]:
+    """`fetch_unergy_projects` con cache de dos niveles.
+
+    Existe porque `/proyectos/pendientes` lo consulta en CADA llamada, y esa API
+    no es barata. El mismo patron del monitoreo solar: memoria del proceso
+    adelante --gratis, y evita el viaje dentro de la misma request-- y Redis
+    atras, compartido por los workers de gunicorn.
+
+    **Una lista vacia no se cachea.** Un fallo de la API devuelve `[]`, igual
+    que "no hay proyectos", y guardarlo seria congelar el error media hora.
+
+    Los backfills siguen usando `fetch_unergy_projects` directo: corren a mano y
+    quieren el dato fresco.
+    """
+    import time
+
+    ahora = time.monotonic()
+    guardado = _cache_proyectos.get(_CLAVE_PROYECTOS_UNERGY)
+    if guardado and (ahora - guardado[0]) < TTL_PROYECTOS_UNERGY:
+        return guardado[1]
+
+    try:
+        from django.core.cache import cache
+
+        de_redis = cache.get(_CLAVE_PROYECTOS_UNERGY)
+    except Exception:
+        de_redis = None
+    if de_redis:
+        _cache_proyectos[_CLAVE_PROYECTOS_UNERGY] = (ahora, de_redis)
+        return de_redis
+
+    datos = fetch_unergy_projects(token)
+    if datos:
+        _cache_proyectos[_CLAVE_PROYECTOS_UNERGY] = (ahora, datos)
+        try:
+            from django.core.cache import cache
+
+            cache.set(_CLAVE_PROYECTOS_UNERGY, datos, TTL_PROYECTOS_UNERGY)
+        except Exception:
+            pass  # sin Redis el cache queda por proceso
+    return datos
+
+
 def fetch_unergy_projects(token: str) -> list[dict]:
     """Lista completa de proyectos registrados en la plataforma Unergy original
     (no Quoia ni Solenium) -- cada item trae ``nombre_topico`` (= el valor que

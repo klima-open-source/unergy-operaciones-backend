@@ -360,6 +360,55 @@ def _candidatos_quoia(fronteras_vinculadas: dict[str, int]) -> list[_Candidato]:
     return out
 
 
+def _candidatos_unergy() -> list[_Candidato]:
+    """Las plantas registradas en la plataforma Unergy original.
+
+    Tercera fuente, despues de Sun Factory y Quoia. Hacia falta porque hay
+    plantas que **solo** existen aca: las de terceros a las que les prestamos
+    algun servicio. Caso que lo motivo (2026-09-14): "Caracoli" aparecia como
+    frontera pendiente en Quoia y nunca como proyecto por sugerir, porque
+    ninguna de las dos fuentes la conocia.
+
+    `nombre_topico` es el identificador, y es el mismo valor que guarda
+    `Proyecto.sub_project` -- por eso `sub_project` tuvo que entrar antes en la
+    cascada de emparejamiento. Sin ese ancla, cada planta de aca habria caido a
+    la coincidencia por nombre, que es como se crean los duplicados.
+
+    Un fallo devuelve lista vacia, no levanta: las otras dos fuentes siguen
+    sirviendo y la vista no se queda sin pendientes por una API caida.
+    """
+    from apps.energia.services.comercializacion import (
+        fetch_unergy_projects_cacheado,
+        unergy_token,
+    )
+
+    try:
+        token = unergy_token()
+    except Exception:
+        return []
+    if not token:
+        return []
+    try:
+        crudos = fetch_unergy_projects_cacheado(token)
+    except Exception:
+        return []
+
+    out = []
+    for p in crudos:
+        topico = (p.get("nombre_topico") or "").strip()
+        nombre = (p.get("nombre_proyecto") or p.get("nombre_corto") or "").strip()
+        if not topico or not nombre or _excluir_por_nombre(nombre):
+            continue
+        c = _Candidato(
+            fuentes={"unergy"},
+            nombre_raw=nombre,
+            sub_project=topico,
+        )
+        c.core = _core(c.nombre_raw)
+        out.append(c)
+    return out
+
+
 def _fusionar_por_core(candidatos: list[_Candidato]) -> list[_Candidato]:
     """Combina candidatos de distintas fuentes que refieren al mismo
     proyecto real (mismo `core`), sin pisar campos ya llenados.
@@ -412,6 +461,10 @@ def _reforzar_solo_quoia(candidatos: list[_Candidato]) -> None:
     ser aislada (prueba/calibración), sin que ninguna otra fuente respaldara
     la sugerencia. Muta `candidatos` in-place."""
     for c in candidatos:
+        # `== {"quoia"}` y no `"quoia" in c.fuentes`: la exigencia es para el
+        # candidato que NADIE MAS corrobora. Desde que la API de Unergy es la
+        # tercera fuente (2026-09-14), aparecer tambien ahi cuenta como
+        # corroboracion y el candidato sale de esta regla.
         if c.fuentes == {"quoia"} and c.estado_sugerido == "en_operacion" and not c.generacion_multidia:
             c.estado_sugerido = None
             c.fase_construccion = None
@@ -466,6 +519,7 @@ def resolver_pendientes() -> list[dict]:
     crudos = (
         _candidatos_sunfactory()
         + _candidatos_quoia(fronteras_vinculadas)
+        + _candidatos_unergy()
     )
     candidatos = _fusionar_por_core(crudos)
     _reforzar_solo_quoia(candidatos)
