@@ -182,8 +182,75 @@ def ventana_utc(desde, hasta) -> tuple[str, str]:
     ), (desde_dt, hasta_dt)
 
 
+# Cuánto vale una corrida de la flota antes de volver a pedirla.
+#
+# 15 minutos: la curva de los últimos días ya no cambia, y la de HOY el
+# frontend la pisa igual con `/generacion-hoy`, que va aparte y tiene su propio
+# TTL más corto. Alargarlo más no ganaría nada visible y retrasaría ver una
+# planta que empezó a reportar.
+TTL_FLOTA = 900
+
+_PREFIJO_FLOTA = "generacion_flota:"
+
+
 def generacion_de_la_flota(proyectos, desde, hasta) -> dict:
-    """Generación real de todos los proyectos, agregada por fecha y por proyecto."""
+    """Generación real de todos los proyectos, agregada por fecha y por proyecto.
+
+    **Cacheado, porque cuesta una llamada externa POR PROYECTO.** Son ~90 curvas
+    pedidas a la API de Unergy, una por planta, y no había nada que las evitara:
+    cada vez que alguien abría Fallas -> Monitoreo se pagaban enteras. Medido en
+    producción el 2026-09-14: **48 segundos** para devolver 3 kB.
+
+    El caché es de dos niveles, igual que el del monitoreo solar: memoria del
+    proceso adelante --gratis, y evita el viaje dentro de la misma request-- y
+    Redis atrás, compartido por los tres workers de gunicorn. Si Redis no
+    responde queda el de proceso, que es mejor que nada y no rompe.
+
+    La clave lleva el rango de fechas Y los proyectos: dos rangos distintos son
+    dos respuestas distintas, y si entra una planta nueva a operación la
+    respuesta vieja ya no le sirve a nadie.
+    """
+    import hashlib
+
+    ids = ",".join(str(p.id) for p in sorted(proyectos, key=lambda x: x.id))
+    clave = (
+        f"{_PREFIJO_FLOTA}{desde}:{hasta}:"
+        f"{hashlib.sha1(ids.encode()).hexdigest()[:12]}"
+    )
+
+    ahora = time.monotonic()
+    guardado = _cache_flota.get(clave)
+    if guardado and (ahora - guardado[0]) < TTL_FLOTA:
+        return guardado[1]
+    try:
+        from django.core.cache import cache
+
+        de_redis = cache.get(clave)
+    except Exception:
+        de_redis = None
+    if de_redis is not None:
+        _cache_flota[clave] = (ahora, de_redis)
+        return de_redis
+
+    datos = _generacion_de_la_flota(proyectos, desde, hasta)
+
+    # Un fallo de token no se cachea: sería congelar el error 15 minutos.
+    if not datos.get("error"):
+        _cache_flota[clave] = (ahora, datos)
+        try:
+            from django.core.cache import cache
+
+            cache.set(clave, datos, TTL_FLOTA)
+        except Exception:
+            pass  # sin Redis el cache queda por proceso
+    return datos
+
+
+_cache_flota: dict[str, tuple[float, dict]] = {}
+
+
+def _generacion_de_la_flota(proyectos, desde, hasta) -> dict:
+    """La corrida real. Ver `generacion_de_la_flota`, que es la que se llama."""
     (pedir_desde, pedir_hasta), (desde_dt, hasta_dt) = ventana_utc(desde, hasta)
     try:
         token_ = token()
