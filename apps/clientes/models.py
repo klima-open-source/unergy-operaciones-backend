@@ -41,7 +41,7 @@ class ClienteDocumentoComercial(Timer):
     cliente = models.ForeignKey("Cliente", on_delete=models.DO_NOTHING, db_column="cliente_id", null=True, blank=True, related_name="documentos_comerciales")
     contrato_servicio = models.ForeignKey("contratos.ContratoServicio", on_delete=models.CASCADE, db_column="contrato_servicio_id", null=True, blank=True, related_name="cliente_documentos_comerciales_por_contrato_servicio_id")
     ppa_contrato = models.ForeignKey("ppa.PpaContrato", on_delete=models.CASCADE, db_column="ppa_contrato_id", null=True, blank=True, related_name="documentos_comerciales")
-    tipo = models.CharField(max_length=20, choices=[("rut", "rut"), ("certificado_bancario", "certificado_bancario"), ("camara_comercio", "camara_comercio"), ("oferta", "oferta"), ("contrato", "contrato")])
+    tipo = models.CharField(max_length=20, choices=[("rut", "rut"), ("cedula_ciudadania", "cedula_ciudadania"), ("certificado_bancario", "certificado_bancario"), ("camara_comercio", "camara_comercio"), ("oferta", "oferta"), ("contrato", "contrato")])
     nombre = models.CharField(max_length=255)
     numero = models.CharField(max_length=100, null=True, blank=True)
     fecha = models.DateField(null=True, blank=True)
