@@ -100,7 +100,7 @@ class InformeGuardado(models.Model):
     creado_en = models.DateTimeField(default=timezone.now)
     editado_en = models.DateTimeField(null=True, blank=True)
     aprobado_en = models.DateTimeField(null=True, blank=True)
-    correo_enviado = models.BooleanField()
+    correo_enviado = models.BooleanField(default=False)
     correo_enviado_en = models.DateTimeField(null=True, blank=True)
     comentarios = models.JSONField(null=True, blank=True)
     miembros = models.JSONField(null=True, blank=True)
