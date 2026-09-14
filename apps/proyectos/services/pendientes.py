@@ -94,7 +94,6 @@ class _Candidato:
     potencia_ac_kw: float | None = None
     capacidad_instalada_kwp: float | None = None
     sub_project: str | None = None
-    project_id_solenium: str | None = None
     origina_code: str | None = None
     codigo_tsf: str | None = None
     sunfactory_project_id: int | None = None
@@ -397,7 +396,7 @@ def _fusionar_por_core(candidatos: list[_Candidato]) -> list[_Candidato]:
         for campo in (
             "municipio", "departamento", "latitud", "longitud", "tipo_proyecto",
             "potencia_ac_kw", "capacidad_instalada_kwp", "sub_project",
-            "project_id_solenium", "origina_code", "codigo_tsf",
+            "origina_code", "codigo_tsf",
             "sunfactory_project_id", "proyecto_id",
         ):
             if getattr(existente, campo) is None and getattr(c, campo) is not None:
@@ -428,7 +427,7 @@ def resolver_pendientes() -> list[dict]:
     proyectos = list(
         Proyecto.objects.filter(deleted_at__isnull=True).only(
             "id", "nombre_comercial", "estado", "fase_construccion", "origina_code",
-            "codigo_tsf", "sunfactory_project_id", "sub_project", "project_id_solenium",
+            "codigo_tsf", "sunfactory_project_id", "sub_project",
         )
     )
 
@@ -437,7 +436,13 @@ def resolver_pendientes() -> list[dict]:
     }
     por_origina_code = {(p.origina_code or "").upper(): p for p in proyectos if p.origina_code}
     por_codigo_tsf = {(p.codigo_tsf or "").upper(): p for p in proyectos if p.codigo_tsf}
-    por_solenium_id = {p.project_id_solenium: p for p in proyectos if p.project_id_solenium}
+    # `sub_project` es como identifica cada planta la API de Unergy (su
+    # `nombre_topico`). Faltaba, y sin el un candidato que solo traiga ese
+    # identificador cae al ultimo recurso --coincidencia por nombre-- que es
+    # exactamente como se crean los duplicados.
+    por_sub_project = {
+        (p.sub_project or "").lower(): p for p in proyectos if p.sub_project
+    }
     por_core = {}
     for p in proyectos:
         core = _core(p.nombre_comercial)
@@ -477,8 +482,8 @@ def resolver_pendientes() -> list[dict]:
             match = por_origina_code.get(c.origina_code.upper())
         if match is None and c.codigo_tsf:
             match = por_codigo_tsf.get(c.codigo_tsf.upper())
-        if match is None and c.project_id_solenium:
-            match = por_solenium_id.get(c.project_id_solenium)
+        if match is None and c.sub_project:
+            match = por_sub_project.get(c.sub_project.lower())
         if match is None and c.proyecto_id:
             match = next((p for p in proyectos if p.id == c.proyecto_id), None)
 
@@ -535,7 +540,9 @@ def resolver_pendientes() -> list[dict]:
                 "potencia_ac_kw": c.potencia_ac_kw,
                 "capacidad_instalada_kwp": c.capacidad_instalada_kwp,
                 "sub_project": c.sub_project,
-                "project_id_solenium": c.project_id_solenium,
+                # Se conserva en la respuesta para no romper al frontend, pero
+                # ninguna fuente lo llena desde que Solenium dejo de serlo.
+                "project_id_solenium": None,
                 "origina_code": c.origina_code,
                 "codigo_tsf": c.codigo_tsf,
                 "sunfactory_project_id": c.sunfactory_project_id,
@@ -561,7 +568,9 @@ def resolver_pendientes() -> list[dict]:
                 "potencia_ac_kw": c.potencia_ac_kw,
                 "capacidad_instalada_kwp": c.capacidad_instalada_kwp,
                 "sub_project": c.sub_project,
-                "project_id_solenium": c.project_id_solenium,
+                # Se conserva en la respuesta para no romper al frontend, pero
+                # ninguna fuente lo llena desde que Solenium dejo de serlo.
+                "project_id_solenium": None,
                 "origina_code": c.origina_code,
                 "codigo_tsf": c.codigo_tsf,
                 "sunfactory_project_id": c.sunfactory_project_id,

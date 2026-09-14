@@ -31,6 +31,37 @@ def _forzar(request) -> bool:
     return request.query_params.get("forzar", "").lower() in ("true", "1")
 
 
+# Un nombre mas corto que esto no se usa para sugerir: "GD" o "N2" emparejarian
+# con media base y la sugerencia seria ruido.
+_MINIMO_PARA_SUGERIR = 5
+
+
+def _sugerir_por_nombre(nombre_quoia: str, proyectos: list[tuple]) -> tuple | None:
+    """El proyecto cuyo nombre CONTIENE al de Quoia, si hay exactamente uno.
+
+    `_mgs_number` solo reconoce "MGS | Minigranja | MGR + numero", asi que las
+    plantas con nombre propio se quedaban sin sugerencia aunque el proyecto
+    existiera. Caso real (2026-09-14): Quoia trae "Calipso", "Rigel" y "Titan",
+    y en la base estan como "Astrea 1 (Calipso)", "Astrea 2 (Rigel)" y
+    "Astrea 3 (Titan)" -- el nombre de Quoia esta ahi, entre parentesis.
+
+    **Si coincide con mas de uno no se sugiere nada.** Una sugerencia ambigua es
+    peor que ninguna: quien confirma no vuelve a mirar, y la frontera queda
+    colgada del proyecto equivocado. Sin sugerencia, al menos tiene que elegir.
+
+    Sigue siendo una propuesta: nada se crea solo.
+    """
+    aguja = (nombre_quoia or "").strip().lower()
+    if len(aguja) < _MINIMO_PARA_SUGERIR:
+        return None
+    coincidencias = [
+        (pid, nombre) for pid, nombre in proyectos
+        if aguja in (nombre or "").lower()
+    ]
+    return coincidencias[0] if len(coincidencias) == 1 else None
+
+
+
 @class_logger_wrapper(name="Operaciones | Fronteras")
 class FronteraViewSet(viewsets.GenericViewSet):
     """Catálogo de fronteras y confirmación de los borders de Quoia.
@@ -352,10 +383,13 @@ class FronteraViewSet(viewsets.GenericViewSet):
 
         # Una sola pasada por proyecto en vez de un barrido por cada pendiente:
         # antes era O(pendientes × proyectos). El primero con cada número gana.
+        proyectos_vivos = list(
+            py_models.Proyecto.objects.filter(deleted_at__isnull=True)
+            .values_list("id", "nombre_comercial")
+        )
+
         por_numero: dict[int, tuple] = {}
-        for pid, nombre in py_models.Proyecto.objects.filter(
-            deleted_at__isnull=True
-        ).values_list("id", "nombre_comercial"):
+        for pid, nombre in proyectos_vivos:
             numero = _mgs_number(nombre or "")
             if numero is not None and numero not in por_numero:
                 por_numero[numero] = (pid, nombre)
@@ -371,7 +405,8 @@ class FronteraViewSet(viewsets.GenericViewSet):
             ):
                 continue
             vistos.add(codigo)
-            sugerido = por_numero.get(_mgs_number(nombre_quoia))
+            sugerido = (por_numero.get(_mgs_number(nombre_quoia))
+                        or _sugerir_por_nombre(nombre_quoia, proyectos_vivos))
             pendientes.append({
                 "frt_code": codigo,
                 "nombre_quoia": nombre_quoia,
