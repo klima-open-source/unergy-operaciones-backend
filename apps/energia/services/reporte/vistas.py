@@ -73,10 +73,23 @@ def _semaforo(caso, revisar: bool) -> str:
 
 
 _GRUPO_FUENTE_GENERACION = {
-    "cgm": "medidor", "principal": "medidor", "respaldo": "medidor",
+    # CGM aparte de "Medidor" (pedido 2026-09-14). Es el dato oficial del
+    # mercado, no una lectura nuestra: agrupado con los medidores, el resumen no
+    # dejaba ver cuanto del reporte se sostiene en el CGM y cuanto en lo que
+    # leemos nosotros, que es la pregunta que se le hace a este grafico.
+    "cgm": "cgm",
+    "principal": "medidor", "respaldo": "medidor",
     "principal_sin_cgm": "medidor", "respaldo_sin_cgm": "medidor",
     "principal_sin_historico": "medidor", "respaldo_sin_historico": "medidor",
-    "reconectador": "medidor", "excel_terceros": "medidor", "externo": "medidor",
+    # El reconectador SI es equipo nuestro, asi que se queda en "Medidor".
+    "reconectador": "medidor",
+    # Estos dos no los medimos nosotros ni pasan por el mercado: son un Excel
+    # que manda un tercero y un dato que reporta otra empresa. Contarlos como
+    # "Medidor" hacia que un proyecto sin UNA sola lectura propia apareciera al
+    # 100% en medidor -- el caso que destapo esto fue Complejo Industrial
+    # Cedillanos: 27 dias de Excel de terceros y 3 de otra empresa, y el
+    # resumen decia "Medidor 100%".
+    "excel_terceros": "terceros", "externo": "terceros",
     "inversores": "inversor", "solenium_power": "inversor",
     # "crudos"/"crudos_parcial" NO son lectura de inversores -- salen del
     # nodo del medidor en Quoia (telemetría cruda "ap", integrada con
@@ -97,19 +110,26 @@ _GRUPO_FUENTE_GENERACION = {
 
 
 _GRUPO_FUENTE_CONSUMO = {
-    "cgm": "medidor", "medidor": "medidor",
+    "cgm": "cgm", "medidor": "medidor",
     "histórico": "estimacion",
     "sin dato": "sin_fuente", "error": "sin_fuente",
 }
 
 
 _ETIQUETA_GRUPO_FUENTE = {
-    "medidor": "Medidor", "inversor": "Inversor", "estimacion": "Estimación",
+    "cgm": "CGM", "medidor": "Medidor", "inversor": "Inversor",
+    "terceros": "Reportado por terceros", "estimacion": "Estimación",
     "apagado": "Apagado", "sin_fuente": "Sin fuente", "otro": "Otro",
 }
 
 
-_ORDEN_GRUPO_FUENTE = ["medidor", "inversor", "estimacion", "apagado", "sin_fuente", "otro"]
+# De mayor a menor respaldo del dato: el CGM es oficial del mercado; el medidor
+# y el inversor los leemos nosotros; lo de terceros es una medicion real pero
+# que no podemos verificar; la estimacion es inferida.
+_ORDEN_GRUPO_FUENTE = [
+    "cgm", "medidor", "inversor", "terceros", "estimacion", "apagado",
+    "sin_fuente", "otro",
+]
 
 
 _ETIQUETA_FUENTE_CRUDA_GENERACION = {
