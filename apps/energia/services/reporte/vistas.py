@@ -313,14 +313,17 @@ def serie_automatico(desde: date, hasta: date) -> dict:
 
     con_cgm: dict[date, set[int]] = defaultdict(set)
     reportaron: dict[date, set[int]] = defaultdict(set)
+    nombres: dict[int, str] = {}
     for modelo, campo in ((ReporteEnergiaGeneracion, "medidor_usado"),
                           (ReporteEnergiaConsumo, "caso")):
         # `.lower()` a propósito: generación guarda "cgm" y consumo "CGM".
         for fila in (modelo.objects.filter(fecha__range=(desde, hasta))
-                     .values("frontera_id", "fecha", campo)):
-            reportaron[fila["fecha"]].add(fila["frontera_id"])
+                     .values("frontera_id", "frontera__nombre_frontera", "fecha", campo)):
+            fid = fila["frontera_id"]
+            nombres[fid] = fila["frontera__nombre_frontera"]
+            reportaron[fila["fecha"]].add(fid)
             if (fila[campo] or "").strip().lower() == "cgm":
-                con_cgm[fila["fecha"]].add(fila["frontera_id"])
+                con_cgm[fila["fecha"]].add(fid)
 
     reportables = _fronteras_reportables_por_dia(desde, hasta)
 
@@ -351,12 +354,49 @@ def serie_automatico(desde: date, hasta: date) -> dict:
 
     return {
         "dias": dias,
+        "dias_contados": len(dias) - sin_corrida,
         "dias_sin_corrida": sin_corrida,
         "automaticas": total_cgm,
         "fronteras": total_reportables,
         "tasa": (round(total_cgm / total_reportables * 100, 1)
                  if total_reportables else 0.0),
+        "por_frontera": _automatico_por_frontera(dias, con_cgm, reportaron, nombres),
     }
+
+
+def _automatico_por_frontera(dias, con_cgm, reportaron, nombres) -> list[dict]:
+    """Cada frontera con su % de días automáticos, **la peor primero**.
+
+    Reemplaza al desglose por grupo, que no decía nada: al abrir "Otra fuente"
+    casi todas las filas daban 96-100%, porque esa barra es el complemento --
+    cualquier frontera que no sea automática SIEMPRE tiene casi todos sus días
+    ahí (reportado por la usuaria el 2026-09-15).
+
+    Acá el orden es la información: arriba quedan las fronteras que nunca
+    reportan solas, que son la cola de trabajo. Solo se miran los días con
+    corrida, igual que la tasa.
+    """
+    contados = [d["fecha"] for d in dias if not d["sin_corrida"]]
+    totales: dict[int, int] = defaultdict(int)
+    automaticos: dict[int, int] = defaultdict(int)
+    for fecha in contados:
+        for fid in reportaron.get(fecha, ()):
+            totales[fid] += 1
+        for fid in con_cgm.get(fecha, ()):
+            automaticos[fid] += 1
+
+    filas = [
+        {
+            "frontera_id": fid,
+            "nombre_proyecto": _NOMBRES_CORREGIDOS.get(fid, nombres.get(fid, "")),
+            "dias": n,
+            "automaticos": automaticos.get(fid, 0),
+            "tasa": round(automaticos.get(fid, 0) / n * 100, 1),
+        }
+        for fid, n in totales.items() if n
+    ]
+    filas.sort(key=lambda f: (f["tasa"], -f["dias"], f["nombre_proyecto"] or ""))
+    return filas
 
 
 def _distribucion_y_detalle(

@@ -440,3 +440,82 @@ def test_el_umbral_deja_margen_de_sobra():
     from apps.energia.services.reporte.vistas import COBERTURA_MINIMA_DE_UNA_CORRIDA
 
     assert 0.01 < COBERTURA_MINIMA_DE_UNA_CORRIDA < 0.95
+
+
+# ── La tabla por frontera ───────────────────────────────────────────────────
+# Reemplaza al desglose por grupo, que no decia nada: al abrir "Otra fuente"
+# casi todas las filas daban 96-100%, porque esa barra es el complemento --
+# cualquier frontera que no sea automatica SIEMPRE tiene casi todos sus dias
+# ahi (reportado por la usuaria el 2026-09-15). Aca el ORDEN es la informacion.
+
+
+def _por_frontera(r):
+    return [(f["nombre_proyecto"], f["automaticos"], f["dias"], f["tasa"])
+            for f in r["por_frontera"]]
+
+
+def test_la_peor_va_primero(base_limpia):
+    buena = _frontera("Siempre sola")
+    mala = _frontera("Nunca sola")
+    for dia in (DIA1, DIA2, DIA3):
+        _reporte(buena, dia, fuente="cgm")
+        _reporte(mala, dia, fuente="principal")
+
+    assert _por_frontera(_serie()) == [
+        ("Nunca sola", 0, 3, 0.0),
+        ("Siempre sola", 3, 3, 100.0),
+    ]
+
+
+def test_solo_cuenta_los_dias_con_corrida(base_limpia):
+    """La tabla y la tasa tienen que mirar los mismos días, o el detalle
+    contradice al titular."""
+    fronteras = [_frontera(n) for n in ("F", "Otra", "Tercera")]
+    for dia in (DIA1, DIA2):
+        for f in fronteras:
+            _reporte(f, dia, fuente="cgm")
+    _reporte(fronteras[0], DIA3, fuente="principal")  # dia sin corrida: 1 de 3
+
+    r = _serie()
+
+    assert r["dias_sin_corrida"] == 1
+    assert _por_frontera(r) == [
+        ("F", 2, 2, 100.0), ("Otra", 2, 2, 100.0), ("Tercera", 2, 2, 100.0),
+    ], "el dia sin corrida no le suma un dia malo a F"
+
+
+def test_una_frontera_que_no_reporto_nunca_no_aparece(base_limpia):
+    """No tiene filas, así que no hay días sobre los cuales sacarle un
+    porcentaje. Sale en el denominador de la tasa, no en esta tabla."""
+    f = _frontera("Reporta")
+    _frontera("Muda")
+    for dia in (DIA1, DIA2, DIA3):
+        _reporte(f, dia)
+
+    assert [n for n, _, _, _ in _por_frontera(_serie())] == ["Reporta"]
+
+
+def test_el_titular_no_lo_da_esta_tabla(base_limpia):
+    """La tasa divide sobre las fronteras REPORTABLES; la tabla, sobre los días
+    que cada frontera reportó. Son distintas a propósito: la muda no puede
+    tener una fila con 0/0, pero sí tiene que pesar en el total."""
+    f = _frontera("Reporta")
+    _frontera("Muda")
+    for dia in (DIA1, DIA2, DIA3):
+        _reporte(f, dia, fuente="cgm")
+
+    r = _serie()
+
+    assert r["tasa"] == 50.0, "1 de 2 fronteras reportables, todos los días"
+    assert r["por_frontera"][0]["tasa"] == 100.0
+
+
+def test_el_umbral_es_inclusivo(base_limpia):
+    """Justo en la mitad SI cuenta como corrida. Da igual para los datos reales
+    --los dias buenos cubren >=95% y los rotos <=1%-- pero conviene que el borde
+    este escrito y no se descubra en una prueba."""
+    fronteras = [_frontera("A"), _frontera("B")]
+    for dia in (DIA1, DIA2, DIA3):
+        _reporte(fronteras[0], dia, fuente="cgm")
+
+    assert _serie()["dias_sin_corrida"] == 0
