@@ -74,10 +74,52 @@ class Proyecto(Timer):
 
     class Meta:
         db_table = "proyectos"
-        unique_together = [("sub_project",)]
-        unique_together = [("project_id_solarview",)]
-        unique_together = [("sunfactory_project_id",)]
+
+        # OJO: esto estaba escrito como CUATRO asignaciones seguidas a
+        # `unique_together` (sub_project, project_id_solarview,
+        # sunfactory_project_id y project_id_solenium). En Python eso no las
+        # acumula: cada una pisa a la anterior y solo sobrevive la ultima. Las
+        # tres primeras parecian declaradas y no lo estaban.
+        #
+        # **La base SI las tiene** -- verificado contra produccion el
+        # 2026-09-15: `proyectos_sub_project_key`,
+        # `uq_proyectos_project_id_solarview` e
+        # `ix_proyectos_sunfactory_project_id` existen como indices unicos.
+        # Django adopto un esquema que ya venia con ellos, asi que el modelo
+        # miente pero los datos estan protegidos.
+        #
+        # No se agregan al modelo a proposito: Django no sabe que ya existen y
+        # generaria operaciones para CREARLAS de nuevo, dejando dos
+        # restricciones redundantes sobre la misma columna. Adoptarlas bien es
+        # una migracion aparte, con `state_operations`, y no es urgente.
         unique_together = [("project_id_solenium",)]
+
+        constraints = [
+            # Los dos codigos de Sun Factory, sin proteccion hasta ahora. Es el
+            # hueco por el que paso el duplicado de "Astrea 1 (Calipso)" (ids
+            # 274 y 275, mismo codigo_tsf): la sincronizacion cruza por estos
+            # campos para no duplicar, pero nada impedia que se crearan dos
+            # filas con el mismo valor. Detectarlo despues no es protegerlo.
+            #
+            # `deleted_at IS NULL` en la condicion: un merge deja al perdedor
+            # con soft-delete, y su codigo tiene que quedar libre. Sin eso, el
+            # proyecto borrado seguiria ocupando el codigo para siempre.
+            #
+            # `codigo_tsf` lo escribe una PERSONA al crear un proyecto a mano
+            # (esta en CAMPOS_CREACION del serializer); `origina_code` llega de
+            # Sun Factory como su `base_name`. Los dos identifican la misma
+            # planta y los dos se usan para emparejar.
+            models.UniqueConstraint(
+                fields=["codigo_tsf"],
+                condition=models.Q(codigo_tsf__isnull=False, deleted_at__isnull=True),
+                name="uq_proyectos_codigo_tsf_vivo",
+            ),
+            models.UniqueConstraint(
+                fields=["origina_code"],
+                condition=models.Q(origina_code__isnull=False, deleted_at__isnull=True),
+                name="uq_proyectos_origina_code_vivo",
+            ),
+        ]
 
 
 class Portafolio(Timer):
