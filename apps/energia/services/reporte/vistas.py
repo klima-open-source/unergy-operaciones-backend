@@ -172,14 +172,15 @@ def _distribucion_automatico(gen_filas, con_filas):
     for filas in (gen_filas, con_filas):
         for fid, nombre, etiqueta_cruda, n in filas:
             low = (etiqueta_cruda or "").strip().lower()
+            info = por_frontera.setdefault(fid, {
+                "nombre": _NOMBRES_CORREGIDOS.get(fid, nombre),
+                "dias_totales": 0, "dias_excluidos": 0, "grupos": {},
+            })
             if low == "excluida":
+                info["dias_excluidos"] += n
                 continue
             grupo = AUTOMATICO if low == "cgm" else OTRA_FUENTE
             cuenta[grupo] += n
-            info = por_frontera.setdefault(fid, {
-                "nombre": _NOMBRES_CORREGIDOS.get(fid, nombre),
-                "dias_totales": 0, "grupos": {},
-            })
             info["dias_totales"] += n
             g = info["grupos"].setdefault(grupo, {"dias": 0})
             g["dias"] += n
@@ -194,6 +195,7 @@ def _distribucion_automatico(gen_filas, con_filas):
             "nombre_proyecto": info["nombre"],
             "grupo": grupo,
             "dias_totales": info["dias_totales"],
+            "dias_excluidos": info["dias_excluidos"],
             "dias_grupo": g["dias"],
             "desglose": [],
         }
@@ -211,24 +213,35 @@ def _distribucion_y_detalle(
     """A partir de (frontera_id, nombre_frontera, etiqueta_cruda, n) --
     devuelve (a) el total agrupado global (para las tarjetas KPI) y (b) el
     detalle por frontera+grupo con desglose de fuentes crudas (para el
-    drill-down al hacer clic en una tarjeta). 'excluida' no se cuenta como
-    fuente, pero SÍ cuenta en dias_totales (ese día sí tuvo fila, solo que
-    a propósito no se reportó)."""
+    drill-down al hacer clic en una tarjeta).
+
+    **`dias_totales` son los días REPORTABLES: 'excluida' no entra.** Antes sí
+    entraba acá y no en el gráfico de automáticos, así que una frontera con días
+    excluidos mostraba porcentajes que no sumaban 100 en un desglose y sí en el
+    otro (2026-09-15). El desglose divide `dias_grupo / dias_totales`, y el
+    gráfico de arriba divide sobre la suma de los grupos: para que los dos
+    cuenten lo mismo, el denominador tiene que ser el mismo.
+
+    Los días excluidos no se pierden: van aparte en `dias_excluidos`. No se
+    reportaron a propósito, así que no son ni un acierto ni un fallo -- son otra
+    pregunta, no una fuente peor."""
     conteos_globales: dict[str, int] = {}
     por_frontera: dict[int, dict] = {}
     for fid, nombre, etiqueta_cruda, n in filas:
         info = por_frontera.setdefault(fid, {
-            "nombre": _NOMBRES_CORREGIDOS.get(fid, nombre), "dias_totales": 0, "grupos": {},
+            "nombre": _NOMBRES_CORREGIDOS.get(fid, nombre),
+            "dias_totales": 0, "dias_excluidos": 0, "grupos": {},
         })
-        info["dias_totales"] += n
         if etiqueta_cruda is None:
             grupo, etq_legible = "sin_fuente", "Sin fuente"
         else:
             low = etiqueta_cruda.strip().lower()
             if low == "excluida":
+                info["dias_excluidos"] += n
                 continue  # no es una fuente -- ese día no se reportó a propósito
             grupo = mapa.get(low, "otro")
             etq_legible = (etiquetas_legibles or {}).get(low, etiqueta_cruda)
+        info["dias_totales"] += n
         conteos_globales[grupo] = conteos_globales.get(grupo, 0) + n
         g = info["grupos"].setdefault(grupo, {"dias": 0, "desglose": {}})
         g["dias"] += n
@@ -244,6 +257,7 @@ def _distribucion_y_detalle(
             "nombre_proyecto": info["nombre"],
             "grupo": _ETIQUETA_GRUPO_FUENTE[grupo],
             "dias_totales": info["dias_totales"],
+            "dias_excluidos": info["dias_excluidos"],
             "dias_grupo": g["dias"],
             "desglose": [
                 {"etiqueta": e, "dias": n}

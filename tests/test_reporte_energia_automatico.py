@@ -184,3 +184,58 @@ def test_el_front_conoce_las_dos_etiquetas():
 
     assert "'Automático (CGM)':" in fuente
     assert "'Otra fuente':" in fuente
+
+
+# ── Los días excluidos cuentan igual en los tres gráficos ───────────────────
+# Hasta el 2026-09-15 no: `_distribucion_y_detalle` los sumaba a `dias_totales`
+# y `_distribucion_automatico` no. Efecto visible: al abrir una frontera con
+# días excluidos desde Generación, sus porcentajes no sumaban 100 --faltaba esa
+# porción-- y desde Automáticos sí. El desglose divide `dias_grupo /
+# dias_totales` y la barra de arriba divide sobre la suma de los grupos: con
+# denominadores distintos, dos números que dicen lo mismo no coincidían.
+
+
+def _filas_con_excluidos():
+    return [(1, "Frontera", "cgm", 10), (1, "Frontera", "excluida", 5),
+            (1, "Frontera", "principal", 10)]
+
+
+def _detalles_de_los_dos_graficos():
+    from apps.energia.services.reporte.vistas import (
+        _GRUPO_FUENTE_GENERACION, _distribucion_automatico, _distribucion_y_detalle,
+    )
+
+    _, det_gen = _distribucion_y_detalle(_filas_con_excluidos(), _GRUPO_FUENTE_GENERACION)
+    _, det_auto = _distribucion_automatico(_filas_con_excluidos(), [])
+    return det_gen, det_auto
+
+
+def test_los_dos_graficos_usan_el_mismo_denominador():
+    det_gen, det_auto = _detalles_de_los_dos_graficos()
+
+    assert {d["dias_totales"] for d in det_gen} == {20}
+    assert {d["dias_totales"] for d in det_auto} == {20}
+
+
+def test_los_porcentajes_del_desglose_suman_cien():
+    """Era lo que se veía mal: 10 y 10 sobre 25 daban 40% + 40% = 80%."""
+    for detalle in _detalles_de_los_dos_graficos():
+        suma = sum(round(d["dias_grupo"] / d["dias_totales"] * 100) for d in detalle)
+        assert suma == 100
+
+
+def test_el_denominador_del_desglose_es_el_de_la_barra():
+    from apps.energia.services.reporte.vistas import (
+        _GRUPO_FUENTE_GENERACION, _distribucion_y_detalle,
+    )
+
+    dist, detalle = _distribucion_y_detalle(_filas_con_excluidos(), _GRUPO_FUENTE_GENERACION)
+
+    assert sum(d["total"] for d in dist) == detalle[0]["dias_totales"]
+
+
+def test_los_dias_excluidos_no_se_pierden():
+    """Salen del porcentaje, pero quedan contados: no se reportaron a propósito,
+    y eso es otra pregunta -- no una fuente peor."""
+    for detalle in _detalles_de_los_dos_graficos():
+        assert {d["dias_excluidos"] for d in detalle} == {5}
