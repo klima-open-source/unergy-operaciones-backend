@@ -656,10 +656,10 @@ def calcular_balance(year: int, month: int,
 _DIAS_TASA_REF = 30
 
 
-def _plantas_contratos_de(year: int, month: int) -> dict:
+def _plantas_contratos_de(year: int, month: int, incluir_todos: bool = False) -> dict:
     """Payload de plantas-contratos del mes (aislado para poder mockear en tests)."""
     from apps.mercado_xm.services.cumplimiento.piscinas import plantas_contratos
-    return plantas_contratos(year, month, incluir_todos=False)
+    return plantas_contratos(year, month, incluir_todos=incluir_todos)
 
 
 def _tasa_diaria_reciente(plantas: dict, hoy: date) -> dict:
@@ -692,7 +692,8 @@ def _tasa_diaria_reciente(plantas: dict, hoy: date) -> dict:
     return {pid: (por_sp.get(sp) / dias) for pid, sp in sub.items() if por_sp.get(sp) is not None}
 
 
-def calcular_balance_proyectado(year: int, month: int, hoy: date | None = None) -> dict:
+def calcular_balance_proyectado(year: int, month: int, hoy: date | None = None,
+                                incluir_todos: bool = False) -> dict:
     """Balance de bolsa de un mes FUTURO: contratos de ese mes × tasa de generación
     reciente, todo proyectado. Misma forma de salida que `calcular_balance` (balance/periodo)."""
     hoy = hoy or hoy_col()
@@ -700,7 +701,7 @@ def calcular_balance_proyectado(year: int, month: int, hoy: date | None = None) 
     first_day = date(year, month, 1)
     last_day = date(year, month, total_dias)
 
-    data = _plantas_contratos_de(year, month)
+    data = _plantas_contratos_de(year, month, incluir_todos=incluir_todos)
     derivado = construir_tramos(data, first_day, last_day)
     plantas = derivado["plantas"]
     tasa = _tasa_diaria_reciente(plantas, hoy)
