@@ -51,18 +51,26 @@ def sincronizar_tsf() -> str:
     return resumen
 
 
-@shared_task(name="proyectos.sincronizar_generacion_solenium")
-def sincronizar_generacion_solenium() -> str:
-    """Trae de Solenium la generación diaria de los últimos 8 días.
+@shared_task(name="proyectos.sincronizar_generacion_diaria")
+def sincronizar_generacion_diaria() -> str:
+    """Trae de la API de Unergy la generación diaria de los últimos días.
 
-    Ventana móvil y no solo ayer: Solenium corrige hacia atrás, y un día que
-    llegó incompleto se completa en una corrida posterior sin intervención.
+    **El nombre ya no dice la fuente, a proposito.** Se llamaba
+    `sincronizar_generacion_solenium` y leia de Solenium; el 2026-09-15 se
+    cambio a la API de Unergy, que cubre casi el doble de plantas (~90 con
+    `sub_project` contra 57 con id de Solenium) y estaba viva cuando la otra
+    llevaba nueve dias sin escribir. Atar el nombre de la tarea a la fuente
+    obliga a renombrarla --y a tocar el horario y `django_celery_beat`-- cada
+    vez que la fuente cambia.
 
-    El UPSERT solo pisa filas cuya `fuente` ya es 'solenium': un valor cargado a
-    mano o traído de otra fuente manda sobre este, que es el criterio de toda la
-    tabla.
+    Ventana movil y no solo ayer: la API corrige hacia atras, y un dia que llego
+    incompleto se completa en una corrida posterior sin intervencion.
+
+    El UPSERT solo pisa filas cuya `fuente` ya es la suya: un valor cargado a
+    mano, o traido de Solenium cuando esa sincronizacion corria, manda sobre
+    este. Es el criterio de toda la tabla.
     """
-    from apps.proyectos.services.generacion_solenium import sincronizar
+    from apps.proyectos.services.generacion_unergy import sincronizar
 
     stats = sincronizar()
     resumen = (f"{stats['filas']} días de {stats['proyectos']} proyectos")

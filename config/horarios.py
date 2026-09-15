@@ -65,11 +65,11 @@ HORARIOS = {
 
     # ── Ingesta de fuentes externas ──────────────────────────────────────────
     "gen-sync-am": {
-        "task": "proyectos.sincronizar_generacion_solenium",
+        "task": "proyectos.sincronizar_generacion_diaria",
         "schedule": crontab(hour=7, minute=0),
     },
     "gen-sync-pm": {
-        "task": "proyectos.sincronizar_generacion_solenium",
+        "task": "proyectos.sincronizar_generacion_diaria",
         "schedule": crontab(hour=19, minute=0),
     },
     "bolsa-ingest": {
