@@ -595,6 +595,37 @@ def _generacion_30d(crudo: dict | None) -> list[dict]:
     return [{"date": d, "kwh": round(v, 1)} for d, v in sorted(diario.items())]
 
 
+def _sin_curva_si_no_genero(snap: dict | None) -> dict | None:
+    """Le borra la curva a un medidor que no exportó energía en el día.
+
+    Quoia entrega la potencia activa CON SIGNO --generar es negativo, consumir
+    positivo-- y `snapshot_medidor` la publica en valor absoluto. Así, una
+    planta parada que consume queda dibujada igual que una produciendo a tope.
+
+    Caso que lo destapó (2026-09-15, MGS 0007 La Paz Vallenata): meseta plana
+    de ~740 kW a las 3 de la mañana, con los inversores en cero y 0 kWh
+    exportados. La tarjeta se contradecía sola -- decía "0 kWh" arriba y
+    dibujaba una planta a plena carga abajo. Verificado el mismo día: Valencia
+    Oriente 1 y Agustín 1 generando marcan -711 y -968; Taurus IX, Cacica y
+    Vallenata, paradas, marcan +2, +1,6 y +740.
+
+    **El árbitro es la ENERGÍA, no el signo.** Si el contador del día quedó en
+    cero, no hubo generación y no hay curva que dibujar. No se decide por el
+    signo porque la convención se comprobó en cinco plantas de un solo día:
+    poco para apoyar un criterio que decide qué se ve y qué no.
+
+    `energia_kwh = None` es OTRA cosa: el canal de energía no reportó, y no se
+    puede probar que no generó. Ahí la curva se deja como está -- los dos
+    canales se caen por separado (ver `_horas_cubiertas`, nodo 1693: `ap` todo
+    en cero mientras `eae` sí acumulaba).
+    """
+    if not snap or snap.get("energia_kwh") is None:
+        return snap
+    if snap["energia_kwh"] > 0 or not snap.get("curva"):
+        return snap
+    return {**snap, "curva": [], "sin_generacion": True}
+
+
 def monitoreo_detalle(proyecto_id: int, incluir_snapshot: bool = False,
                       incluir_30d: bool = True) -> dict:
     """Detalle de un proyecto: curva de potencia de hoy, 30 días y medidores.
@@ -675,8 +706,12 @@ def monitoreo_detalle(proyecto_id: int, incluir_snapshot: bool = False,
     ]
     hasta = max(horas_ok)[11:16] if horas_ok else None
 
-    med_p = f_med_p.result() if f_med_p else None
-    med_r = f_med_r.result() if f_med_r else None
+    # Antes de elegir: un medidor que no exportó energía no dibuja curva. Ver
+    # `_sin_curva_si_no_genero`. Va antes de `elegir_medidor` para que los tres
+    # campos que salen en la respuesta (`medidor`, `medidor_principal` y
+    # `medidor_respaldo`) cuenten lo mismo.
+    med_p = _sin_curva_si_no_genero(f_med_p.result() if f_med_p else None)
+    med_r = _sin_curva_si_no_genero(f_med_r.result() if f_med_r else None)
 
     # La elección vive SOLO acá. Antes el mismo criterio ("mayor energía")
     # estaba escrito también en SolarLiveView.vue, y podían desincronizarse en
