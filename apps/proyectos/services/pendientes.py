@@ -470,6 +470,28 @@ def _reforzar_solo_quoia(candidatos: list[_Candidato]) -> None:
             c.fase_construccion = None
 
 
+# Los identificadores que `_actualizar_desde_pendiente` rellena cuando estan
+# vacios. Solo estos: la ubicacion tambien se rellena ahi, pero confirmar un
+# vinculo es sobre el vinculo -- y ademas esos campos no vienen cargados en el
+# queryset, asi que mirarlos costaria una consulta por proyecto.
+_IDENTIFICADORES_DEL_VINCULO = (
+    "origina_code", "codigo_tsf", "sunfactory_project_id", "sub_project",
+)
+
+
+def _hay_vinculo_por_escribir(candidato, proyecto) -> bool:
+    """Si confirmar este candidato dejaria algun identificador nuevo.
+
+    `_actualizar_desde_pendiente` NO pisa lo que ya tiene valor, asi que cuando
+    el proyecto los tiene todos, confirmar no cambia nada.
+    """
+    return any(
+        getattr(proyecto, campo, None) is None
+        and getattr(candidato, campo, None) is not None
+        for campo in _IDENTIFICADORES_DEL_VINCULO
+    )
+
+
 def resolver_pendientes() -> list[dict]:
     """Candidatos de Sun Factory y Quoia que no están reflejados en `proyectos`,
     o que sí lo están pero con el estado o la fase desincronizados.
@@ -569,7 +591,20 @@ def resolver_pendientes() -> list[dict]:
                     # en_construccion).
                     and match.fase_construccion != "energizado"
                 )
-                or (confianza == "nombre")  # vínculo sin confirmar todavía
+                # Un match por NOMBRE se sugiere para confirmar el vinculo --
+                # pero solo si al confirmarlo se va a escribir algo. Si el
+                # proyecto ya tiene todos sus identificadores, confirmar no hace
+                # nada (`_actualizar_desde_pendiente` solo rellena campos
+                # vacios) y la sugerencia vuelve a aparecer en la siguiente
+                # consulta: un bucle en el que el boton "Actualizar" no
+                # progresa nunca.
+                #
+                # Caso real (2026-09-15): la API de Unergy trae DOS entradas
+                # para la misma planta --"chima" y "chima_oriente"-- y nuestro
+                # proyecto ya estaba vinculado a la primera. La segunda
+                # emparejaba por nombre, no tenia nada que aportar, y volvia
+                # siempre.
+                or (confianza == "nombre" and _hay_vinculo_por_escribir(c, match))
             )
             if not necesita_actualizar:
                 continue
