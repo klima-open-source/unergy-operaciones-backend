@@ -281,31 +281,31 @@ def resumen(fecha: date) -> dict:
     }
 
 
-def _peor_ratio(item: dict) -> float:
-    """La peor de las tres fuentes, como fracción de los días con fila.
-
-    Es el criterio de orden Y el de "grave" (>30 %): una frontera con el medidor
-    principal perfecto pero Solenium caído la mitad de los días es tan urgente
-    como la inversa.
-    """
-    return max(
-        item["veces_medidor_principal_incompleto"],
-        item["veces_medidor_respaldo_incompleto"],
-        item["veces_solenium_incompleto"],
-    ) / item["dias_con_fila"]
-
-
 def resumen_historico(desde: date, hasta: date) -> dict:
     """Patrones a lo largo de VARIOS días, por frontera — distinto de `resumen`,
     que es de un solo día.
 
-    Responde qué tan seguido se usa cada fuente y qué medidores tienen datos
-    incompletos o comunicación intermitente. Solo se listan las fronteras con AL
-    MENOS un día incompleto: mostrar también las perfectas (0 % en las tres
-    columnas) es ruido, no información.
+    Responde dos cosas: de qué fuente salió el dato de cada día-frontera, y
+    cuánto del reporte salió automático por CGM.
 
-    "Intervención manual recurrente" y "Recuperación activa de medidores" —las
-    otras dos secciones que tenía— se quitaron el 2026-08-26.
+    Tres secciones se quitaron por el camino: "Intervención manual recurrente" y
+    "Recuperación activa de medidores" (2026-08-26), y "Datos incompletos de
+    medidores e inversores" (2026-09-15).
+
+    Esa última contaba en cuántos días llegó incompleta cada fuente, y se quitó
+    porque la pregunta estaba mal planteada: "incompleto" es una bandera de sí/no
+    que junta cuatro situaciones distintas --el medidor arrancó tarde, se cayó
+    temprano, tuvo huecos en medio, o la planta no generó ese día-- y faltar una
+    hora se veía igual que faltar diez. Ni el conteo ni el porcentaje arreglaban
+    eso. Medirlo bien es contar HORAS faltantes, y para que eso no cueste una
+    lectura de ~1.000 curvas JSON por consulta habría que calcularlas al generar
+    el reporte y guardarlas en columnas nuevas. Se decidió que no valía el
+    trabajo por ahora.
+
+    **Las banderas del modelo se quedan**: `medidor_principal_completo`,
+    `medidor_respaldo_completo` y `solenium_completo` las usa el clasificador
+    para decidir el caso de cada reporte. Lo que se fue es la métrica construida
+    encima de ellas.
     """
     if hasta < desde:
         raise NoProcesable("'hasta' no puede ser anterior a 'desde'")
@@ -333,49 +333,6 @@ def resumen_historico(desde: date, hasta: date) -> dict:
     dist_con, detalle_con = _distribucion_y_detalle(con_filas, _GRUPO_FUENTE_CONSUMO)
     dist_auto, detalle_auto = _distribucion_automatico(gen_filas, con_filas)
 
-    # 2) Datos incompletos -- solo Generación (Consumo no tiene inversores
-    # contra qué comparar, así que no tiene estas 3 columnas).
-    def _incompletos(campo):
-        return Count("id", filter=Q(**{campo: False}))
-
-    incompletos_rows = [
-        (
-            f["frontera_id"], f["frontera__nombre_frontera"],
-            f["n_ppal"], f["n_resp"], f["n_sol"], f["dias"],
-        )
-        for f in ReporteEnergiaGeneracion.objects
-        .filter(fecha__range=(desde, hasta))
-        .values("frontera_id", "frontera__nombre_frontera")
-        .annotate(
-            n_ppal=_incompletos("medidor_principal_completo"),
-            n_resp=_incompletos("medidor_respaldo_completo"),
-            n_sol=_incompletos("solenium_completo"),
-            dias=Count("id"),
-        )
-    ]
-    # Solo fronteras con AL MENOS un día incompleto -- mostrar también las
-    # que están perfectas (0% en las 3 columnas) es ruido, no información
-    # (pedido 2026-08-21: "MGS 0042 San Martín Norte"/"GD Taurus VIII" con
-    # 0%/0%/0% aparecían igual). Ordenadas de más a menos crítico (mayor %
-    # de días afectados en cualquiera de las 3 fuentes primero).
-    incompletos = sorted(
-        (
-            {
-                "frontera_id": fid,
-                "nombre_proyecto": _NOMBRES_CORREGIDOS.get(fid, nombre),
-                "veces_medidor_principal_incompleto": int(v_ppal or 0),
-                "veces_medidor_respaldo_incompleto": int(v_resp or 0),
-                "veces_solenium_incompleto": int(v_sol or 0),
-                "dias_con_fila": dias,
-            }
-            for fid, nombre, v_ppal, v_resp, v_sol, dias in incompletos_rows
-            if v_ppal or v_resp or v_sol
-        ),
-        key=_peor_ratio,
-        reverse=True,
-    )
-    graves = [i for i in incompletos if _peor_ratio(i) > 0.3]
-
     return {
         "desde": desde, "hasta": hasta,
         "distribucion_fuente_generacion": dist_gen,
@@ -386,19 +343,6 @@ def resumen_historico(desde: date, hasta: date) -> dict:
         # juntos: la pregunta es sobre el reporte entero, no sobre una mitad.
         "distribucion_automatico": dist_auto,
         "detalle_automatico": detalle_auto,
-        "incompletos": incompletos,
-        # El segundo callout solo se manda si el rango tiene mas de un dia. Con
-        # un solo dia, "mas del 30% de sus dias afectados" es lo mismo que "al
-        # menos un dia afectado" -- los dos numeros salian identicos (65 y 65 el
-        # 2026-09-04) y el segundo no aportaba nada, solo daba a entender que
-        # median cosas distintas.
-        "incompletos_callouts": [
-            {"valor": str(len(incompletos)),
-             "etiqueta": "fronteras con al menos un día de datos incompletos"},
-            *([{"valor": str(len(graves)),
-                "etiqueta": "con más del 30% de sus días afectados"}]
-              if (hasta - desde).days >= 1 else []),
-        ],
     }
 
 
