@@ -145,6 +145,65 @@ _ETIQUETA_FUENTE_CRUDA_GENERACION = {
 }
 
 
+AUTOMATICO = "Automático (CGM)"
+OTRA_FUENTE = "Otra fuente"
+
+
+def _distribucion_automatico(gen_filas, con_filas):
+    """Cuantos dias-frontera se reportaron automatico via CGM, y cuantos no.
+
+    Es una pregunta distinta de la de los otros dos graficos. Esos dicen **de
+    donde salio el dato**; este dice **cuanto salio solo**, que es la metrica
+    para saber si la automatizacion avanza.
+
+    Generacion y consumo van JUNTOS: lo que se quiere medir es el reporte
+    entero, no una de sus mitades. Un dia-frontera de generacion y uno de
+    consumo cuentan igual, porque los dos son un reporte que alguien tuvo que
+    hacer o que salio solo.
+
+    Los dias EXCLUIDOS no entran en ninguno de los dos lados: no se reportaron a
+    proposito, asi que no son ni un exito ni un fallo de la automatizacion.
+    Contarlos como "otra fuente" empeoraria la metrica por una decision
+    deliberada.
+    """
+    cuenta = {AUTOMATICO: 0, OTRA_FUENTE: 0}
+    por_frontera: dict[int, dict] = {}
+
+    for filas in (gen_filas, con_filas):
+        for fid, nombre, etiqueta_cruda, n in filas:
+            low = (etiqueta_cruda or "").strip().lower()
+            if low == "excluida":
+                continue
+            grupo = AUTOMATICO if low == "cgm" else OTRA_FUENTE
+            cuenta[grupo] += n
+            info = por_frontera.setdefault(fid, {
+                "nombre": _NOMBRES_CORREGIDOS.get(fid, nombre),
+                "dias_totales": 0, "grupos": {},
+            })
+            info["dias_totales"] += n
+            g = info["grupos"].setdefault(grupo, {"dias": 0})
+            g["dias"] += n
+
+    distribucion = [
+        {"etiqueta": etq, "total": cuenta[etq]}
+        for etq in (AUTOMATICO, OTRA_FUENTE) if cuenta[etq]
+    ]
+    detalle = [
+        {
+            "frontera_id": fid,
+            "nombre_proyecto": info["nombre"],
+            "grupo": grupo,
+            "dias_totales": info["dias_totales"],
+            "dias_grupo": g["dias"],
+            "desglose": [],
+        }
+        for fid, info in por_frontera.items()
+        for grupo, g in info["grupos"].items()
+    ]
+    detalle.sort(key=lambda d: (-d["dias_grupo"], d["nombre_proyecto"] or ""))
+    return distribucion, detalle
+
+
 def _distribucion_y_detalle(
     filas: list[tuple[int, str, str | None, int]], mapa: dict[str, str],
     etiquetas_legibles: dict[str, str] | None = None,
@@ -272,6 +331,7 @@ def resumen_historico(desde: date, hasta: date) -> dict:
     ]
     dist_gen, detalle_gen = _distribucion_y_detalle(gen_filas, _GRUPO_FUENTE_GENERACION, _ETIQUETA_FUENTE_CRUDA_GENERACION)
     dist_con, detalle_con = _distribucion_y_detalle(con_filas, _GRUPO_FUENTE_CONSUMO)
+    dist_auto, detalle_auto = _distribucion_automatico(gen_filas, con_filas)
 
     # 2) Datos incompletos -- solo Generación (Consumo no tiene inversores
     # contra qué comparar, así que no tiene estas 3 columnas).
@@ -322,6 +382,10 @@ def resumen_historico(desde: date, hasta: date) -> dict:
         "distribucion_fuente_consumo": dist_con,
         "detalle_fuente_generacion": detalle_gen,
         "detalle_fuente_consumo": detalle_con,
+        # Cuanto del reporte salio automatico por CGM. Generacion y consumo
+        # juntos: la pregunta es sobre el reporte entero, no sobre una mitad.
+        "distribucion_automatico": dist_auto,
+        "detalle_automatico": detalle_auto,
         "incompletos": incompletos,
         # El segundo callout solo se manda si el rango tiene mas de un dia. Con
         # un solo dia, "mas del 30% de sus dias afectados" es lo mismo que "al
