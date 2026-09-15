@@ -3,6 +3,8 @@
 from rest_framework import serializers
 
 from apps.mercado_xm import models as mx_models
+from apps.ppa import models as ppa_models
+from apps.proyectos import models as py_models
 
 TIPOS_SOLICITUD = (
     "registro", "modificacion", "terminacion", "desistimiento",
@@ -39,9 +41,35 @@ class SolicitudSerializer(serializers.ModelSerializer):
 
 
 class SolicitudEscrituraSerializer(serializers.ModelSerializer):
+    """Escritura. Acepta los MISMOS nombres de clave foránea que emite la lectura.
+
+    `SolicitudSerializer` devuelve `proyecto_id` y `contrato_ppa_id`, y eso es lo
+    que el formulario manda de vuelta. Como `ModelSerializer` nombra sus campos
+    igual que las FK del modelo (`proyecto`, `contrato_ppa`), esos dos llegaban
+    con un nombre que el serializer no reconocía — y DRF **descarta en silencio**
+    lo que no reconoce. El PATCH respondía 200 con `validated_data` vacío y la
+    planta no cambiaba: el contrato CTLP0003368 quedó en GD Marimonda sin forma
+    de moverlo desde la vista (reportado el 2026-09-15).
+
+    Se declaran los dos alias en vez de renombrar los campos para no romper a
+    quien ya manda `proyecto`.
+    """
+
+    proyecto_id = serializers.PrimaryKeyRelatedField(
+        source="proyecto", queryset=py_models.Proyecto.objects.all(),
+        required=False, allow_null=True,
+    )
+    # `null` es un valor con significado: una terminación manda la planta vacía
+    # a propósito, para que Cumplimiento prorratee el mes en vez de borrarlo.
+    contrato_ppa_id = serializers.PrimaryKeyRelatedField(
+        source="contrato_ppa", queryset=ppa_models.PpaContrato.objects.all(),
+        required=False, allow_null=True,
+    )
+
     class Meta:
         model = mx_models.AsicSolicitud
         fields = [
+            "proyecto_id", "contrato_ppa_id",
             "proyecto", "contrato_ppa", "requerimiento_asic", "tipo_solicitud",
             "prioridad_limitacion", "codigo_sic_contrato", "codigo_sic_vendedor",
             "codigo_sic_comprador", "cedula_agente_vendedor",
