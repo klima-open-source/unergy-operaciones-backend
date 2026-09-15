@@ -268,13 +268,20 @@ def _fronteras_reportables_por_dia(desde: date, hasta: date) -> dict[date, int]:
     return reportables
 
 
+# Un día con MENOS de esta fracción de las fronteras reportadas no fue una
+# corrida: fue una corrida que no ocurrió. El umbral cae en un hueco enorme --
+# los días normales cubren entre 95% y 100%, y los rotos 0,7% o menos (una fila
+# de 145)-- así que dónde exactamente se ponga no cambia ningún resultado.
+COBERTURA_MINIMA_DE_UNA_CORRIDA = 0.5
+
+
 def serie_automatico(desde: date, hasta: date) -> dict:
     """Tasa diaria de reporte automático (CGM), y el total del rango.
 
     **Qué mide.** Cada día: cuántas fronteras reportaron solas vía CGM, sobre
-    cuántas fronteras existían ese día. Es la pregunta de la automatización --
-    "¿cuánto salió solo?"-- separada de la de las otras dos barras, que dicen de
-    dónde salió el dato.
+    cuántas debían reportar. Es la pregunta de la automatización --"¿cuánto
+    salió solo?"-- separada de la de las otras dos barras, que dicen de dónde
+    salió el dato.
 
     **Por qué el denominador son las fronteras REPORTABLES y no las que
     reportaron.** Registrada en ASIC, una frontera tiene que reportar todos los
@@ -288,25 +295,30 @@ def serie_automatico(desde: date, hasta: date) -> dict:
 
     **Por qué el total es la razón de totales y no el promedio de las tasas.**
     Con el denominador fijo las dos cuentas dan lo MISMO, así que da igual cuál
-    se elija mientras nada se mueva; pero las fronteras se crean, el denominador
-    cambia de a poco, y ahí el promedio le daría el mismo peso a un día con 144
-    fronteras que a uno con 141. La razón de totales no se rompe nunca.
+    se elija mientras nada se mueva; pero las fronteras entran al ASIC, el
+    denominador cambia de a poco, y ahí el promedio le daría el mismo peso a un
+    día con 147 fronteras que a uno con 139. La razón de totales no se rompe.
 
-    Y esto es lo que hace que los días malos ya no haya que sacarlos a mano: el
-    5 de septiembre de 2026 --el clasificador no corrió y quedó UNA fila-- entra
-    como `0 / 141`. Se diluye solo, y además queda contado como lo que fue: un
-    día sin reportar. Con el denominador viejo ese mismo día era `0 / 1`, un
-    cero perfecto que en un promedio de días valía tanto como un mes entero.
+    **Los días sin corrida quedan fuera de la tasa, pero no de la serie.** El 5
+    y el 6 de septiembre de 2026 no se reportó nada: fue la migración del
+    servidor, no la automatización (confirmado con la usuaria). Contarlos sería
+    culpar a esta métrica de una caída de infraestructura, y entonces el número
+    se movería por dos causas distintas sin poder saber cuál. Siguen apareciendo
+    en `dias` con `sin_corrida=True` --el gráfico los pinta y dice por qué-- y se
+    cuentan aparte en `dias_sin_corrida`. Eliminarlos de la vista sería esconder
+    dos días en que 145 fronteras debían reportar y ninguna lo hizo.
     """
     if hasta < desde:
         raise NoProcesable("'hasta' no puede ser anterior a 'desde'")
 
     con_cgm: dict[date, set[int]] = defaultdict(set)
+    reportaron: dict[date, set[int]] = defaultdict(set)
     for modelo, campo in ((ReporteEnergiaGeneracion, "medidor_usado"),
                           (ReporteEnergiaConsumo, "caso")):
         # `.lower()` a propósito: generación guarda "cgm" y consumo "CGM".
         for fila in (modelo.objects.filter(fecha__range=(desde, hasta))
                      .values("frontera_id", "fecha", campo)):
+            reportaron[fila["fecha"]].add(fila["frontera_id"])
             if (fila[campo] or "").strip().lower() == "cgm":
                 con_cgm[fila["fecha"]].add(fila["frontera_id"])
 
@@ -315,20 +327,31 @@ def serie_automatico(desde: date, hasta: date) -> dict:
     dias = []
     total_cgm = 0
     total_reportables = 0
+    sin_corrida = 0
     for dia in sorted(reportables):
         cgm = len(con_cgm.get(dia, ()))
         universo = reportables[dia]
-        total_cgm += cgm
-        total_reportables += universo
+        cubiertas = len(reportaron.get(dia, ()))
+        hubo_corrida = bool(
+            universo and cubiertas >= universo * COBERTURA_MINIMA_DE_UNA_CORRIDA
+        )
+        if hubo_corrida:
+            total_cgm += cgm
+            total_reportables += universo
+        else:
+            sin_corrida += 1
         dias.append({
             "fecha": dia,
             "automaticas": cgm,
             "fronteras": universo,
+            "reportaron": cubiertas,
+            "sin_corrida": not hubo_corrida,
             "tasa": round(cgm / universo * 100, 1) if universo else 0.0,
         })
 
     return {
         "dias": dias,
+        "dias_sin_corrida": sin_corrida,
         "automaticas": total_cgm,
         "fronteras": total_reportables,
         "tasa": (round(total_cgm / total_reportables * 100, 1)
