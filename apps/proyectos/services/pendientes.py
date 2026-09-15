@@ -33,9 +33,10 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import timedelta
 
 from apps.fronteras.models import Frontera
 
@@ -46,7 +47,11 @@ from apps.fronteras.models import Frontera
 # moria con NameError.
 _EXCLUIR_NOMBRES = ("solenium piso",)
 _EXCLUIR_PREFIJOS = ("deprecated",)
-from apps.proyectos.models import Proyecto, ProyectoPendienteIgnorado
+from apps.plataforma.services.fechas import hoy_col
+from apps.proyectos.models import (
+    GeneracionDiaria, Proyecto, ProyectoPendienteIgnorado,
+)
+from apps.proyectos.services.generacion_unergy import DIAS_VENTANA
 from apps.proyectos.services.tsf_sync import (
     _SF_IMPORT_STATES, _STATUS_TO_FASE, _core, _derive_commercial_name,
     _parece_codigo, _sunfactory_all_projects, _sunfactory_token,
@@ -225,51 +230,173 @@ def _frt_a_border_id(borders: list[dict]) -> dict[str, int]:
     return out
 
 
-# Cache de "¿generación real?" por frt_code -- evita repetir ~66 llamadas de
-# medición en paralelo en cada GET /proyectos/pendientes (se llama también
-# desde confirmar/ignorar). Mismo TTL que _get_dynamic_maps en gaia_client.
-_generacion_real_cache: dict[str, bool] | None = None
-_generacion_real_cache_ts: float = 0.0
+# ── Cuánto hay que preguntarle a Quoia ──────────────────────────────────────
+# Antes se medían TODOS los borders con reporte reciente --~145, y cada uno son
+# hasta DOS llamadas (medidor de nodo, y el CGM como respaldo)-- y recién
+# después se filtraba por nombre y por si la frontera ya estaba vinculada. Se
+# medía para botar.
+#
+# Ahora se filtra primero, y lo que queda se parte en dos:
+#
+#   · La frontera YA está vinculada a un proyecto → la respuesta está en
+#     `generacion_diaria`, que se indexa justo por `proyecto_id`. Cero llamadas.
+#   · La frontera no la tenemos → es una candidata de verdad y Quoia es la
+#     única fuente. Solo por esas se pregunta.
+#
+# Medido contra PRODUCCIÓN el 2026-09-15: de las 153 fronteras vivas con código,
+# **las 153 están vinculadas a un proyecto**, ninguna suelta. Hoy, entonces, el
+# segundo grupo son solo las que Quoia conoce y nosotros todavía no. El reparto
+# no depende de esa proporción, pero dice de dónde sale el ahorro.
+#
+# Esto depende de que `generacion_diaria` cubra a los proyectos que AÚN NO
+# están marcados en operación -- que es lo que se arregló el mismo día en
+# `generacion_unergy.sincronizar`. Sin eso, este camino responde "no genera"
+# para todos y calla la sugerencia en vez de acelerarla.
+
+_DIAS_GENERACION_SOSTENIDA = 3
+
+
+def _frt_codes(border: dict) -> tuple[str, str]:
+    """`(código de generación, código de consumo)` de un border, normalizados."""
+    gen = border.get("frt_generation") or {}
+    cons = border.get("frt_consumption") or {}
+    return ((gen.get("frt_code") or "").strip().lower(),
+            (cons.get("frt_code") or "").strip().lower())
+
+
+def _repartir_borders(
+    borders: list[dict], fronteras_vinculadas: dict[str, int],
+) -> tuple[list[tuple[str, int]], list[tuple[str, str, int | None]]]:
+    """`(propias, ajenas)` entre los borders por los que vale la pena preguntar.
+
+    `propias` son `(frt_code, proyecto_id)`: se responden desde nuestra base.
+    `ajenas` son `(frt_code, última fecha reportada, border_id)`: van a Quoia.
+
+    Quedan afuera los que no tienen nombre, los excluidos por nombre
+    (`deprecated`, el edificio de Solenium) y los que nunca reportaron.
+    """
+    propias: list[tuple[str, int]] = []
+    ajenas: list[tuple[str, str, int | None]] = []
+    for b in borders:
+        nombre = (b.get("name") or "").strip()
+        if not nombre or _excluir_por_nombre(nombre):
+            continue
+        gen = b.get("frt_generation") or {}
+        fecha = gen.get("last_report_date")
+        if not fecha:
+            continue
+        code_gen, code_cons = _frt_codes(b)
+        if not code_gen:
+            continue
+        proyecto_id = fronteras_vinculadas.get(code_gen) or fronteras_vinculadas.get(code_cons)
+        if proyecto_id is not None:
+            propias.append((code_gen, proyecto_id))
+        else:
+            ajenas.append((code_gen, fecha, gen.get("id")))
+    return propias, ajenas
+
+
+def _generacion_desde_la_base(
+    propias: list[tuple[str, int]],
+) -> tuple[dict[str, bool], dict[str, bool]]:
+    """`(generó, generó sostenido)` por frt_code, leyendo `generacion_diaria`.
+
+    Una consulta para todas. Sostenido = los `_DIAS_GENERACION_SOSTENIDA` días
+    completos anteriores a hoy, el mismo criterio que se le exigía a Quoia; hoy
+    no cuenta porque puede estar parcial.
+
+    El chequeo de un día mira la ventana que el sync llena, no la fecha exacta
+    que Quoia reporta como último dato: nuestra tabla es diaria y no tiene por
+    qué coincidir al día con el catálogo de un tercero.
+    """
+    if not propias:
+        return {}, {}
+
+    ids = {pid for _, pid in propias}
+    hoy = hoy_col()
+    completos = [hoy - timedelta(days=i) for i in range(1, _DIAS_GENERACION_SOSTENIDA + 1)]
+    desde = min(completos + [hoy - timedelta(days=DIAS_VENTANA)])
+
+    por_proyecto: dict[int, set] = defaultdict(set)
+    for pid, fecha in (
+        GeneracionDiaria.objects
+        .filter(proyecto_id__in=ids, fecha__gte=desde, kwh_real__gt=0)
+        .values_list("proyecto_id", "fecha")
+    ):
+        por_proyecto[pid].add(fecha)
+
+    un_dia: dict[str, bool] = {}
+    sostenida: dict[str, bool] = {}
+    for code, pid in propias:
+        fechas = por_proyecto.get(pid, set())
+        un_dia[code] = bool(fechas)
+        sostenida[code] = all(d in fechas for d in completos)
+    return un_dia, sostenida
+
+
+# Cache de lo que SÍ hay que preguntarle a Quoia -- ya solo las fronteras que
+# no tenemos. Vive en una variable de módulo, así que es por worker de gunicorn
+# y se pierde en cada despliegue; con el reparto de arriba eso dejó de importar,
+# porque lo que puede llegar a recalcular es un puñado y no el catálogo entero.
+#
+# **Es POR CÓDIGO, no un diccionario entero con una fecha.** Antes se guardaba
+# el resultado completo de la última corrida: si otra la llamaba con menos
+# fronteras --el endpoint de diagnóstico pregunta por una sola-- el diccionario
+# chico quedaba pisando al grande, y todo lo que no estuviera ahí se leía como
+# "no genera". Un falso negativo callado.
+_generacion_real_cache: dict[str, tuple[bool, float]] = {}
 _GENERACION_REAL_CACHE_TTL = 3600  # segundos
 
 
-def _generacion_real_por_frt(gaia: GaiaClient, borders: list[dict]) -> dict[str, bool]:
-    global _generacion_real_cache, _generacion_real_cache_ts
+def _vigentes(cache: dict, codigos) -> tuple[dict[str, bool], list]:
+    """`(lo que ya sabemos, lo que hay que volver a medir)`."""
     now = time.monotonic()
-    if _generacion_real_cache is not None and (now - _generacion_real_cache_ts) < _GENERACION_REAL_CACHE_TTL:
-        return _generacion_real_cache
+    sabido: dict[str, bool] = {}
+    faltan = []
+    for item in codigos:
+        code = item[0] if isinstance(item, tuple) else item
+        guardado = cache.get(code)
+        if guardado is not None and (now - guardado[1]) < _GENERACION_REAL_CACHE_TTL:
+            sabido[code] = guardado[0]
+        else:
+            faltan.append(item)
+    return sabido, faltan
 
-    dynamic = _get_dynamic_maps(gaia) or {}
-    frt_a_nodos = dynamic.get("frt") or {}
 
-    con_reporte = [
-        ((b.get("frt_generation") or {}).get("frt_code", "").strip().lower(),
-         (b.get("frt_generation") or {}).get("last_report_date"),
-         (b.get("frt_generation") or {}).get("id"))
-        for b in borders
-        if (b.get("frt_generation") or {}).get("last_report_date")
-    ]
+def _guardar(cache: dict, resultado: dict[str, bool]) -> None:
+    now = time.monotonic()
+    for code, valor in resultado.items():
+        cache[code] = (valor, now)
+
+
+def _generacion_real_por_frt(
+    gaia: GaiaClient, ajenas: list[tuple[str, str, int | None]],
+) -> dict[str, bool]:
+    """¿Generó de verdad el día que Quoia reporta como último? Por frt_code."""
+    sabido, faltan = _vigentes(_generacion_real_cache, ajenas)
+    if not faltan:
+        return sabido
+
+    frt_a_nodos = (_get_dynamic_maps(gaia) or {}).get("frt") or {}
+
     resultado: dict[str, bool] = {}
-    if con_reporte:
-        with ThreadPoolExecutor(max_workers=min(len(con_reporte), 12)) as pool:
-            def _check(item):
-                code, fecha, border_id = item
-                node_p, node_r = frt_a_nodos.get(code, (None, None))
-                return code, _generacion_real(gaia, node_p, node_r, border_id, fecha)
-            for code, tiene in pool.map(_check, con_reporte):
-                resultado[code] = tiene
+    with ThreadPoolExecutor(max_workers=min(len(faltan), 12)) as pool:
+        def _check(item):
+            code, fecha, border_id = item
+            node_p, node_r = frt_a_nodos.get(code, (None, None))
+            return code, _generacion_real(gaia, node_p, node_r, border_id, fecha)
+        for code, tiene in pool.map(_check, faltan):
+            resultado[code] = tiene
 
-    _generacion_real_cache = resultado
-    _generacion_real_cache_ts = now
-    return resultado
+    _guardar(_generacion_real_cache, resultado)
+    return {**sabido, **resultado}
 
 
 # Cache de "¿generación sostenida varios días?" -- más caro que el de 1 día
 # (repite la medición por N días), así que solo se calcula para los frt_code
-# que YA pasaron el chequeo de 1 día (subconjunto chico). Mismo TTL.
-_generacion_multidia_cache: dict[str, bool] | None = None
-_generacion_multidia_cache_ts: float = 0.0
-_DIAS_GENERACION_SOSTENIDA = 3
+# que YA pasaron el chequeo de 1 día (subconjunto chico). Mismo TTL, y también
+# por código, por la misma razón que el de arriba.
+_generacion_multidia_cache: dict[str, tuple[bool, float]] = {}
 
 
 def _generacion_real_multidia_por_frt(
@@ -282,32 +409,26 @@ def _generacion_real_multidia_por_frt(
     de verdad. Caso real 2026-07-10: Garza/La Perdiz/Taurus VIII-X pasaban el
     chequeo de 1 día, pero ese mismo día, revisado después, mostraba
     generación real en cero -- solo se sostuvo un día aislado."""
-    global _generacion_multidia_cache, _generacion_multidia_cache_ts
-    now = time.monotonic()
-    if _generacion_multidia_cache is not None and (now - _generacion_multidia_cache_ts) < _GENERACION_REAL_CACHE_TTL:
-        return _generacion_multidia_cache
+    sabido, faltan = _vigentes(_generacion_multidia_cache, [c for c in frt_codes if c])
+    if not faltan:
+        return sabido
 
-    dynamic = _get_dynamic_maps(gaia) or {}
-    frt_a_nodos = dynamic.get("frt") or {}
+    frt_a_nodos = (_get_dynamic_maps(gaia) or {}).get("frt") or {}
     frt_a_border = frt_a_border or {}
-    hoy = date.today()
+    hoy = hoy_col()
     fechas = [(hoy - timedelta(days=i)).isoformat() for i in range(1, _DIAS_GENERACION_SOSTENIDA + 1)]
 
     resultado: dict[str, bool] = {}
-    codigos = [c for c in frt_codes if c]
-    if codigos:
-        with ThreadPoolExecutor(max_workers=min(len(codigos), 12)) as pool:
-            def _check(code):
-                node_p, node_r = frt_a_nodos.get(code, (None, None))
-                border_id = frt_a_border.get(code)
-                sostenida = all(_generacion_real(gaia, node_p, node_r, border_id, f) for f in fechas)
-                return code, sostenida
-            for code, tiene in pool.map(_check, codigos):
-                resultado[code] = tiene
+    with ThreadPoolExecutor(max_workers=min(len(faltan), 12)) as pool:
+        def _check(code):
+            node_p, node_r = frt_a_nodos.get(code, (None, None))
+            border_id = frt_a_border.get(code)
+            return code, all(_generacion_real(gaia, node_p, node_r, border_id, f) for f in fechas)
+        for code, tiene in pool.map(_check, faltan):
+            resultado[code] = tiene
 
-    _generacion_multidia_cache = resultado
-    _generacion_multidia_cache_ts = now
-    return resultado
+    _guardar(_generacion_multidia_cache, resultado)
+    return {**sabido, **resultado}
 
 
 def _candidatos_quoia(fronteras_vinculadas: dict[str, int]) -> list[_Candidato]:
@@ -318,12 +439,21 @@ def _candidatos_quoia(fronteras_vinculadas: dict[str, int]) -> list[_Candidato]:
         borders = gaia.get_all_borders()
     except Exception:
         return []
-    generacion_real = _generacion_real_por_frt(gaia, borders)
-    # Multi-día solo para los que ya pasaron el de 1 día -- subconjunto chico,
-    # evita multiplicar por 3 las llamadas de medición para todo el pipeline.
-    codigos_1dia = [code for code, tiene in generacion_real.items() if tiene]
-    frt_a_border = _frt_a_border_id(borders)
-    generacion_multidia = _generacion_real_multidia_por_frt(gaia, codigos_1dia, frt_a_border)
+
+    propias, ajenas = _repartir_borders(borders, fronteras_vinculadas)
+
+    # Las que ya son nuestras: una consulta a la base, ninguna llamada externa.
+    generacion_real, generacion_multidia = _generacion_desde_la_base(propias)
+
+    # Las que no tenemos: acá sí hay que preguntar. Multi-día solo para las que
+    # ya pasaron el de 1 día -- subconjunto chico, evita multiplicar por 3.
+    if ajenas:
+        de_quoia = _generacion_real_por_frt(gaia, ajenas)
+        generacion_real.update(de_quoia)
+        codigos_1dia = [code for code, tiene in de_quoia.items() if tiene]
+        generacion_multidia.update(
+            _generacion_real_multidia_por_frt(gaia, codigos_1dia, _frt_a_border_id(borders))
+        )
 
     out = []
     for b in borders:
@@ -331,9 +461,7 @@ def _candidatos_quoia(fronteras_vinculadas: dict[str, int]) -> list[_Candidato]:
         if not nombre or _excluir_por_nombre(nombre):
             continue
         gen = b.get("frt_generation") or {}
-        cons = b.get("frt_consumption") or {}
-        frt_gen_code = (gen.get("frt_code") or "").strip().lower()
-        frt_cons_code = (cons.get("frt_code") or "").strip().lower()
+        frt_gen_code, frt_cons_code = _frt_codes(b)
 
         # Ya vinculado a un proyecto vía fronteras.codigo_frontera -- match
         # directo, no hace falta adivinar por nombre.

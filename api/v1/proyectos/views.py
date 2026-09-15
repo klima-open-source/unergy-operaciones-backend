@@ -553,14 +553,24 @@ class ProyectoViewSet(viewsets.GenericViewSet):
             borders = gaia.get_all_borders()
         except Exception as exc:
             raise ServicioNoDisponible(f"No se pudo consultar Quoia: {exc}")
-        generacion_real = pendientes_svc._generacion_real_por_frt(gaia, borders)
-
         por_codigo = {}
         for b in borders:
             gen = b.get("frt_generation") or {}
             codigo = (gen.get("frt_code") or "").strip().lower()
             if codigo:
                 por_codigo[codigo] = gen
+
+        # Solo las fronteras DE ESTE PROYECTO. Antes se le pedía la medición a
+        # Quoia para el catálogo entero --~145 fronteras, hasta dos llamadas
+        # cada una-- para terminar leyendo una o dos: el diagnóstico de un
+        # proyecto costaba lo mismo que listar los pendientes.
+        pedir = []
+        for f in fronteras:
+            codigo = (f.codigo_frontera or "").strip().lower()
+            gen = por_codigo.get(codigo)
+            if codigo and gen and gen.get("last_report_date"):
+                pedir.append((codigo, gen["last_report_date"], gen.get("id")))
+        generacion_real = pendientes_svc._generacion_real_por_frt(gaia, pedir)
 
         return Response({
             "tiene_frontera": True,

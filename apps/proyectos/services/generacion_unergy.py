@@ -70,13 +70,20 @@ def sincronizar() -> dict:
     """Trae la ventana y la persiste. Devuelve `{proyectos, filas}`."""
     from apps.energia.services import unergy_api
 
+    # **No se filtra por estado, a proposito.** Filtrar por `en_operacion` dejaba
+    # afuera justo a los proyectos que todavia no se confirmaron como operando --
+    # y son los que "Proximos a energizar" necesita: esa vista oculta las plantas
+    # que YA generan preguntandole a esta tabla. Con el filtro puesto la tabla
+    # nunca sabia de ellas y la vista no ocultaba ninguna, en silencio.
+    # Solo se excluyen los cancelados: no van a generar nunca.
     proyectos = list(
-        Proyecto.objects.filter(estado="en_operacion", deleted_at__isnull=True)
+        Proyecto.objects.filter(deleted_at__isnull=True)
+        .exclude(estado="cancelado")
         .exclude(Q(sub_project__isnull=True) | Q(sub_project=""))
         .values_list("id", "sub_project")
     )
     if not proyectos:
-        logger.info("ningún proyecto en operación con `sub_project`")
+        logger.info("ningún proyecto con `sub_project`")
         return {"proyectos": 0, "filas": 0}
 
     try:
