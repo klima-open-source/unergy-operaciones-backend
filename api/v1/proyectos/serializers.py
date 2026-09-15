@@ -14,6 +14,8 @@ red: ahí es obligatorio y en /proyectos es opcional.
 
 import json
 
+import re
+
 from rest_framework import serializers
 
 from apps.proyectos import models as py_models
@@ -47,6 +49,12 @@ class _CurvaMensual(serializers.JSONField):
         return data if isinstance(data, list) else None
 
 
+# Un codigo CREG: COL + letras y numeros, sin separadores. El `base_name`
+# de Sun Factory es ESE prefijo mas el sitio ("COLCEST924P3_ASTREA_ORIENTE"),
+# y ese entero va en `origina_code`, no aca.
+_PREFIJO_CREG = re.compile(r"^COL[A-Z0-9]+$")
+
+
 class ProyectoCrearSerializer(serializers.ModelSerializer):
     # Mismo alias de transición que en la salida, para el lado de la escritura:
     # un frontend todavía sin promover manda `potencia_instalada_kwp` al
@@ -71,6 +79,41 @@ class ProyectoCrearSerializer(serializers.ModelSerializer):
             c: {"required": False, "allow_null": True}
             for c in CAMPOS_CREACION if c != "nombre_comercial"
         }
+
+    def validate_codigo_tsf(self, valor):
+        """Solo el prefijo CREG, no el `base_name` entero.
+
+        Sun Factory manda un solo dato, el `base_name`
+        (`COLCEST924P3_ASTREA_ORIENTE`), y de ahi salen dos campos nuestros:
+        `origina_code` se queda con el entero y `codigo_tsf` con el prefijo
+        (`COLCEST924P3`).
+
+        Pero `codigo_tsf` tambien lo escribe una persona en el formulario, y
+        hasta ahora nadie validaba el formato. Tres proyectos --las tres
+        Astrea-- quedaron con el `base_name` completo en el campo del prefijo y
+        `origina_code` vacio, y eso rompe el emparejamiento de `tsf_sync`, que
+        cruza por el prefijo para reconocer un proyecto que ya existe. De hecho
+        hay una linea que tambien prueba `Q(codigo_tsf=base_name)`: un parche
+        para justo este caso.
+
+        Se rechaza en vez de recortar en silencio: quien pego el valor completo
+        probablemente quiso registrar el proyecto de Sun Factory, y decirselo es
+        mas util que guardar la mitad sin avisar.
+        """
+        if valor in (None, ""):
+            return valor
+        codigo = str(valor).strip()
+        if _PREFIJO_CREG.match(codigo):
+            return codigo
+        prefijo = codigo.split("_", 1)[0]
+        if _PREFIJO_CREG.match(prefijo):
+            raise serializers.ValidationError(
+                f"Parece el codigo completo de Sun Factory. El Codigo TSF es solo "
+                f"el prefijo: '{prefijo}'."
+            )
+        raise serializers.ValidationError(
+            "Formato invalido: se espera un codigo CREG como 'COLCEST924P3'."
+        )
 
 
 class ProyectoDesdeCrmSerializer(ProyectoCrearSerializer):
