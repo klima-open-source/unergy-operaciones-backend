@@ -17,12 +17,13 @@ declarada — que es justo lo que ese bloque intentaba tapar.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 
 from django.db.models import F, Max, Q
 
 from apps.fronteras.models import Frontera
 from apps.plataforma.services.fechas import hoy_col
-from apps.proyectos.models import Proyecto
+from apps.proyectos.models import GeneracionDiaria, Proyecto
 from apps.proyectos.services.tsf_sync import _FASE_TO_LABEL
 
 logger = logging.getLogger("operaciones.proximos_energizar")
@@ -98,38 +99,47 @@ def _contratos_por_proyecto(proyecto_ids: list[int]) -> dict[int, list[str]]:
     return salida
 
 
-def _generando_ya(proyectos, fronteras: dict[int, dict]) -> set[int]:
-    """Los que ya generan de verdad según Quoia, aunque nadie lo haya confirmado.
+# Cuántos días atrás se mira para decidir si una planta "ya está generando".
+#
+# La ventana del sync de generación es de 7 días, así que con 7 se cubre todo lo
+# que esa tabla puede tener fresco. Y una planta que genera de verdad reporta
+# varios días seguidos: si en una semana no hay ni un día con energía, no está
+# generando.
+DIAS_PARA_CONSIDERAR_GENERANDO = 7
+
+
+def _generando_ya(proyectos) -> set[int]:
+    """Los que ya generan de verdad, aunque nadie lo haya confirmado.
 
     NO toca `estado` ni `fase_construccion` en la base: esa confirmación sigue
     siendo manual. Esto solo evita que la vista dependa de que alguien revise
-    Pendientes a tiempo. Cacheado 1 h, así que casi nunca golpea Quoia.
+    Pendientes a tiempo.
 
-    `ponytail: el cruce con Quoia sigue en app/services/proyectos_pendientes.py`.
-    Son 546 líneas sin sesión de base (solo HTTP contra Gaia) que se portan con
-    `/proyectos`, su dueño; traerlas acá por tres endpoints sería moverlas dos
-    veces.
+    **Sale de `generacion_diaria`, no de Quoia** (2026-09-15). Antes preguntaba
+    al proveedor: traía el catálogo COMPLETO de borders y después consultaba la
+    generación real frontera por frontera --~145 llamadas externas en cada carga
+    de la pantalla-- con un caché en una variable de módulo que cada worker de
+    gunicorn tenía por separado. La vista devolvía 504: nunca terminaba de
+    cargar.
+
+    Ahora es UNA consulta a nuestra propia base. El dato puede tener hasta doce
+    horas (el sync corre 07:00 y 19:00), y para esto da igual: una planta no
+    arranca y para dentro del mismo día.
+
+    Si el sync se detuviera, esto devuelve un conjunto vacío y las plantas que ya
+    generan siguen apareciendo en la lista unos días más. Es la misma degradación
+    que tenía el camino viejo cuando Quoia no respondía, y no rompe la vista.
     """
-    ids_con_frontera = [p.id for p in proyectos if p.id in fronteras]
-    if not ids_con_frontera:
+    ids = [p.id for p in proyectos]
+    if not ids:
         return set()
-    try:
-        from app.services.mgs.gaia_client import GaiaClient
-        from app.services.proyectos_pendientes import _generacion_real_por_frt
-
-        gaia = GaiaClient()
-        if not gaia.enabled:
-            return set()
-        generacion_real = _generacion_real_por_frt(gaia, gaia.get_all_borders())
-        return {
-            pid for pid in ids_con_frontera
-            if generacion_real.get((fronteras[pid]["codigo_frontera"] or "").strip().lower())
-        }
-    except Exception as exc:
-        logger.warning(
-            "Verificación de generación real falló (se ignora, no bloquea la vista): %s", exc
-        )
-        return set()
+    desde = hoy_col() - timedelta(days=DIAS_PARA_CONSIDERAR_GENERANDO)
+    return set(
+        GeneracionDiaria.objects
+        .filter(proyecto_id__in=ids, fecha__gte=desde, kwh_real__gt=0)
+        .values_list("proyecto_id", flat=True)
+        .distinct()
+    )
 
 
 def listar() -> dict:
@@ -161,7 +171,7 @@ def listar() -> dict:
         }
 
     fronteras = _fronteras_por_proyecto([p.id for p in filas])
-    filas = [p for p in filas if p.id not in _generando_ya(filas, fronteras)]
+    filas = [p for p in filas if p.id not in _generando_ya(filas)]
     contratos = _contratos_por_proyecto([p.id for p in filas])
 
     # Última vez que el sync (on-demand o el job de 6 h) tocó CUALQUIER proyecto
