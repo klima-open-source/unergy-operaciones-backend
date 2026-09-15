@@ -28,6 +28,19 @@ from difflib import SequenceMatcher
 UMBRAL_ACEPTAR = 0.55
 MARGEN_AMBIGUO = 0.05
 
+# Cuánto tiene que parecerse el TEXTO cuando los dos nombres no comparten NI UNA
+# palabra significativa.
+#
+# La similitud de texto está para tolerar erratas --«Caracoli» contra
+# «Caracolli»--, no para emparentar nombres distintos. Pero sin este piso podía
+# sostener un match ella sola: «GD Caracolí 2» contra «La Catedral» puntuaba
+# 0,556 --por encima del umbral-- sin una sola palabra en común, solo porque las
+# letras se parecen (caso real, 2026-09-15).
+#
+# 0,80 deja pasar una errata de verdad (una letra de más en una palabra da 0,9 o
+# más) y corta el parecido accidental, que ronda 0,5.
+UMBRAL_SIN_TOKENS_COMUNES = 0.80
+
 _STOPWORDS = {
     "de", "del", "la", "el", "los", "las", "y", "en",
     "minigranja", "minigranjas", "mgs", "mgr", "gd", "planta", "granja",
@@ -119,6 +132,11 @@ def score_nombre(nombre_a: str, nombres_b: list[str]) -> float:
         ratio = SequenceMatcher(
             None, " ".join(sorted(tokens_a)), " ".join(sorted(tokens_b))
         ).ratio()
+        # Sin una sola palabra en común, el parecido de texto tiene que ser
+        # MUCHO mayor para contar: ahí ya no está tolerando una errata, está
+        # emparentando dos nombres distintos. Ver UMBRAL_SIN_TOKENS_COMUNES.
+        if not inter and ratio < UMBRAL_SIN_TOKENS_COMUNES:
+            ratio = 0.0
         mejor = max(mejor, jaccard, overlap * 0.85, ratio)
     return round(mejor, 3)
 
