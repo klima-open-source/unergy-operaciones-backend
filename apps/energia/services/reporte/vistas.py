@@ -20,9 +20,11 @@ usuaria el 2026-08-21). Tres separaciones que importan y son fáciles de perder:
 
 from __future__ import annotations
 
-from datetime import date
+from collections import defaultdict
+from datetime import date, timedelta
 
 from django.db.models import Count, Q
+from django.utils.timezone import localtime
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
@@ -206,6 +208,134 @@ def _distribucion_automatico(gen_filas, con_filas):
     return distribucion, detalle
 
 
+def _fronteras_reportables_por_dia(desde: date, hasta: date) -> dict[date, int]:
+    """Cuántas fronteras DEBÍAN reportar al ASIC cada día del rango.
+
+    Es el denominador de la tasa diaria, y elegirlo bien es todo el diseño de
+    esta métrica. Son dos decisiones separadas: QUIÉNES entran, y DESDE CUÁNDO.
+
+    **Quiénes: el mismo filtro que arma el reporte**, en
+    `orquestador._fronteras_con_reporte` -- activa, con código, no borrada. Si
+    este conjunto fuera más grande que el del reporte, las de más serían fallas
+    permanentes que ninguna automatización puede arreglar, y la tasa quedaría
+    subestimada por construcción.
+
+    Hay una diferencia con el orquestador que conviene conocer: allá la palabra
+    final la tiene QUOIA --una frontera reporta si su `frt_code` está en
+    `get_all_borders()`-- y acá no se le puede preguntar, porque ese catálogo
+    solo existe en presente y esto mira rangos pasados. Se asume que nuestra
+    tabla lo refleja. El 2026-09-15 no lo reflejaba: 9 fronteras activas no
+    estaban en Quoia (GD DELTA 2, BAYUNCA I, SAN ONOFRE, NAOS 2 y 3, con sus
+    consumos) y se borraron a mano. **Si la tabla vuelve a separarse del
+    catálogo, esta tasa baja sin que nada haya empeorado de verdad.**
+
+    **Desde cuándo: `fecha_registro_asic`**, no `created_at`. Registrada en
+    ASIC, una frontera tiene que reportar todos los días aunque sea una matriz
+    de ceros. `created_at` dice cuándo alguien cargó la FILA acá, que es otra
+    cosa: las dos fechas no coinciden en NINGUNA de las 153 fronteras, y casi
+    todas se cargaron el mismo día (2026-05-02, cuando se pobló la tabla).
+    BAYUNCA I está en ASIC desde 2020 y se cargó en 2026. Un denominador que se
+    mueve cuando importamos datos convierte ruido nuestro en una caída de la
+    métrica.
+
+    Los otros dos candidatos de fecha no servían: `estado` dice `'activa'` en
+    las 153 (no distingue nada) y `fecha_inicio_representacion` falta en 59.
+
+    Una frontera borrada cuenta hasta el día en que se borró, no después. Ojo
+    con lo que eso significa para los rangos ya pasados: borrarla hoy no la saca
+    de los días anteriores, porque entonces sí estaba.
+    """
+    filas = (
+        Frontera.objects
+        .filter(estado="activa", codigo_frontera__isnull=False)
+        .values_list("fecha_registro_asic", "deleted_at")
+    )
+    altas: list[date] = []
+    bajas: list[date] = []
+    for registro, borrada in filas:
+        if registro is None:
+            continue  # sin registro en ASIC no se le puede exigir un reporte
+        altas.append(registro)
+        if borrada is not None:
+            bajas.append(localtime(borrada).date())
+
+    reportables: dict[date, int] = {}
+    dia = desde
+    while dia <= hasta:
+        reportables[dia] = (sum(1 for a in altas if a <= dia)
+                            - sum(1 for b in bajas if b <= dia))
+        dia += timedelta(days=1)
+    return reportables
+
+
+def serie_automatico(desde: date, hasta: date) -> dict:
+    """Tasa diaria de reporte automático (CGM), y el total del rango.
+
+    **Qué mide.** Cada día: cuántas fronteras reportaron solas vía CGM, sobre
+    cuántas fronteras existían ese día. Es la pregunta de la automatización --
+    "¿cuánto salió solo?"-- separada de la de las otras dos barras, que dicen de
+    dónde salió el dato.
+
+    **Por qué el denominador son las fronteras REPORTABLES y no las que
+    reportaron.** Registrada en ASIC, una frontera tiene que reportar todos los
+    días aunque sea una matriz de ceros. No reportar es entonces el peor caso
+    posible --peor que un reporte manual-- y contando solo las que reportaron
+    desaparecía de los dos lados de la división: no penalizaba nada. Medido el
+    2026-09-15: el 16 de agosto reportaron 106 fronteras de las 139 registradas.
+
+    Cuál fecha define "reportable" NO da igual, y el primer intento estuvo mal:
+    ver `_fronteras_reportables_por_dia`.
+
+    **Por qué el total es la razón de totales y no el promedio de las tasas.**
+    Con el denominador fijo las dos cuentas dan lo MISMO, así que da igual cuál
+    se elija mientras nada se mueva; pero las fronteras se crean, el denominador
+    cambia de a poco, y ahí el promedio le daría el mismo peso a un día con 144
+    fronteras que a uno con 141. La razón de totales no se rompe nunca.
+
+    Y esto es lo que hace que los días malos ya no haya que sacarlos a mano: el
+    5 de septiembre de 2026 --el clasificador no corrió y quedó UNA fila-- entra
+    como `0 / 141`. Se diluye solo, y además queda contado como lo que fue: un
+    día sin reportar. Con el denominador viejo ese mismo día era `0 / 1`, un
+    cero perfecto que en un promedio de días valía tanto como un mes entero.
+    """
+    if hasta < desde:
+        raise NoProcesable("'hasta' no puede ser anterior a 'desde'")
+
+    con_cgm: dict[date, set[int]] = defaultdict(set)
+    for modelo, campo in ((ReporteEnergiaGeneracion, "medidor_usado"),
+                          (ReporteEnergiaConsumo, "caso")):
+        # `.lower()` a propósito: generación guarda "cgm" y consumo "CGM".
+        for fila in (modelo.objects.filter(fecha__range=(desde, hasta))
+                     .values("frontera_id", "fecha", campo)):
+            if (fila[campo] or "").strip().lower() == "cgm":
+                con_cgm[fila["fecha"]].add(fila["frontera_id"])
+
+    reportables = _fronteras_reportables_por_dia(desde, hasta)
+
+    dias = []
+    total_cgm = 0
+    total_reportables = 0
+    for dia in sorted(reportables):
+        cgm = len(con_cgm.get(dia, ()))
+        universo = reportables[dia]
+        total_cgm += cgm
+        total_reportables += universo
+        dias.append({
+            "fecha": dia,
+            "automaticas": cgm,
+            "fronteras": universo,
+            "tasa": round(cgm / universo * 100, 1) if universo else 0.0,
+        })
+
+    return {
+        "dias": dias,
+        "automaticas": total_cgm,
+        "fronteras": total_reportables,
+        "tasa": (round(total_cgm / total_reportables * 100, 1)
+                 if total_reportables else 0.0),
+    }
+
+
 def _distribucion_y_detalle(
     filas: list[tuple[int, str, str | None, int]], mapa: dict[str, str],
     etiquetas_legibles: dict[str, str] | None = None,
@@ -357,6 +487,10 @@ def resumen_historico(desde: date, hasta: date) -> dict:
         # juntos: la pregunta es sobre el reporte entero, no sobre una mitad.
         "distribucion_automatico": dist_auto,
         "detalle_automatico": detalle_auto,
+        # La tasa dia a dia, con las fronteras VIVAS de denominador. Es la que
+        # deja ver los dias en que el clasificador no corrio (aparecen en 0%
+        # en vez de desaparecer) y la que no hay que limpiar a mano.
+        "serie_automatico": serie_automatico(desde, hasta),
     }
 
 
