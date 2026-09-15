@@ -208,111 +208,100 @@ def _distribucion_automatico(gen_filas, con_filas):
     return distribucion, detalle
 
 
-def _fronteras_reportables_por_dia(desde: date, hasta: date) -> dict[date, int]:
-    """Cuántas fronteras DEBÍAN reportar al ASIC cada día del rango.
+def _fronteras_registradas_por_dia(desde: date, hasta: date) -> dict[date, set[int]]:
+    """Qué fronteras estaban registradas en ASIC cada día del rango.
 
-    Es el denominador de la tasa diaria, y elegirlo bien es todo el diseño de
-    esta métrica. Son dos decisiones separadas: QUIÉNES entran, y DESDE CUÁNDO.
+    **No es el denominador de la tasa** --ese son las clasificadas, ver
+    `serie_automatico`-- sino la alarma que va al lado: si una frontera
+    registrada deja de aparecer en el reporte, hay que poder verlo. Así pasaron
+    desapercibidas las 9 que se borraron el 2026-09-15.
 
-    **Quiénes: el mismo filtro que arma el reporte**, en
-    `orquestador._fronteras_con_reporte` -- activa, con código, no borrada. Si
-    este conjunto fuera más grande que el del reporte, las de más serían fallas
-    permanentes que ninguna automatización puede arreglar, y la tasa quedaría
-    subestimada por construcción.
+    Devuelve CONJUNTOS y no conteos a propósito. Restar dos totales daría un
+    número que parece la brecha y no lo es: el 14 de septiembre había 147
+    registradas y 144 clasificadas, pero 6 de esas 144 todavía no estaban
+    registradas --reportaron antes de su `fecha_registro_asic`--, así que la
+    resta decía 3 y las que de verdad faltaban eran 9.
 
-    Hay una diferencia con el orquestador que conviene conocer: allá la palabra
-    final la tiene QUOIA --una frontera reporta si su `frt_code` está en
-    `get_all_borders()`-- y acá no se le puede preguntar, porque ese catálogo
-    solo existe en presente y esto mira rangos pasados. Se asume que nuestra
-    tabla lo refleja. El 2026-09-15 no lo reflejaba: 9 fronteras activas no
-    estaban en Quoia (GD DELTA 2, BAYUNCA I, SAN ONOFRE, NAOS 2 y 3, con sus
-    consumos) y se borraron a mano. **Si la tabla vuelve a separarse del
-    catálogo, esta tasa baja sin que nada haya empeorado de verdad.**
+    **La fecha de alta es `fecha_registro_asic`**, no `created_at`: esta última
+    dice cuándo alguien cargó la FILA acá. Las dos no coinciden en NINGUNA de
+    las 153 fronteras --casi todas se cargaron el 2026-05-02, cuando se pobló la
+    tabla, y BAYUNCA I está en ASIC desde 2020--. Se filtra por `estado` y
+    `codigo_frontera` igual que `orquestador._fronteras_con_reporte`.
 
-    **Desde cuándo: `fecha_registro_asic`**, no `created_at`. Registrada en
-    ASIC, una frontera tiene que reportar todos los días aunque sea una matriz
-    de ceros. `created_at` dice cuándo alguien cargó la FILA acá, que es otra
-    cosa: las dos fechas no coinciden en NINGUNA de las 153 fronteras, y casi
-    todas se cargaron el mismo día (2026-05-02, cuando se pobló la tabla).
-    BAYUNCA I está en ASIC desde 2020 y se cargó en 2026. Un denominador que se
-    mueve cuando importamos datos convierte ruido nuestro en una caída de la
-    métrica.
-
-    Los otros dos candidatos de fecha no servían: `estado` dice `'activa'` en
-    las 153 (no distingue nada) y `fecha_inicio_representacion` falta en 59.
-
-    Una frontera borrada cuenta hasta el día en que se borró, no después. Ojo
-    con lo que eso significa para los rangos ya pasados: borrarla hoy no la saca
-    de los días anteriores, porque entonces sí estaba.
+    Una frontera borrada cuenta hasta el día en que se borró, no después.
     """
     filas = (
         Frontera.objects
         .filter(estado="activa", codigo_frontera__isnull=False)
-        .values_list("fecha_registro_asic", "deleted_at")
+        .values_list("id", "fecha_registro_asic", "deleted_at")
     )
-    altas: list[date] = []
-    bajas: list[date] = []
-    for registro, borrada in filas:
-        if registro is None:
-            continue  # sin registro en ASIC no se le puede exigir un reporte
-        altas.append(registro)
-        if borrada is not None:
-            bajas.append(localtime(borrada).date())
+    vigencias = [
+        (fid, registro, localtime(borrada).date() if borrada else None)
+        for fid, registro, borrada in filas
+        if registro is not None  # sin registro en ASIC no debe un reporte
+    ]
 
-    reportables: dict[date, int] = {}
+    por_dia: dict[date, set[int]] = {}
     dia = desde
     while dia <= hasta:
-        reportables[dia] = (sum(1 for a in altas if a <= dia)
-                            - sum(1 for b in bajas if b <= dia))
+        por_dia[dia] = {
+            fid for fid, alta, baja in vigencias
+            if alta <= dia and (baja is None or baja > dia)
+        }
         dia += timedelta(days=1)
-    return reportables
+    return por_dia
 
 
-# Un día con MENOS de esta fracción de las fronteras reportadas no fue una
-# corrida: fue una corrida que no ocurrió. El umbral cae en un hueco enorme --
-# los días normales cubren entre 95% y 100%, y los rotos 0,7% o menos (una fila
-# de 145)-- así que dónde exactamente se ponga no cambia ningún resultado.
+# Un día con MENOS de esta fracción de los reportes habituales del rango no fue
+# una corrida: fue una corrida que no ocurrió. El umbral cae en un hueco enorme
+# --los días normales traen 136-144 filas y los rotos 1-- así que dónde se ponga
+# exactamente no cambia ningún resultado.
 COBERTURA_MINIMA_DE_UNA_CORRIDA = 0.5
 
 
 def serie_automatico(desde: date, hasta: date) -> dict:
     """Tasa diaria de reporte automático (CGM), y el total del rango.
 
-    **Qué mide.** Cada día: cuántas fronteras reportaron solas vía CGM, sobre
-    cuántas debían reportar. Es la pregunta de la automatización --"¿cuánto
-    salió solo?"-- separada de la de las otras dos barras, que dicen de dónde
-    salió el dato.
+    **Qué mide.** Cada día: de las fronteras que el clasificador procesó,
+    cuántas se reportaron solas vía CGM. Es la pregunta de la automatización
+    --"¿cuánto salió solo?"-- separada de la de las otras dos barras, que dicen
+    de dónde salió el dato.
 
-    **Por qué el denominador son las fronteras REPORTABLES y no las que
-    reportaron.** Registrada en ASIC, una frontera tiene que reportar todos los
-    días aunque sea una matriz de ceros. No reportar es entonces el peor caso
-    posible --peor que un reporte manual-- y contando solo las que reportaron
-    desaparecía de los dos lados de la división: no penalizaba nada. Medido el
-    2026-09-15: el 16 de agosto reportaron 106 fronteras de las 139 registradas.
+    **El denominador son las CLASIFICADAS.** Se probó dividir sobre las
+    registradas en ASIC, para que una frontera que no reporta nada penalizara en
+    vez de salir de los dos lados de la división. Medido el 2026-09-15 contra
+    producción, la brecha entre "debían" y "reportaron" era TODOS los días
+    exactamente las mismas 9 fronteras --BAYUNCA I, SAN ONOFRE, DELTA 2, NAOS 2
+    y 3, con sus consumos-- que estaban en nuestra tabla y no en el catálogo de
+    Quoia, y que se borraron ese día. Sin ellas los dos conjuntos coinciden, así
+    que ese denominador agregaba maquinaria (una fecha de alta por frontera, y
+    un desajuste propio: seis fronteras reportaron ANTES de su
+    `fecha_registro_asic`, lo que podía dar tasas de más del 100%) sin cambiar
+    ningún número.
 
-    Cuál fecha define "reportable" NO da igual, y el primer intento estuvo mal:
-    ver `_fronteras_reportables_por_dia`.
+    Lo que sí se conserva es la alarma que motivaba aquello: `registradas` y
+    `sin_reportar` van en cada día, al lado y no como divisor. Si una frontera
+    vuelve a dejar de reportar, se ve -- que es como esas 9 pasaron
+    desapercibidas.
 
     **Por qué el total es la razón de totales y no el promedio de las tasas.**
-    Con el denominador fijo las dos cuentas dan lo MISMO, así que da igual cuál
-    se elija mientras nada se mueva; pero las fronteras entran al ASIC, el
-    denominador cambia de a poco, y ahí el promedio le daría el mismo peso a un
-    día con 147 fronteras que a uno con 139. La razón de totales no se rompe.
+    El denominador cambia de un día a otro, así que el promedio le daría el
+    mismo peso a un día con 144 fronteras que a uno con 136. La razón de totales
+    le da a cada día el peso que tuvo.
 
     **Los días sin corrida quedan fuera de la tasa, pero no de la serie.** El 5
     y el 6 de septiembre de 2026 no se reportó nada: fue la migración del
-    servidor, no la automatización (confirmado con la usuaria). Contarlos sería
-    culpar a esta métrica de una caída de infraestructura, y entonces el número
-    se movería por dos causas distintas sin poder saber cuál. Siguen apareciendo
-    en `dias` con `sin_corrida=True` --el gráfico los pinta y dice por qué-- y se
-    cuentan aparte en `dias_sin_corrida`. Eliminarlos de la vista sería esconder
-    dos días en que 145 fronteras debían reportar y ninguna lo hizo.
+    servidor, no la automatización. Contarlos movería la métrica por dos causas
+    distintas --cobertura de CGM e infraestructura-- sin poder saber cuál. Como
+    el denominador ahora son las clasificadas, un día roto daría `0/1`: un cero
+    perfecto sobre una sola frontera. Se detecta comparando el volumen del día
+    contra la mediana del rango.
     """
     if hasta < desde:
         raise NoProcesable("'hasta' no puede ser anterior a 'desde'")
 
     con_cgm: dict[date, set[int]] = defaultdict(set)
-    reportaron: dict[date, set[int]] = defaultdict(set)
+    clasificadas: dict[date, set[int]] = defaultdict(set)
     nombres: dict[int, str] = {}
     for modelo, campo in ((ReporteEnergiaGeneracion, "medidor_usado"),
                           (ReporteEnergiaConsumo, "caso")):
@@ -321,33 +310,40 @@ def serie_automatico(desde: date, hasta: date) -> dict:
                      .values("frontera_id", "frontera__nombre_frontera", "fecha", campo)):
             fid = fila["frontera_id"]
             nombres[fid] = fila["frontera__nombre_frontera"]
-            reportaron[fila["fecha"]].add(fid)
+            clasificadas[fila["fecha"]].add(fid)
             if (fila[campo] or "").strip().lower() == "cgm":
                 con_cgm[fila["fecha"]].add(fid)
 
-    reportables = _fronteras_reportables_por_dia(desde, hasta)
+    registradas = _fronteras_registradas_por_dia(desde, hasta)
+    # La mediana de lo que trae un día normal. Es la referencia para decir si
+    # hubo corrida: no se puede usar la cobertura, porque con este denominador
+    # todos los días cubren el 100% por construcción.
+    volumenes = sorted(len(v) for v in clasificadas.values())
+    tipico = volumenes[len(volumenes) // 2] if volumenes else 0
 
     dias = []
     total_cgm = 0
-    total_reportables = 0
+    total_clasificadas = 0
     sin_corrida = 0
-    for dia in sorted(reportables):
+    for dia in sorted(registradas):
         cgm = len(con_cgm.get(dia, ()))
-        universo = reportables[dia]
-        cubiertas = len(reportaron.get(dia, ()))
+        universo = len(clasificadas.get(dia, ()))
         hubo_corrida = bool(
-            universo and cubiertas >= universo * COBERTURA_MINIMA_DE_UNA_CORRIDA
+            universo and universo >= tipico * COBERTURA_MINIMA_DE_UNA_CORRIDA
         )
         if hubo_corrida:
             total_cgm += cgm
-            total_reportables += universo
+            total_clasificadas += universo
         else:
             sin_corrida += 1
         dias.append({
             "fecha": dia,
             "automaticas": cgm,
             "fronteras": universo,
-            "reportaron": cubiertas,
+            "registradas": len(registradas[dia]),
+            # Diferencia de CONJUNTOS, no de totales: ver el docstring de
+            # `_fronteras_registradas_por_dia`.
+            "sin_reportar": len(registradas[dia] - clasificadas.get(dia, set())),
             "sin_corrida": not hubo_corrida,
             "tasa": round(cgm / universo * 100, 1) if universo else 0.0,
         })
@@ -357,10 +353,10 @@ def serie_automatico(desde: date, hasta: date) -> dict:
         "dias_contados": len(dias) - sin_corrida,
         "dias_sin_corrida": sin_corrida,
         "automaticas": total_cgm,
-        "fronteras": total_reportables,
-        "tasa": (round(total_cgm / total_reportables * 100, 1)
-                 if total_reportables else 0.0),
-        "por_frontera": _automatico_por_frontera(dias, con_cgm, reportaron, nombres),
+        "fronteras": total_clasificadas,
+        "tasa": (round(total_cgm / total_clasificadas * 100, 1)
+                 if total_clasificadas else 0.0),
+        "por_frontera": _automatico_por_frontera(dias, con_cgm, clasificadas, nombres),
     }
 
 

@@ -1,35 +1,28 @@
-"""Tasa diaria de reporte automático (CGM), sobre las fronteras REPORTABLES.
+"""Tasa diaria de reporte automático (CGM) sobre las fronteras clasificadas.
 
-La métrica de automatización contaba días-frontera sobre **las que reportaron**.
-Eso dejaba dos agujeros, los dos medidos contra producción el 2026-09-15:
+Cada día: de las fronteras que el clasificador proceso, cuántas se reportaron
+solas vía CGM. El total del rango es la razón de totales, no el promedio de las
+tasas diarias.
 
-**1. Una frontera que no reportó nada no penalizaba.** Registrada en ASIC, una
-frontera tiene que reportar todos los días aunque sea una matriz de ceros
-(confirmado por la usuaria el 2026-09-15). No reportar es entonces el PEOR caso
---peor que un reporte manual-- y contando solo las que reportaron salía de los
-dos lados de la división, así que era invisible. El 16 de agosto reportaron 106
-de las 139 registradas.
+**Por qué el denominador son las clasificadas.** Se probó dividir sobre las
+registradas en ASIC, para que una frontera que no reporta nada penalizara en vez
+de salir de los dos lados de la división. Medido contra producción el
+2026-09-15, la brecha entre "debían" y "reportaron" era TODOS los días
+exactamente las mismas 9 fronteras --BAYUNCA I, SAN ONOFRE, DELTA 2, NAOS 2 y 3,
+con sus consumos-- que estaban en nuestra tabla y no en el catálogo de Quoia, y
+que se borraron ese día. Sin ellas los dos conjuntos coinciden: ese denominador
+agregaba maquinaria sin mover ningún número, y traía un desajuste propio (seis
+fronteras reportaron ANTES de su `fecha_registro_asic`, lo que podía dar tasas
+de más del 100%).
 
-**2. El total del rango dependía de cómo se resumiera.** Con el denominador
-moviéndose día a día, el promedio de las tasas diarias y la razón de totales
-daban 34,7% y 36,5%: 2 puntos de diferencia sin que ninguna fuera "la buena".
-Peor con un día roto -- el 5 de septiembre el clasificador no corrió y quedó UNA
-fila: `0/1` es un cero perfecto que en un promedio de días pesaba como un mes.
+**Lo que sí se conserva es la alarma.** `registradas` y `sin_reportar` van en
+cada día, al lado y no como divisor. Así se ve si una frontera registrada deja
+de aparecer -- que es como esas 9 pasaron desapercibidas.
 
-Con el denominador en las fronteras reportables las dos cuentas dan lo mismo, y
-el día roto entra como `0/145`: se diluye solo y queda contado como lo que fue,
-un día sin reportar. Por eso esta métrica no necesita que nadie saque los días
-malos a mano.
-
-Se usa la razón de totales igual, porque el denominador SÍ se mueve --entran
-fronteras nuevas al ASIC-- y ahí el promedio le daría el mismo peso a un día con
-147 fronteras que a uno con 139.
-
-**La fecha que define el denominador es `fecha_registro_asic`, no `created_at`.**
-El primer intento usó `created_at` y estaba mal: dice cuándo se cargó la FILA en
-nuestra tabla, no cuándo la frontera empezó a deber un reporte. El 14 de
-septiembre se cargaron 6 de una y el denominador saltaba de 147 a 153 sin que
-cambiara nada en la realidad -- ruido nuestro disfrazado de caída de la métrica.
+**Los días sin corrida quedan fuera de la tasa, pero no de la serie.** El 5 y el
+6 de septiembre de 2026 no se reportó nada: fue la migración del servidor, no la
+automatización (confirmado con la usuaria). Contarlos movería la métrica por dos
+causas distintas sin poder saber cuál.
 """
 import pytest
 
@@ -95,10 +88,11 @@ def _momento(d: date):
 
 
 def _frontera(nombre, registrada=DIA1, borrada=None, estado="activa"):
-    """`registrada` es la fecha de registro en ASIC: desde ahí debe reportar.
+    """`registrada` es la fecha de registro en ASIC.
 
     `estado="activa"` y tener código son parte del filtro -- el mismo que usa
-    `orquestador._fronteras_con_reporte` para armar el reporte."""
+    `orquestador._fronteras_con_reporte` para armar el reporte.
+    """
     from apps.fronteras.models import Frontera
 
     return Frontera.objects.create(
@@ -109,10 +103,13 @@ def _frontera(nombre, registrada=DIA1, borrada=None, estado="activa"):
 
 
 def _reporte(frontera, dia, fuente="cgm"):
+    """Una fila de generación: es lo que significa "el clasificador la procesó".
+
+    `caso` es NOT NULL en las dos tablas; lo que esta métrica lee de generación
+    es `medidor_usado`.
+    """
     from apps.energia.models import ReporteEnergiaGeneracion
 
-    # `caso` es NOT NULL en las dos tablas; lo que esta metrica lee de
-    # generacion es `medidor_usado`.
     return ReporteEnergiaGeneracion.objects.create(
         frontera_id=frontera.id, fecha=dia, medidor_usado=fuente, caso="1",
     )
@@ -128,138 +125,37 @@ def _tasas(r):
     return [d["tasa"] for d in r["dias"]]
 
 
-# ── El ejemplo que explica la métrica ───────────────────────────────────────
+def _campo(r, nombre):
+    return [d[nombre] for d in r["dias"]]
 
 
-def test_el_ejemplo_de_diez_fronteras(base_limpia):
-    """10 fronteras, 3 días. El día 3 el clasificador no corrió y quedó 1 fila.
-
-        día 1   5 con CGM de 10 reportables   50%   cuenta
-        día 2   6 con CGM de 10 reportables   60%   cuenta
-        día 3   0 con CGM de 10 reportables    0%   SIN CORRIDA, no cuenta
-
-    El día 3 se sigue viendo con su 0%, pero no entra en el total: no reportar
-    por una caída del proceso no es un fallo de la automatización.
-    """
-    fronteras = [_frontera(f"F{i}") for i in range(10)]
-    for f in fronteras[:5]:
-        _reporte(f, DIA1)
-    for f in fronteras[:6]:
-        _reporte(f, DIA2)
-    _reporte(fronteras[0], DIA3, fuente="principal")  # la única fila del día 3
-
-    r = _serie()
-
-    assert _tasas(r) == [50.0, 60.0, 0.0], "los tres días se ven"
-    assert [d["sin_corrida"] for d in r["dias"]] == [False, False, True]
-    assert r["automaticas"] == 11
-    assert r["fronteras"] == 20, "el día sin corrida no suma al denominador"
-    assert r["tasa"] == 55.0
+# ── El cálculo ──────────────────────────────────────────────────────────────
 
 
-def test_con_denominador_fijo_las_dos_formas_coinciden(base_limpia):
-    """Es el argumento entero del diseño: deja de haber una decisión que tomar."""
-    fronteras = [_frontera(f"F{i}") for i in range(10)]
-    for f in fronteras[:5]:
-        _reporte(f, DIA1)
-    for f in fronteras[:6]:
-        _reporte(f, DIA2)
+def test_la_tasa_de_un_dia_es_cgm_sobre_clasificadas(base_limpia):
+    fronteras = [_frontera(f"F{i}") for i in range(4)]
+    for f in fronteras:
+        _reporte(f, DIA1, fuente="cgm" if f is fronteras[0] else "principal")
 
-    r = _serie()
-    contados = [d["tasa"] for d in r["dias"] if not d["sin_corrida"]]
-    promedio = round(sum(contados) / len(contados), 1)
-
-    assert r["tasa"] == promedio
+    assert _serie()["dias"][0]["tasa"] == 25.0
 
 
-# ── El día que el clasificador no corrió ────────────────────────────────────
+def test_el_total_es_razon_de_totales(base_limpia):
+    """Cada día pesa lo que su tamaño: no es el promedio de los porcentajes."""
+    fronteras = [_frontera(f"F{i}") for i in range(6)]
+    # DIA1: 4 clasificadas, las 4 automáticas   -> 100%
+    for f in fronteras[:4]:
+        _reporte(f, DIA1, fuente="cgm")
+    # DIA2: 6 clasificadas, 2 automáticas       ->  33,3%
+    for i, f in enumerate(fronteras):
+        _reporte(f, DIA2, fuente="cgm" if i < 2 else "principal")
 
+    r = _serie(desde=DIA1, hasta=DIA2)
 
-def test_un_dia_sin_ninguna_fila_se_ve_entero(base_limpia):
-    """No `0/0` ni desaparecido: cero sobre las fronteras que debían reportar,
-    y marcado como lo que fue."""
-    for i in range(4):
-        _frontera(f"F{i}")
-
-    dia3 = _serie()["dias"][2]
-
-    assert dia3 == {
-        "fecha": DIA3, "automaticas": 0, "fronteras": 4,
-        "reportaron": 0, "sin_corrida": True, "tasa": 0.0,
-    }
-
-
-def test_los_dias_malos_salen_solos(base_limpia):
-    """Nadie tiene que elegir fechas a mano: el día sin corrida se detecta por
-    su cobertura y queda fuera del total."""
-    fronteras = [_frontera(f"F{i}") for i in range(10)]
-    for dia in (DIA1, DIA2):
-        for f in fronteras:
-            _reporte(f, dia)
-    _reporte(fronteras[0], DIA3, fuente="principal")
-
-    r = _serie()
-
-    assert r["tasa"] == 100.0
-    assert r["dias_sin_corrida"] == 1
-
-
-# ── El denominador se mueve con el registro en ASIC ─────────────────────────
-
-
-def test_una_frontera_registrada_a_mitad_no_cuenta_antes(base_limpia):
-    """Antes del registro en ASIC no le debe un reporte a nadie."""
-    _frontera("Vieja")
-    _frontera("Nueva", registrada=DIA3)
-
-    assert [d["fronteras"] for d in _serie()["dias"]] == [1, 1, 2]
-
-
-def test_una_frontera_borrada_sale_del_denominador(base_limpia):
-    _frontera("Queda")
-    _frontera("Se va", borrada=DIA2)
-
-    assert [d["fronteras"] for d in _serie()["dias"]] == [2, 1, 1]
-
-
-def test_el_total_es_razon_de_totales_no_promedio(base_limpia):
-    """Se separan cuando el denominador cambia: un día con 2 fronteras no puede
-    pesar igual que uno con 1."""
-    vieja = _frontera("Vieja")
-    _frontera("Nueva", registrada=DIA2)
-    _reporte(vieja, DIA1)
-    for dia in (DIA2, DIA3):
-        _reporte(vieja, dia)
-        _reporte(Frontera_de("Nueva"), dia, fuente="principal")
-
-    r = _serie()
-    contados = [d["tasa"] for d in r["dias"] if not d["sin_corrida"]]
-    promedio = round(sum(contados) / len(contados), 1)
-
-    assert r["tasa"] == 60.0, "3 con CGM de 5 fronteras-día"
-    assert promedio != r["tasa"], "el promedio pesaría igual un día de 1 y uno de 2"
-
-
-def Frontera_de(nombre):
-    from apps.fronteras.models import Frontera
-
-    return Frontera.objects.get(nombre_frontera=nombre)
-
-
-# ── Detalles que ya costaron una cuenta mal ─────────────────────────────────
-
-
-def test_cgm_cuenta_en_mayuscula_y_en_minuscula(base_limpia):
-    """Generación guarda "cgm" y consumo "CGM". Una consulta escrita a mano que
-    no lo sepa cuenta de menos -- pasó el 2026-09-15 revisando esto mismo."""
-    from apps.energia.models import ReporteEnergiaConsumo
-
-    f = _frontera("F")
-    g = _frontera("G")
-    _reporte(f, DIA1, fuente="cgm")
-    ReporteEnergiaConsumo.objects.create(frontera_id=g.id, fecha=DIA1, caso="CGM")
-
-    assert _serie()["dias"][0]["automaticas"] == 2
+    assert r["tasa"] == 60.0, "6 automáticas de 10 clasificadas"
+    promedio = round(sum(_tasas(r)) / 2, 1)
+    assert promedio == 66.7, "el promedio le daría el mismo peso a los dos días"
+    assert promedio != r["tasa"]
 
 
 def test_una_frontera_con_generacion_y_consumo_el_mismo_dia_cuenta_una_vez(base_limpia):
@@ -271,15 +167,25 @@ def test_una_frontera_con_generacion_y_consumo_el_mismo_dia_cuenta_una_vez(base_
     _reporte(f, DIA1, fuente="cgm")
     ReporteEnergiaConsumo.objects.create(frontera_id=f.id, fecha=DIA1, caso="CGM")
 
-    assert _serie()["dias"][0] == {
-        "fecha": DIA1, "automaticas": 1, "fronteras": 1,
-        "reportaron": 1, "sin_corrida": False, "tasa": 100.0,
-    }
+    dia1 = _serie()["dias"][0]
+
+    assert (dia1["automaticas"], dia1["fronteras"], dia1["tasa"]) == (1, 1, 100.0)
+
+
+def test_cgm_cuenta_en_mayuscula_y_en_minuscula(base_limpia):
+    """Generación guarda "cgm" y consumo "CGM". Una consulta escrita a mano que
+    no lo sepa cuenta de menos -- pasó el 2026-09-15 revisando esto mismo."""
+    from apps.energia.models import ReporteEnergiaConsumo
+
+    f, g = _frontera("F"), _frontera("G")
+    _reporte(f, DIA1, fuente="cgm")
+    ReporteEnergiaConsumo.objects.create(frontera_id=g.id, fecha=DIA1, caso="CGM")
+
+    assert _serie()["dias"][0]["automaticas"] == 2
 
 
 def test_las_otras_fuentes_no_son_automaticas(base_limpia):
-    f = _frontera("F")
-    _reporte(f, DIA1, fuente="principal")
+    _reporte(_frontera("F"), DIA1, fuente="principal")
 
     assert _serie()["dias"][0]["tasa"] == 0.0
 
@@ -292,83 +198,12 @@ def test_el_rango_al_reves_se_rechaza():
 
 
 def test_un_solo_dia_devuelve_un_solo_punto(base_limpia):
-    _frontera("F")
+    _reporte(_frontera("F"), DIA1)
 
     assert len(_serie(desde=DIA1, hasta=DIA1)["dias"]) == 1
 
 
-def test_el_denominador_no_se_mueve_al_cargar_filas(base_limpia):
-    """El error del primer intento: se usaba `created_at`, así que importar
-    fronteras viejas hacía caer la métrica sin que cambiara nada real."""
-    from apps.fronteras.models import Frontera
-
-    _frontera("Vieja", registrada=DIA1)
-    # Cargada HOY en nuestra tabla, pero registrada en ASIC hace años.
-    Frontera.objects.create(
-        nombre_frontera="Importada", codigo_frontera="importada", estado="activa",
-        fecha_registro_asic=date(2020, 1, 1),
-    )
-
-    assert [d["fronteras"] for d in _serie()["dias"]] == [2, 2, 2]
-
-
-def test_una_frontera_sin_registro_asic_no_entra(base_limpia):
-    """No se le puede exigir un reporte a algo que el mercado no conoce."""
-    from apps.fronteras.models import Frontera
-
-    _frontera("Registrada")
-    Frontera.objects.create(
-        nombre_frontera="Sin ASIC", codigo_frontera="sinasic", estado="activa")
-
-    assert [d["fronteras"] for d in _serie()["dias"]] == [1, 1, 1]
-
-
-# ── El mismo conjunto que arma el reporte ───────────────────────────────────
-
-
-def test_una_frontera_inactiva_no_entra(base_limpia):
-    """`estado` es nuestro control de apagado: una frontera que marcamos
-    inactiva no reporta, así que tampoco puede contar como falla."""
-    _frontera("Activa")
-    _frontera("Apagada", estado="inactiva")
-
-    assert [d["fronteras"] for d in _serie()["dias"]] == [1, 1, 1]
-
-
-def test_una_frontera_sin_codigo_no_entra(base_limpia):
-    """Sin `codigo_frontera` el orquestador no la puede cruzar contra Quoia, así
-    que nunca va a reportar."""
-    from apps.fronteras.models import Frontera
-
-    _frontera("Con codigo")
-    Frontera.objects.create(
-        nombre_frontera="Sin codigo", estado="activa", fecha_registro_asic=DIA1)
-
-    assert [d["fronteras"] for d in _serie()["dias"]] == [1, 1, 1]
-
-
-def test_el_filtro_es_el_mismo_del_orquestador():
-    """Si el reporte y esta métrica dejaran de mirar el mismo conjunto, las de
-    más serían fallas permanentes que ninguna automatización puede arreglar."""
-    import inspect
-
-    from apps.energia.services.reporte import orquestador, vistas
-
-    del_reporte = inspect.getsource(orquestador._fronteras_con_reporte)
-    de_la_metrica = inspect.getsource(vistas._fronteras_reportables_por_dia)
-
-    for condicion in ('estado="activa"', "codigo_frontera__isnull=False"):
-        assert condicion in del_reporte
-        assert condicion in de_la_metrica
-
-
-# ── Los días sin corrida quedan fuera de la tasa ────────────────────────────
-# El 5 y el 6 de septiembre de 2026 no se reportó nada, y fue la MIGRACIÓN DEL
-# SERVIDOR (confirmado con la usuaria el 2026-09-15), no la automatización.
-# Contarlos movería la métrica por dos causas distintas --cobertura de CGM e
-# infraestructura-- sin poder saber cuál fue. Pero siguen apareciendo en la
-# serie: esconderlos taparía dos días en que 145 fronteras debían reportar y
-# ninguna lo hizo.
+# ── Los días sin corrida ────────────────────────────────────────────────────
 
 
 def _sin_corrida(r):
@@ -385,29 +220,34 @@ def test_un_dia_sin_ninguna_fila_no_entra_en_la_tasa(base_limpia):
     r = _serie()
 
     assert _sin_corrida(r) == [DIA3]
-    assert r["tasa"] == 100.0, "los dos días buenos fueron 100% automáticos"
+    assert r["tasa"] == 100.0
     assert r["fronteras"] == 8, "el día sin corrida tampoco suma al denominador"
+    assert r["dias_contados"] == 2
+    assert r["dias_sin_corrida"] == 1
 
 
 def test_una_corrida_a_medias_tampoco_cuenta(base_limpia):
-    """El 5 de septiembre quedó UNA fila de 145. Eso no es una corrida pobre:
-    es una corrida que no ocurrió."""
+    """El 5 de septiembre quedó UNA fila de 145. Con el denominador en las
+    clasificadas eso daría `0/1` -- un cero perfecto sobre una sola frontera--
+    así que se detecta por VOLUMEN: cuántas trajo el día contra la mediana."""
     fronteras = [_frontera(f"F{i}") for i in range(10)]
     for dia in (DIA1, DIA2):
         for f in fronteras:
             _reporte(f, dia)
-    _reporte(fronteras[0], DIA3)
+    _reporte(fronteras[0], DIA3, fuente="principal")
 
     assert _sin_corrida(_serie()) == [DIA3]
 
 
 def test_una_corrida_casi_completa_si_cuenta(base_limpia):
-    """Los días normales cubren entre 95% y 100%. Faltar una frontera es un
-    hueco de ESA frontera, no una corrida caída."""
+    """Los días normales traen 136-144 filas. Faltar una frontera es un hueco de
+    ESA frontera, no una corrida caída."""
     fronteras = [_frontera(f"F{i}") for i in range(10)]
-    for f in fronteras[:9]:
-        for dia in (DIA1, DIA2, DIA3):
+    for dia in (DIA1, DIA2):
+        for f in fronteras:
             _reporte(f, dia)
+    for f in fronteras[:9]:
+        _reporte(f, DIA3)
 
     assert _sin_corrida(_serie()) == []
 
@@ -416,37 +256,140 @@ def test_el_dia_sin_corrida_sigue_en_la_serie(base_limpia):
     """Sale de la tasa, no de la vista: es la única forma de explicar después
     por qué ese día no hay nada."""
     for i in range(4):
-        _frontera(f"F{i}")
-    for f in Frontera_todas():
-        _reporte(f, DIA1)
+        _reporte(_frontera(f"F{i}"), DIA1)
 
     r = _serie()
 
     assert len(r["dias"]) == 3
     assert r["dias"][2]["fecha"] == DIA3
-    assert r["dias"][2]["fronteras"] == 4, "se ve cuántas debían reportar"
+    assert r["dias"][2]["registradas"] == 4, "se ve cuántas debían reportar"
     assert r["dias_sin_corrida"] == 2
 
 
-def Frontera_todas():
-    from apps.fronteras.models import Frontera
+def test_los_dias_malos_salen_solos(base_limpia):
+    """Nadie tiene que elegir fechas a mano."""
+    fronteras = [_frontera(f"F{i}") for i in range(10)]
+    for dia in (DIA1, DIA2):
+        for f in fronteras:
+            _reporte(f, dia, fuente="cgm")
+    _reporte(fronteras[0], DIA3, fuente="principal")
 
-    return list(Frontera.objects.all())
+    r = _serie()
+
+    assert r["tasa"] == 100.0
+    assert r["dias_sin_corrida"] == 1
 
 
 def test_el_umbral_deja_margen_de_sobra():
-    """Los días normales cubren >=95% y los rotos <=1%. El umbral vive en ese
-    hueco, así que moverlo no cambia ningún resultado real."""
+    """Los días normales traen 136-144 filas y los rotos 1. El umbral vive en
+    ese hueco, así que moverlo no cambia ningún resultado real."""
     from apps.energia.services.reporte.vistas import COBERTURA_MINIMA_DE_UNA_CORRIDA
 
     assert 0.01 < COBERTURA_MINIMA_DE_UNA_CORRIDA < 0.95
 
 
+# ── La alarma: registradas que no aparecieron ───────────────────────────────
+
+
+def test_una_frontera_registrada_que_no_reporto_se_cuenta_aparte(base_limpia):
+    """Es la señal que se perdió con las 9 de BAYUNCA/NAOS/DELTA: estaban
+    registradas, no reportaban, y nadie lo veía."""
+    f = _frontera("Reporta")
+    _frontera("Muda")
+    for dia in (DIA1, DIA2, DIA3):
+        _reporte(f, dia, fuente="cgm")
+
+    r = _serie()
+
+    assert _campo(r, "registradas") == [2, 2, 2]
+    assert _campo(r, "sin_reportar") == [1, 1, 1]
+    assert r["tasa"] == 100.0, "la muda NO entra en la tasa, solo en la alarma"
+
+
+def test_la_brecha_es_diferencia_de_conjuntos_no_de_totales(base_limpia):
+    """El 14 de septiembre había 147 registradas y 144 clasificadas, pero 6 de
+    esas 144 todavía NO estaban registradas --reportaron antes de su
+    `fecha_registro_asic`--, así que la resta decía 3 y faltaban 9."""
+    muda = _frontera("Registrada y muda")
+    temprana = _frontera("Reporta antes de registrarse", registrada=DIA3)
+    _reporte(temprana, DIA1, fuente="cgm")
+
+    dia1 = _serie()["dias"][0]
+
+    assert dia1["registradas"] == 1, "solo la muda estaba registrada el día 1"
+    assert dia1["fronteras"] == 1, "solo la temprana fue clasificada"
+    assert dia1["sin_reportar"] == 1, "la muda; restar totales habría dado 0"
+    assert muda.id != temprana.id
+
+
+def test_una_frontera_inactiva_no_cuenta_como_faltante(base_limpia):
+    """`estado` es nuestro control de apagado: una frontera que marcamos
+    inactiva no reporta, así que tampoco es una ausencia."""
+    _reporte(_frontera("Activa"), DIA1)
+    _frontera("Apagada", estado="inactiva")
+
+    assert _serie()["dias"][0]["sin_reportar"] == 0
+
+
+def test_una_frontera_sin_codigo_no_cuenta_como_faltante(base_limpia):
+    """Sin `codigo_frontera` el orquestador no la puede cruzar contra Quoia, así
+    que nunca va a reportar."""
+    from apps.fronteras.models import Frontera
+
+    _reporte(_frontera("Con codigo"), DIA1)
+    Frontera.objects.create(
+        nombre_frontera="Sin codigo", estado="activa", fecha_registro_asic=DIA1)
+
+    assert _serie()["dias"][0]["sin_reportar"] == 0
+
+
+def test_una_frontera_sin_registro_asic_no_cuenta_como_faltante(base_limpia):
+    """No se le puede exigir un reporte a algo que el mercado no conoce."""
+    from apps.fronteras.models import Frontera
+
+    _reporte(_frontera("Registrada"), DIA1)
+    Frontera.objects.create(
+        nombre_frontera="Sin ASIC", codigo_frontera="sinasic", estado="activa")
+
+    assert _serie()["dias"][0]["sin_reportar"] == 0
+
+
+def test_la_alta_es_el_registro_asic_y_no_la_carga_de_la_fila(base_limpia):
+    """`created_at` dice cuándo alguien cargó la FILA acá. Las dos fechas no
+    coinciden en NINGUNA de las 153 fronteras: casi todas se cargaron el
+    2026-05-02, cuando se pobló la tabla, y BAYUNCA I está en ASIC desde 2020."""
+    _frontera("Registrada despues", registrada=DIA3)
+
+    assert _campo(_serie(), "registradas") == [0, 0, 1]
+
+
+def test_una_frontera_borrada_deja_de_exigirse(base_limpia):
+    _frontera("Queda")
+    _frontera("Se va", borrada=DIA2)
+
+    assert _campo(_serie(), "registradas") == [2, 1, 1]
+
+
+def test_el_filtro_de_registradas_es_el_del_orquestador():
+    """Si la alarma mirara un conjunto más grande que el del reporte, avisaría
+    de fronteras que nunca iban a reportar."""
+    import inspect
+
+    from apps.energia.services.reporte import orquestador, vistas
+
+    del_reporte = inspect.getsource(orquestador._fronteras_con_reporte)
+    de_la_alarma = inspect.getsource(vistas._fronteras_registradas_por_dia)
+
+    for condicion in ('estado="activa"', "codigo_frontera__isnull=False"):
+        assert condicion in del_reporte
+        assert condicion in de_la_alarma
+
+
 # ── La tabla por frontera ───────────────────────────────────────────────────
-# Reemplaza al desglose por grupo, que no decia nada: al abrir "Otra fuente"
+# Reemplaza al desglose por grupo, que no decía nada: al abrir "Otra fuente"
 # casi todas las filas daban 96-100%, porque esa barra es el complemento --
-# cualquier frontera que no sea automatica SIEMPRE tiene casi todos sus dias
-# ahi (reportado por la usuaria el 2026-09-15). Aca el ORDEN es la informacion.
+# cualquier frontera que no sea automática SIEMPRE tiene casi todos sus días
+# ahí (reportado por la usuaria el 2026-09-15). Acá el ORDEN es la información.
 
 
 def _por_frontera(r):
@@ -474,48 +417,25 @@ def test_solo_cuenta_los_dias_con_corrida(base_limpia):
     for dia in (DIA1, DIA2):
         for f in fronteras:
             _reporte(f, dia, fuente="cgm")
-    _reporte(fronteras[0], DIA3, fuente="principal")  # dia sin corrida: 1 de 3
+    _reporte(fronteras[0], DIA3, fuente="principal")  # día sin corrida: 1 de 3
 
     r = _serie()
 
     assert r["dias_sin_corrida"] == 1
     assert _por_frontera(r) == [
         ("F", 2, 2, 100.0), ("Otra", 2, 2, 100.0), ("Tercera", 2, 2, 100.0),
-    ], "el dia sin corrida no le suma un dia malo a F"
+    ], "el día sin corrida no le suma un día malo a F"
 
 
 def test_una_frontera_que_no_reporto_nunca_no_aparece(base_limpia):
     """No tiene filas, así que no hay días sobre los cuales sacarle un
-    porcentaje. Sale en el denominador de la tasa, no en esta tabla."""
+    porcentaje. Su ausencia se cuenta en `sin_reportar`, que es la alarma."""
     f = _frontera("Reporta")
     _frontera("Muda")
     for dia in (DIA1, DIA2, DIA3):
         _reporte(f, dia)
 
-    assert [n for n, _, _, _ in _por_frontera(_serie())] == ["Reporta"]
-
-
-def test_el_titular_no_lo_da_esta_tabla(base_limpia):
-    """La tasa divide sobre las fronteras REPORTABLES; la tabla, sobre los días
-    que cada frontera reportó. Son distintas a propósito: la muda no puede
-    tener una fila con 0/0, pero sí tiene que pesar en el total."""
-    f = _frontera("Reporta")
-    _frontera("Muda")
-    for dia in (DIA1, DIA2, DIA3):
-        _reporte(f, dia, fuente="cgm")
-
     r = _serie()
 
-    assert r["tasa"] == 50.0, "1 de 2 fronteras reportables, todos los días"
-    assert r["por_frontera"][0]["tasa"] == 100.0
-
-
-def test_el_umbral_es_inclusivo(base_limpia):
-    """Justo en la mitad SI cuenta como corrida. Da igual para los datos reales
-    --los dias buenos cubren >=95% y los rotos <=1%-- pero conviene que el borde
-    este escrito y no se descubra en una prueba."""
-    fronteras = [_frontera("A"), _frontera("B")]
-    for dia in (DIA1, DIA2, DIA3):
-        _reporte(fronteras[0], dia, fuente="cgm")
-
-    assert _serie()["dias_sin_corrida"] == 0
+    assert [n for n, _, _, _ in _por_frontera(r)] == ["Reporta"]
+    assert _campo(r, "sin_reportar") == [1, 1, 1]
