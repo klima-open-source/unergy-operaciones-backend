@@ -162,3 +162,90 @@ def test_el_front_conoce_las_dos_etiquetas_nuevas():
 
     assert "'CGM':" in fuente
     assert "'Reportado por terceros':" in fuente
+
+
+# ── El orden de las barras ──────────────────────────────────────────────────
+# Hasta el 2026-09-16 salian en orden de CONFIANZA del dato (CGM, medidor,
+# inversor, terceros, estimacion, apagado...). La usuaria pidio que fueran de
+# mayor a menor porcentaje: comparar alturas es lo que se le pregunta a este
+# grafico, y con el orden semantico habia que leer los numeros uno por uno.
+#
+# El orden de confianza no se tira: queda de desempate, para que dos grupos con
+# el mismo conteo no bailen de posicion entre una corrida y otra. Lo que sigue
+# diciendo QUE es cada barra son los colores, que no dependen de la posicion.
+
+
+def _etiquetas(filas, mapa=None):
+    from apps.energia.services.reporte.vistas import (
+        _GRUPO_FUENTE_GENERACION, _distribucion_y_detalle,
+    )
+
+    dist, _ = _distribucion_y_detalle(filas, mapa or _GRUPO_FUENTE_GENERACION)
+    return [d["etiqueta"] for d in dist]
+
+
+def _totales(filas, mapa=None):
+    from apps.energia.services.reporte.vistas import (
+        _GRUPO_FUENTE_GENERACION, _distribucion_y_detalle,
+    )
+
+    dist, _ = _distribucion_y_detalle(filas, mapa or _GRUPO_FUENTE_GENERACION)
+    return [d["total"] for d in dist]
+
+
+def test_las_barras_van_de_mayor_a_menor():
+    filas = [
+        (1, "F", "cgm", 5),
+        (2, "G", "principal", 40),
+        (3, "H", "inversores", 20),
+    ]
+
+    assert _totales(filas) == [40, 20, 5]
+    assert _etiquetas(filas) == ["Medidor", "Inversor", "CGM"]
+
+
+def test_el_orden_no_depende_de_como_lleguen_las_filas():
+    filas = [(1, "F", "inversores", 3), (2, "G", "cgm", 9), (3, "H", "principal", 6)]
+
+    assert _totales(filas) == [9, 6, 3]
+
+    assert _totales(list(reversed(filas))) == [9, 6, 3]
+
+
+def test_un_empate_se_rompe_por_confianza_del_dato():
+    """Sin desempate, dos grupos iguales cambiarian de lugar entre corridas y
+    la gráfica parecería moverse sola."""
+    filas = [(1, "F", "historico", 7), (2, "G", "cgm", 7)]
+
+    assert _etiquetas(filas) == ["CGM", "Estimación"]
+
+
+def test_el_orden_de_confianza_sigue_existiendo():
+    """Es el de los colores y el del desempate; no se borró al cambiar el de
+    las barras."""
+    from apps.energia.services.reporte.vistas import _ORDEN_GRUPO_FUENTE
+
+    assert _ORDEN_GRUPO_FUENTE[:3] == ["cgm", "medidor", "inversor"]
+    assert _ORDEN_GRUPO_FUENTE[-1] == "otro"
+
+
+def test_consumo_se_ordena_igual():
+    from apps.energia.services.reporte.vistas import _GRUPO_FUENTE_CONSUMO
+
+    filas = [(1, "F", "cgm", 2), (2, "G", "medidor", 30), (3, "H", "sin dato", 11)]
+
+    assert _totales(filas, _GRUPO_FUENTE_CONSUMO) == [30, 11, 2]
+
+
+def test_las_dos_barras_de_automaticos_no_se_reordenan():
+    """Ahí el orden no es un ranking sino una pareja bien/mal, y que
+    "Automático" se mueva de lugar según el mes confundiría más de lo que
+    ayuda."""
+    from apps.energia.services.reporte.vistas import (
+        AUTOMATICO, OTRA_FUENTE, _distribucion_automatico,
+    )
+
+    dist, _ = _distribucion_automatico(
+        [(1, "F", "principal", 90), (2, "G", "cgm", 10)], [])
+
+    assert [d["etiqueta"] for d in dist] == [AUTOMATICO, OTRA_FUENTE]

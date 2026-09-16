@@ -152,6 +152,7 @@ def test_el_total_es_razon_de_totales(base_limpia):
 
     r = _serie(desde=DIA1, hasta=DIA2)
 
+    assert _excluidos(r) == [], "los dos días corrieron completos"
     assert r["tasa"] == 60.0, "6 automáticas de 10 clasificadas"
     promedio = round(sum(_tasas(r)) / 2, 1)
     assert promedio == 66.7, "el promedio le daría el mismo peso a los dos días"
@@ -206,8 +207,12 @@ def test_un_solo_dia_devuelve_un_solo_punto(base_limpia):
 # ── Los días sin corrida ────────────────────────────────────────────────────
 
 
-def _sin_corrida(r):
-    return [d["fecha"] for d in r["dias"] if d["sin_corrida"]]
+def _excluidos(r):
+    return [d["fecha"] for d in r["dias"] if d["excluido"]]
+
+
+def _motivos(r):
+    return {d["fecha"]: d["motivo"] for d in r["dias"] if d["excluido"]}
 
 
 def test_un_dia_sin_ninguna_fila_no_entra_en_la_tasa(base_limpia):
@@ -219,11 +224,11 @@ def test_un_dia_sin_ninguna_fila_no_entra_en_la_tasa(base_limpia):
 
     r = _serie()
 
-    assert _sin_corrida(r) == [DIA3]
+    assert _excluidos(r) == [DIA3]
     assert r["tasa"] == 100.0
     assert r["fronteras"] == 8, "el día sin corrida tampoco suma al denominador"
     assert r["dias_contados"] == 2
-    assert r["dias_sin_corrida"] == 1
+    assert r["dias_excluidos"] == 1
 
 
 def test_una_corrida_a_medias_tampoco_cuenta(base_limpia):
@@ -236,7 +241,7 @@ def test_una_corrida_a_medias_tampoco_cuenta(base_limpia):
             _reporte(f, dia)
     _reporte(fronteras[0], DIA3, fuente="principal")
 
-    assert _sin_corrida(_serie()) == [DIA3]
+    assert _excluidos(_serie()) == [DIA3]
 
 
 def test_una_corrida_casi_completa_si_cuenta(base_limpia):
@@ -249,7 +254,7 @@ def test_una_corrida_casi_completa_si_cuenta(base_limpia):
     for f in fronteras[:9]:
         _reporte(f, DIA3)
 
-    assert _sin_corrida(_serie()) == []
+    assert _excluidos(_serie()) == []
 
 
 def test_el_dia_sin_corrida_sigue_en_la_serie(base_limpia):
@@ -263,7 +268,7 @@ def test_el_dia_sin_corrida_sigue_en_la_serie(base_limpia):
     assert len(r["dias"]) == 3
     assert r["dias"][2]["fecha"] == DIA3
     assert r["dias"][2]["registradas"] == 4, "se ve cuántas debían reportar"
-    assert r["dias_sin_corrida"] == 2
+    assert r["dias_excluidos"] == 2
 
 
 def test_los_dias_malos_salen_solos(base_limpia):
@@ -277,7 +282,7 @@ def test_los_dias_malos_salen_solos(base_limpia):
     r = _serie()
 
     assert r["tasa"] == 100.0
-    assert r["dias_sin_corrida"] == 1
+    assert r["dias_excluidos"] == 1
 
 
 def test_el_umbral_deja_margen_de_sobra():
@@ -421,7 +426,7 @@ def test_solo_cuenta_los_dias_con_corrida(base_limpia):
 
     r = _serie()
 
-    assert r["dias_sin_corrida"] == 1
+    assert r["dias_excluidos"] == 1
     assert _por_frontera(r) == [
         ("F", 2, 2, 100.0), ("Otra", 2, 2, 100.0), ("Tercera", 2, 2, 100.0),
     ], "el día sin corrida no le suma un día malo a F"
@@ -439,3 +444,123 @@ def test_una_frontera_que_no_reporto_nunca_no_aparece(base_limpia):
 
     assert [n for n, _, _, _ in _por_frontera(r)] == ["Reporta"]
     assert _campo(r, "sin_reportar") == [1, 1, 1]
+
+
+# ── Las otras dos formas de que el clasificador falle ───────────────────────
+# Ninguna es una fecha escrita en el codigo: las tres son reglas, asi que el
+# mismo fallo dentro de seis meses tambien sale solo.
+
+
+def _consumo(frontera, dia, caso="CGM"):
+    from apps.energia.models import ReporteEnergiaConsumo
+
+    return ReporteEnergiaConsumo.objects.create(
+        frontera_id=frontera.id, fecha=dia, caso=caso)
+
+
+def _dia_completo(fronteras, dia, cgm=True):
+    for f in fronteras:
+        _reporte(f, dia, fuente="cgm" if cgm else "principal")
+        _consumo(f, dia, caso="CGM" if cgm else "medidor")
+
+
+def test_una_corrida_parcial_no_cuenta(base_limpia):
+    """El 2026-09-04 hizo las 69 fronteras de generacion y dejo 19 de consumo
+    sin clasificar. Ese dia marco 97% de CGM contra el ~35% habitual."""
+    fronteras = [_frontera(f"F{i}") for i in range(10)]
+    _dia_completo(fronteras, DIA1)
+    _dia_completo(fronteras, DIA2)
+    # DIA3: toda la generacion, solo 3 de 10 de consumo.
+    for f in fronteras:
+        _reporte(f, DIA3, fuente="cgm")
+    for f in fronteras[:3]:
+        _consumo(f, DIA3)
+
+    r = _serie()
+
+    assert _motivos(r) == {DIA3: "corrida_parcial"}
+
+
+def test_el_equilibrio_no_se_rompe_porque_entren_fronteras(base_limpia):
+    """Las fronteras se van sumando --52 en agosto, 73 en septiembre-- asi que
+    un umbral contra la mediana del rango marcaria los dias viejos como
+    parciales. La proporcion entre mitades no se entera del crecimiento."""
+    fronteras = [_frontera(f"F{i}") for i in range(10)]
+    _dia_completo(fronteras[:4], DIA1)   # dia chico, pero equilibrado
+    _dia_completo(fronteras[:7], DIA2)
+    _dia_completo(fronteras, DIA3)
+
+    assert _excluidos(_serie()) == []
+
+
+def test_faltar_una_frontera_de_consumo_no_es_una_corrida_parcial(base_limpia):
+    """Un hueco de UNA frontera es un problema de esa frontera, no del
+    clasificador. Un dia normal trae 69 y 67."""
+    fronteras = [_frontera(f"F{i}") for i in range(10)]
+    for dia in (DIA1, DIA2, DIA3):
+        for f in fronteras:
+            _reporte(f, dia, fuente="cgm")
+        for f in fronteras[:9]:
+            _consumo(f, dia)
+
+    assert _excluidos(_serie()) == []
+
+
+def test_un_dia_con_cero_cgm_no_cuenta(base_limpia):
+    """"Eso nunca pasa" (confirmado con la usuaria el 2026-09-16, sobre el 9 de
+    agosto): un cero absoluto es el programa fallando, no una jornada sin
+    automatizacion. Ese dia corrio ENTERO --103 filas, el volumen normal de su
+    epoca-- asi que ninguna otra regla lo agarraba."""
+    fronteras = [_frontera(f"F{i}") for i in range(10)]
+    _dia_completo(fronteras, DIA1)
+    _dia_completo(fronteras, DIA2)
+    _dia_completo(fronteras, DIA3, cgm=False)  # corrida completa, cero CGM
+
+    r = _serie()
+
+    assert _motivos(r) == {DIA3: "clasificacion_fallida"}
+    assert r["tasa"] == 100.0
+
+
+def test_una_sola_frontera_en_cgm_ya_no_es_un_fallo(base_limpia):
+    """La regla es el CERO absoluto, no "poco". Un dia flojo es un dato."""
+    fronteras = [_frontera(f"F{i}") for i in range(10)]
+    _dia_completo(fronteras, DIA1)
+    _dia_completo(fronteras, DIA2)
+    for f in fronteras:
+        _reporte(f, DIA3, fuente="cgm" if f is fronteras[0] else "principal")
+        _consumo(f, DIA3, caso="medidor")
+
+    assert _excluidos(_serie()) == []
+
+
+def test_cada_dia_excluido_dice_por_que(base_limpia):
+    """Sin el motivo, un hueco en la serie no se puede explicar despues."""
+    fronteras = [_frontera(f"F{i}") for i in range(10)]
+    _dia_completo(fronteras, DIA1)
+    _dia_completo(fronteras, DIA2, cgm=False)   # cero CGM
+    _reporte(fronteras[0], DIA3)                # casi nada
+
+    assert _motivos(_serie()) == {
+        DIA2: "clasificacion_fallida", DIA3: "sin_corrida",
+    }
+
+
+def test_un_dia_sin_corrida_no_se_reporta_ademas_como_cero_cgm(base_limpia):
+    """Las reglas se evaluan en orden y la primera manda: un dia que no corrio
+    tambien tiene cero CGM, y decir "clasificacion fallida" mandaria a buscar
+    un bug donde lo que hubo fue una caida."""
+    fronteras = [_frontera(f"F{i}") for i in range(10)]
+    _dia_completo(fronteras, DIA1)
+    _dia_completo(fronteras, DIA2)
+
+    assert _motivos(_serie())[DIA3] == "sin_corrida"
+
+
+def test_el_equilibrio_se_calcula_igual_en_los_dos_sentidos():
+    from apps.energia.services.reporte.vistas import _equilibrio
+
+    assert _equilibrio(69, 48) == _equilibrio(48, 69)
+    assert round(_equilibrio(69, 67), 2) == 0.97
+    assert round(_equilibrio(69, 48), 2) == 0.70
+    assert _equilibrio(0, 0) == 1.0, "sin filas no hay desequilibrio que reportar"

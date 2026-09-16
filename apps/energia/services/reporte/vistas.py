@@ -128,6 +128,12 @@ _ETIQUETA_GRUPO_FUENTE = {
 # De mayor a menor respaldo del dato: el CGM es oficial del mercado; el medidor
 # y el inversor los leemos nosotros; lo de terceros es una medicion real pero
 # que no podemos verificar; la estimacion es inferida.
+#
+# **Ya NO es el orden de las barras.** Desde el 2026-09-16 se dibujan de mayor a
+# menor porcentaje, que es como se comparan tamanos de un vistazo (pedido de la
+# usuaria). Este orden queda como desempate --dos grupos con el mismo conteo
+# salen en el orden de confianza-- y como el orden de los colores, que son los
+# que siguen diciendo que es cada cosa.
 _ORDEN_GRUPO_FUENTE = [
     "cgm", "medidor", "inversor", "terceros", "estimacion", "apagado",
     "sin_fuente", "otro",
@@ -258,24 +264,41 @@ def _fronteras_registradas_por_dia(desde: date, hasta: date) -> dict[date, set[i
 # exactamente no cambia ningún resultado.
 COBERTURA_MINIMA_DE_UNA_CORRIDA = 0.5
 
+# Las dos mitades --generación y consumo-- se mueven juntas: un día normal trae
+# 69 y 67, o 52 y 51. Si se separan, el clasificador hizo media corrida. El
+# 2026-09-04 hizo las 69 de generación y dejó 19 de consumo sin clasificar
+# (48 de 67, un equilibrio de 0,70), y ese día marcó 97% de CGM contra el ~35%
+# habitual.
+#
+# **Es una PROPORCIÓN entre las dos mitades, no un mínimo contra la mediana del
+# rango.** Las fronteras se van sumando --52 en agosto, 73 en septiembre-- así
+# que cualquier umbral contra la mediana marcaría los días viejos como
+# parciales. La proporción entre mitades no se entera del crecimiento: estuvo
+# entre 0,96 y 0,98 todos los días buenos del rango medido.
+EQUILIBRIO_MINIMO_ENTRE_MITADES = 0.85
+
+MOTIVO_SIN_CORRIDA = "sin_corrida"
+MOTIVO_PARCIAL = "corrida_parcial"
+MOTIVO_SIN_CGM = "clasificacion_fallida"
+
 
 def serie_automatico(desde: date, hasta: date) -> dict:
     """Tasa diaria de reporte automático (CGM), y el total del rango.
 
     **Qué mide.** Cada día: de las fronteras que el clasificador procesó,
     cuántas se reportaron solas vía CGM. Es la pregunta de la automatización
-    --"¿cuánto salió solo?"-- separada de la de las otras dos barras, que dicen
-    de dónde salió el dato.
+    --cuánto salió solo-- separada de la de las otras dos barras, que dicen de
+    dónde salió el dato.
 
     **El denominador son las CLASIFICADAS.** Se probó dividir sobre las
     registradas en ASIC, para que una frontera que no reporta nada penalizara en
     vez de salir de los dos lados de la división. Medido el 2026-09-15 contra
-    producción, la brecha entre "debían" y "reportaron" era TODOS los días
-    exactamente las mismas 9 fronteras --BAYUNCA I, SAN ONOFRE, DELTA 2, NAOS 2
-    y 3, con sus consumos-- que estaban en nuestra tabla y no en el catálogo de
-    Quoia, y que se borraron ese día. Sin ellas los dos conjuntos coinciden, así
-    que ese denominador agregaba maquinaria (una fecha de alta por frontera, y
-    un desajuste propio: seis fronteras reportaron ANTES de su
+    producción, la brecha entre las que debían y las que reportaron era TODOS
+    los días exactamente las mismas 9 fronteras --BAYUNCA I, SAN ONOFRE, DELTA
+    2, NAOS 2 y 3, con sus consumos-- que estaban en nuestra tabla y no en el
+    catálogo de Quoia, y que se borraron ese día. Sin ellas los dos conjuntos
+    coinciden, así que ese denominador agregaba maquinaria (una fecha de alta
+    por frontera, y un desajuste propio: seis fronteras reportaron ANTES de su
     `fecha_registro_asic`, lo que podía dar tasas de más del 100%) sin cambiar
     ningún número.
 
@@ -289,53 +312,91 @@ def serie_automatico(desde: date, hasta: date) -> dict:
     mismo peso a un día con 144 fronteras que a uno con 136. La razón de totales
     le da a cada día el peso que tuvo.
 
-    **Los días sin corrida quedan fuera de la tasa, pero no de la serie.** El 5
-    y el 6 de septiembre de 2026 no se reportó nada: fue la migración del
-    servidor, no la automatización. Contarlos movería la métrica por dos causas
-    distintas --cobertura de CGM e infraestructura-- sin poder saber cuál. Como
-    el denominador ahora son las clasificadas, un día roto daría `0/1`: un cero
-    perfecto sobre una sola frontera. Se detecta comparando el volumen del día
-    contra la mediana del rango.
+    **Los días en que el clasificador no hizo su trabajo quedan fuera de la
+    tasa, pero NO de la serie.** Son tres casos, y cada uno se detecta por una
+    regla: ninguno es una fecha escrita en el código, así que el mismo fallo
+    dentro de seis meses también sale solo.
+
+        `sin_corrida`           el día no trajo ni la mitad del volumen normal.
+                                El 5 y 6 de septiembre de 2026 quedó UNA fila de
+                                145: fue la migración del servidor.
+        `corrida_parcial`       las dos mitades se separaron. El 4 de
+                                septiembre hizo toda la generación y dejó 19
+                                fronteras de consumo sin clasificar.
+        `clasificacion_fallida` el día corrió entero y no usó CGM en NINGUNA
+                                frontera. Eso no pasa nunca (confirmado con la
+                                usuaria el 2026-09-16, sobre el 9 de agosto):
+                                un cero absoluto es el programa fallando, no una
+                                jornada sin automatización.
+
+    Contarlos movería la métrica por causas que no son la automatización --una
+    migración, media corrida, un fallo del clasificador-- y no habría forma de
+    saber cuál. Siguen apareciendo en `dias` con `excluido=True` y su `motivo`,
+    para que el gráfico los pinte y diga por qué: esconderlos taparía días en
+    que 145 fronteras debían reportar y no se reportó ninguna.
     """
     if hasta < desde:
         raise NoProcesable("'hasta' no puede ser anterior a 'desde'")
 
     con_cgm: dict[date, set[int]] = defaultdict(set)
     clasificadas: dict[date, set[int]] = defaultdict(set)
+    por_mitad: dict[str, dict[date, int]] = {
+        "gen": defaultdict(int), "con": defaultdict(int),
+    }
     nombres: dict[int, str] = {}
-    for modelo, campo in ((ReporteEnergiaGeneracion, "medidor_usado"),
-                          (ReporteEnergiaConsumo, "caso")):
+    for modelo, campo, mitad in ((ReporteEnergiaGeneracion, "medidor_usado", "gen"),
+                                 (ReporteEnergiaConsumo, "caso", "con")):
         # `.lower()` a propósito: generación guarda "cgm" y consumo "CGM".
         for fila in (modelo.objects.filter(fecha__range=(desde, hasta))
                      .values("frontera_id", "frontera__nombre_frontera", "fecha", campo)):
             fid = fila["frontera_id"]
             nombres[fid] = fila["frontera__nombre_frontera"]
             clasificadas[fila["fecha"]].add(fid)
+            por_mitad[mitad][fila["fecha"]] += 1
             if (fila[campo] or "").strip().lower() == "cgm":
                 con_cgm[fila["fecha"]].add(fid)
 
     registradas = _fronteras_registradas_por_dia(desde, hasta)
-    # La mediana de lo que trae un día normal. Es la referencia para decir si
-    # hubo corrida: no se puede usar la cobertura, porque con este denominador
-    # todos los días cubren el 100% por construcción.
-    volumenes = sorted(len(v) for v in clasificadas.values())
-    tipico = volumenes[len(volumenes) // 2] if volumenes else 0
+    dias_del_rango = sorted(registradas)
+
+    # Primera pasada: el volumen normal. No se puede medir la cobertura contra
+    # las registradas, porque con este denominador todos los días cubren el 100%
+    # por construcción.
+    tipico = _mediana([len(clasificadas.get(d, ())) for d in dias_del_rango])
+    corrio = {
+        d: bool(clasificadas.get(d)
+                and len(clasificadas[d]) >= tipico * COBERTURA_MINIMA_DE_UNA_CORRIDA)
+        for d in dias_del_rango
+    }
+    # La regla del equilibrio solo tiene sentido si el rango trae las DOS
+    # mitades. Con una sola --un rango de solo generación, o una base de
+    # pruebas-- no hay nada que comparar y marcaría todo como parcial.
+    hay_las_dos = any(por_mitad["gen"].values()) and any(por_mitad["con"].values())
 
     dias = []
     total_cgm = 0
     total_clasificadas = 0
-    sin_corrida = 0
-    for dia in sorted(registradas):
+    excluidos = 0
+    for dia in dias_del_rango:
         cgm = len(con_cgm.get(dia, ()))
         universo = len(clasificadas.get(dia, ()))
-        hubo_corrida = bool(
-            universo and universo >= tipico * COBERTURA_MINIMA_DE_UNA_CORRIDA
-        )
-        if hubo_corrida:
+
+        motivo = None
+        if not corrio[dia]:
+            motivo = MOTIVO_SIN_CORRIDA
+        elif hay_las_dos and _equilibrio(
+            por_mitad["gen"][dia], por_mitad["con"][dia]
+        ) < EQUILIBRIO_MINIMO_ENTRE_MITADES:
+            motivo = MOTIVO_PARCIAL
+        elif cgm == 0:
+            motivo = MOTIVO_SIN_CGM
+
+        if motivo is None:
             total_cgm += cgm
             total_clasificadas += universo
         else:
-            sin_corrida += 1
+            excluidos += 1
+
         dias.append({
             "fecha": dia,
             "automaticas": cgm,
@@ -344,20 +405,41 @@ def serie_automatico(desde: date, hasta: date) -> dict:
             # Diferencia de CONJUNTOS, no de totales: ver el docstring de
             # `_fronteras_registradas_por_dia`.
             "sin_reportar": len(registradas[dia] - clasificadas.get(dia, set())),
-            "sin_corrida": not hubo_corrida,
+            "excluido": motivo is not None,
+            "motivo": motivo,
             "tasa": round(cgm / universo * 100, 1) if universo else 0.0,
         })
 
     return {
         "dias": dias,
-        "dias_contados": len(dias) - sin_corrida,
-        "dias_sin_corrida": sin_corrida,
+        "dias_contados": len(dias) - excluidos,
+        "dias_excluidos": excluidos,
         "automaticas": total_cgm,
         "fronteras": total_clasificadas,
         "tasa": (round(total_cgm / total_clasificadas * 100, 1)
                  if total_clasificadas else 0.0),
         "por_frontera": _automatico_por_frontera(dias, con_cgm, clasificadas, nombres),
     }
+
+
+def _equilibrio(generacion: int, consumo: int) -> float:
+    """Qué tan parejas quedaron las dos mitades de la corrida, de 0 a 1.
+
+    1 es idéntico. Un día normal ronda 0,97 (69 y 67); el 2026-09-04 dio 0,70.
+    """
+    mayor = max(generacion, consumo)
+    return (min(generacion, consumo) / mayor) if mayor else 1.0
+
+
+def _mediana(valores: list[int]) -> float:
+    """Mediana simple. Cero si no hay con qué."""
+    limpios = sorted(valores)
+    if not limpios:
+        return 0.0
+    mitad = len(limpios) // 2
+    if len(limpios) % 2:
+        return float(limpios[mitad])
+    return (limpios[mitad - 1] + limpios[mitad]) / 2
 
 
 def _automatico_por_frontera(dias, con_cgm, reportaron, nombres) -> list[dict]:
@@ -369,10 +451,10 @@ def _automatico_por_frontera(dias, con_cgm, reportaron, nombres) -> list[dict]:
     ahí (reportado por la usuaria el 2026-09-15).
 
     Acá el orden es la información: arriba quedan las fronteras que nunca
-    reportan solas, que son la cola de trabajo. Solo se miran los días con
-    corrida, igual que la tasa.
+    reportan solas, que son la cola de trabajo. Solo se miran los días que
+    cuentan para la tasa, o el detalle contradiría al titular.
     """
-    contados = [d["fecha"] for d in dias if not d["sin_corrida"]]
+    contados = [d["fecha"] for d in dias if not d["excluido"]]
     totales: dict[int, int] = defaultdict(int)
     automaticos: dict[int, int] = defaultdict(int)
     for fecha in contados:
@@ -436,9 +518,15 @@ def _distribucion_y_detalle(
         g["dias"] += n
         g["desglose"][etq_legible] = g["desglose"].get(etq_legible, 0) + n
 
+    # De mayor a menor: comparar alturas es la pregunta que hace este grafico.
+    # El orden de confianza queda de desempate, para que dos grupos empatados no
+    # bailen de posicion entre una corrida y otra.
     global_dist = [
         {"etiqueta": _ETIQUETA_GRUPO_FUENTE[g], "total": conteos_globales[g]}
-        for g in _ORDEN_GRUPO_FUENTE if g in conteos_globales
+        for g in sorted(
+            (g for g in _ORDEN_GRUPO_FUENTE if g in conteos_globales),
+            key=lambda g: (-conteos_globales[g], _ORDEN_GRUPO_FUENTE.index(g)),
+        )
     ]
     detalle = [
         {
