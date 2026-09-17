@@ -155,6 +155,36 @@ class GarantiaPagado(models.Model):
         unique_together = [("anio", "mes")]
 
 
+class GarantiaContrato(models.Model):
+    """Reparto de la garantía de un corte entre los contratos que la generan.
+
+    La garantía la causa el DÉFICIT horario (compra en bolsa por los mínimos de
+    ciertos contratos). Esta tabla guarda, por corte y ventana (anio/mes), cuánto
+    de la garantía total le toca a cada contrato según su déficit —para poder
+    cobrárselo al cliente. La produce `apps.garantias.services.atribucion`.
+    """
+    id = models.BigAutoField(primary_key=True)
+    fecha_corte = models.DateField(db_index=True)
+    anio = models.IntegerField()
+    mes = models.IntegerField()
+    codigo = models.CharField(max_length=40)
+    contrato = models.CharField(max_length=200, null=True, blank=True)
+    comprador = models.CharField(max_length=10, null=True, blank=True)
+    proyecto = models.ForeignKey(
+        "proyectos.Proyecto", on_delete=models.DO_NOTHING, db_column="proyecto_id",
+        null=True, blank=True, related_name="garantia_contrato_por_proyecto_id",
+    )
+    deficit_mwh = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    pct = models.DecimalField(max_digits=9, decimal_places=6, default=0)
+    monto = models.DecimalField(max_digits=20, decimal_places=2, default=0)
+    total_garantia = models.DecimalField(max_digits=20, decimal_places=2, default=0)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = "garantia_contrato"
+        unique_together = [("fecha_corte", "anio", "mes", "codigo")]
+
+
 class BalcttosNeto(models.Model):
     id = models.BigAutoField(primary_key=True)
     anio = models.IntegerField()

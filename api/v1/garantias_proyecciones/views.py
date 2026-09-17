@@ -6,9 +6,12 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
+from datetime import date
+
 from api.logging import class_logger_wrapper, log_endpoint
 from api.permissions import RolePermission
 from apps.garantias import models as ga_models
+from apps.garantias.services import atribucion as atribucion_service
 from apps.garantias.services import proyecciones as proyecciones_service
 from apps.garantias.services.calculo import KWH_PLANTA_NUEVA_DEFAULT
 
@@ -127,3 +130,48 @@ class GarantiaProyeccionViewSet(viewsets.GenericViewSet):
         return Response(
             proyecciones_service.ingerir_balcttos(anio, mes, archivo.read())
         )
+
+    @action(detail=False, methods=["get", "post"], url_path="atribucion")
+    @log_endpoint(name="Operaciones | Garantías | Atribución por contrato")
+    def atribucion(self, request):
+        """Reparte la garantía entre los contratos que la generan (su déficit).
+
+        POST (con el BalCttos en `archivo`): cruza el déficit horario por
+        contrato, lo reparte sobre el total de garantía que ESTIMA el modelo para
+        la ventana del mes siguiente, lo guarda y lo devuelve.
+        GET: el último reparto guardado de esa ventana (`?anio=&mes=`), sin recalcular.
+        """
+        if request.method == "GET":
+            anio = int(_numero(request, "anio", None, 2020, 2050))
+            mes = int(_numero(request, "mes", None, 1, 12))
+            return Response({
+                "anio": anio, "mes": mes,
+                "contratos": atribucion_service.leer_atribucion(anio, mes),
+            })
+
+        archivo = request.FILES.get("archivo")
+        if archivo is None:
+            raise ValidationError({"archivo": "Falta el archivo BalCttos."})
+
+        # Total a repartir = el que estima el modelo para el mes siguiente (M+1),
+        # que es la garantía mensual que precobra XM.
+        resultado = proyecciones_service.en_vivo()
+        ventana = next(
+            (v for v in resultado["ventanas"] if v["clave"] == "mes_siguiente"), None
+        )
+        if ventana is None:
+            raise ValidationError({"modelo": "El modelo no devolvió la ventana del mes siguiente."})
+        total = ventana.get("garantia_total") or 0.0
+
+        filas = atribucion_service.garantia_por_contrato_de_bytes(archivo.read(), total)
+        fecha_corte = date.fromisoformat(resultado["fecha_corte"])
+        guardadas = atribucion_service.guardar_atribucion(
+            fecha_corte, ventana["anio"], ventana["mes"], total, filas
+        )
+        return Response({
+            "fecha_corte": resultado["fecha_corte"],
+            "anio": ventana["anio"], "mes": ventana["mes"],
+            "total_garantia": total,
+            "guardadas": guardadas,
+            "contratos": filas,
+        })

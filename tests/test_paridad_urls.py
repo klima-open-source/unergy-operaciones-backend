@@ -126,11 +126,17 @@ RUTAS_RETIRADAS = {
 #   2026-09-11  GET /facturacion/cumplimiento/export. Excel formulado del valor a
 #               indemnizar por incumplimiento (bolsa SIMEM x incumplida). Nuevo,
 #               no existia en FastAPI.
+#   2026-09-17  GET|POST /garantias/proyecciones/atribucion. Reparte la garantia
+#               entre los contratos que la generan, cruzando el deficit horario
+#               del BalCttos por contrato (para cobrarle a cada cliente su parte).
+#               No existia en FastAPI.
 RUTAS_NUEVAS = {
     ("/api/v1/liquidaciones-api/contratos-energia/{}", "PATCH"),
     ("/api/v1/liquidaciones-api/ipp/sincronizar", "POST"),
     ("/api/v1/facturacion/vs-despachos", "GET"),
     ("/api/v1/facturacion/cumplimiento/export", "GET"),
+    ("/api/v1/garantias/proyecciones/atribucion", "GET"),
+    ("/api/v1/garantias/proyecciones/atribucion", "POST"),
 }
 
 
