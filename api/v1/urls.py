@@ -19,6 +19,7 @@ urlpatterns = [
     path("", include("api.v1.contratos_servicio.urls")),
     path("", include("api.v1.cumplimiento.urls")),
     path("", include("api.v1.dashboard.urls")),
+    path("", include("api.v1.descarga_xm.urls")),
     path("", include("api.v1.estados_resultados.urls")),
     path("", include("api.v1.evo_proxy.urls")),
     path("", include("api.v1.facturacion.urls")),
