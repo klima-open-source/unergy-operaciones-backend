@@ -24,6 +24,7 @@ from apps.clientes.services.panel import (
     servicios_por_cliente,
 )
 from apps.contratos.models import ContratoServicio
+from apps.contratos.services import grupos as grupos_servicio
 from apps.plataforma.services.fechas import hoy_col
 from apps.ppa.models import PpaContrato, PpaContratoProyecto
 from apps.proyectos.models import Proyecto, ProyectoInversionista
@@ -125,12 +126,22 @@ def servicios_contratos(cliente_id: int, hoy: date | None = None) -> list[dict]:
     proyectos = _proyectos_por_id({c.proyecto_id for c in contratos if c.proyecto_id})
 
     def _tarifa(c):
-        """La tarifa relevante según el tipo de servicio del contrato."""
-        if c.servicio_aplica == "representacion":
-            return _num(c.tarifa_representacion)
-        if c.servicio_aplica == "cgm":
-            return _num(c.tarifa_cgm)
-        return _num(c.tarifa_base)
+        """La tarifa relevante según el tipo de servicio del contrato.
+
+        La correspondencia subservicio → columna vive una sola vez, en
+        `apps/contratos/services/grupos.py`. Esta vista muestra UNA tarifa por
+        contrato, así que toma la del primer subservicio: para Operación es la
+        única que hay, y en representación+CGM es la de representación, igual
+        que antes.
+
+        Un `servicio_aplica` fuera del catálogo (`promotor`, `rec` — valores que
+        existieron en el enum) cae a `tarifa_base`, que es lo que hacía la
+        cadena de `if` que esto reemplaza.
+        """
+        subservicios = grupos_servicio.subservicios_de(c)
+        if not subservicios:
+            return _num(c.tarifa_base)
+        return _num(grupos_servicio.tarifa_de(c, subservicios[0]))
 
     grupos: dict[str, list] = defaultdict(list)
     for c in contratos:
