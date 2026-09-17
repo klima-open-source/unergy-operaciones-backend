@@ -1,0 +1,374 @@
+# Diagnóstico del PPA: cómo se crea hoy, qué tablas lo sostienen y qué está roto
+
+Escrito para el equipo de desarrollo. Fecha del corte: **2026-09-17**. Todas las
+cifras de producción salen de consultas de solo lectura corridas ese día contra
+la base `operations`.
+
+Este documento es **descriptivo**: dice cómo es hoy. El modelo objetivo del CRM
+está en [`DOMINIO_COMERCIAL.md`](DOMINIO_COMERCIAL.md) y no se repite acá; donde
+los dos se tocan, se cita.
+
+---
+
+## Resumen: los siete hallazgos
+
+| # | Hallazgo | Gravedad |
+|---|---|---|
+| 1 | `POST`/`PATCH /ppa` **descarta en silencio** `comprador_id`, `vendedor_id` y `responsable_id`. El front manda esas tres claves; el backend espera `comprador`, `vendedor`, `responsable`. Es una regresión del port a Django (FastAPI sí las aceptaba). | 🔴 Alta |
+| 2 | `POST /ppa/{id}/proyectos` **no existe** en el backend. El botón "vincular planta" del detalle da 404. Nunca existió, tampoco en FastAPI. | 🔴 Alta |
+| 3 | El camino "firmar una oferta" (`POST /comercial/ofertas/{id}/firmar`) **no se ha usado nunca**: 0 de 165 ofertas tienen `ppa_contrato_id`. Los 35 PPA se crearon por el otro camino. | 🟠 Media |
+| 4 | `firmar()` y `POST /ppa` **no aplican las mismas reglas**: el primero no valida contra GESCON, no sincroniza partes, nunca escribe `comprador_id` y fija `tipo_contrato="compra"` a mano. | 🟠 Media |
+| 5 | `ppa_contratos` guarda una **copia a mano** de la información de GESCON en seis columnas (`gescon_*`, `codigo_sic`) que ninguna lógica del backend lee, que casi nadie llena, y que ya divergieron de la fuente real. | 🟠 Media |
+| 6 | Datos incompletos: de 34 PPA vivos, **11 no tienen planta vinculada**, **13 no tienen tarifas** y **14 no tienen compromisos de energía**. Sin compromisos, Cumplimiento no puede medir el contrato. | 🟠 Media |
+| 7 | **No hay ni una prueba** que ejerza `POST`/`PATCH /ppa`. Por eso el hallazgo 1 pasó el deploy. | 🟡 Baja |
+
+---
+
+## 1 · El mapa de tablas
+
+### Las seis tablas del dominio `ppa`
+
+| Tabla | Modelo | Qué guarda | Filas (2026-09-17) |
+|---|---|---|---|
+| `ppa_contratos` | `PpaContrato` | El contrato: partes, fechas, tarifa base, indexación, cantidades, datos GESCON, tipo. Borrado **lógico** (`deleted_at`). | 35 (34 vivos) |
+| `ppa_contrato_proyectos` | `PpaContratoProyecto` | N↔N contrato ↔ planta. PK compuesta, sin `id`. | 42 |
+| `ppa_tarifas` | `PpaTarifa` | Precio **por (año, mes)**. Único `(contrato, año, mes)`. | 2 433 |
+| `ppa_compromisos_energia` | `PpaCompromisoEnergia` | Mínimo y máximo de energía **por (año, mes)**, en MWh. | 2 432 |
+| `ppa_responsables` | `PpaResponsable` | Catálogo de quién responde por el contrato, con la bandera `incluir_en_cumplimiento`. | 2 (`Unergy`, `Externo`) |
+| `ipp_mensual` | `IppMensual` | El IPP por mes. No cuelga de ningún contrato: es un índice global que la facturación usa para indexar. | — |
+
+Detalle de las series mensuales: `tarifa` no es nula en ninguna de las 2 433
+filas, y `energia_minima` no es nula en ninguna de las 2 432. Cuando hay datos,
+están completos; el problema es **cuáles contratos no tienen ninguna fila**.
+
+### Quién apunta a `ppa_contratos`
+
+Seis tablas de otros dominios tienen FK al contrato. El `on_delete` importa,
+porque el borrado real solo ocurriría por consola:
+
+| Tabla origen | Columna | `on_delete` | Para qué |
+|---|---|---|---|
+| `asic_solicitudes` | `contrato_ppa_id` | `DO_NOTHING` | El registro GESCON/ASIC ante XM. **Es el que conecta el PPA con el despacho real.** |
+| `cumplimiento_mensual` | `contrato_ppa_id` | `CASCADE` | El cierre mensual de cumplimiento. **Hoy está vacía: 0 filas.** |
+| `clasificacion_energia_mensual` | `contrato_ppa_id` | `SET_NULL` | Clasificación mensual de la energía. |
+| `alertas` | `ppa_id` | `CASCADE` | Alertas de vencimiento (90/60/30 días). Único `(ppa_id, days_to_expiration)`. |
+| `cliente_documentos_comerciales` | `ppa_contrato_id` | `CASCADE` | El enlace de Drive del contrato vive acá, como documento `tipo='contrato'`. 29 filas apuntan a un PPA. |
+| `oportunidad_ofertas` | `ppa_contrato_id` | `SET_NULL` | El enlace con el CRM. **0 filas lo tienen puesto.** |
+
+Y `ppa_contratos` apunta hacia afuera a `clientes` (dos veces: comprador y
+vendedor) y a `ppa_responsables`.
+
+### El dato que no está en ninguna tabla: el estado
+
+`ppa_contratos` **no tiene columna `estado`**. Lo que la UI muestra son dos
+derivados distintos y no hay que confundirlos:
+
+- **Vigencia** (`vigente` / `por_vencer` / `vencido` / `por_iniciar`) — se
+  calcula de las fechas. El front la deriva en
+  `app/features/contratos/utils/ppaVigencia.ts`, porque el listado `GET /ppa` no
+  trae `dias_restantes` y el detalle sí. Está documentado y es deliberado.
+- **Cumplimiento** (`estado_cumplimiento`, `cobertura_actual_pct`) — mide
+  generación contra el compromiso mínimo del mes
+  ([`contratos.visibilidad`](../apps/ppa/services/contratos.py)). Viaja **solo en
+  el detalle y en el resumen global**, nunca en el listado: son dos consultas por
+  contrato, y en una lista de 500 serían mil.
+
+---
+
+## 2 · Los dos caminos de creación
+
+### Camino A — `POST /ppa` (el que se usa)
+
+`PPAContratoWizard.vue` → `POST /api/v1/ppa` →
+[`api/v1/ppa/views.py:97`](../api/v1/ppa/views.py#L97)
+
+En una transacción: crea la fila, valida `fecha_fin` contra los registros GESCON
+de sus plantas (422 si algún registro termina después), fija los proyectos,
+sincroniza nombre y NIT desde el cliente, y guarda el enlace de Drive como
+documento comercial. **No crea tarifas ni compromisos**: el wizard los manda
+después, con `PUT /ppa/{id}/tarifas` y `PUT /ppa/{id}/compromisos`.
+
+Son tres peticiones seguidas sin transacción común. Si la segunda falla, queda un
+contrato sin tarifas y el usuario no tiene cómo saberlo salvo mirando el detalle.
+
+### Camino B — `POST /comercial/ofertas/{id}/firmar` (el que no se usa)
+
+`FirmarOfertaDialog.vue` → [`escritura.firmar()`](../apps/comercial/services/escritura.py#L358)
+
+Crea el PPA desde la oferta aceptada, vincula **todas** las plantas de la oferta,
+expande la tabla de precios anuales a filas mensuales de `ppa_tarifas` recortadas
+al período de suministro, y mueve la oferta a `firmado` con su historial.
+
+**0 de 165 ofertas tienen `ppa_contrato_id`.** El camino está construido y
+probado, pero ningún PPA de producción nació por ahí.
+
+### Lo que hace uno y el otro no
+
+| | `POST /ppa` | `firmar()` |
+|---|---|---|
+| Valida `fecha_fin` contra GESCON | ✅ | ❌ |
+| `sincronizar_partes` (nombre/NIT desde el cliente) | ✅ | ❌ (copia el vendedor a mano) |
+| Escribe `comprador_id` | ✅ (intenta — ver hallazgo 1) | ❌ nunca |
+| Escribe `responsable_id` | ✅ (intenta — ver hallazgo 1) | ❌ nunca |
+| Elige `tipo_contrato` | ✅ del payload | ❌ fijo en `"compra"` |
+| Crea `ppa_tarifas` | ❌ (petición aparte) | ✅ en la misma transacción |
+| Crea `ppa_compromisos_energia` | ❌ (petición aparte) | ❌ nunca |
+| Enlaza la oferta | ❌ | ✅ |
+| Todo en una transacción | ✅ el contrato; no las series | ✅ completo |
+
+El punto 5 de esa tabla es el que `DOMINIO_COMERCIAL.md` marca como *"el punto más
+delicado de toda la etapa"*: cuando se introduzca el PPA de venta en el CRM,
+`firmar()` grabaría al cliente como vendedor **al revés**, y el error llega hasta
+la facturación sin fallar de forma visible.
+
+---
+
+### Y dos cosas que *parecen* un tercer camino, y no lo son
+
+La UI dice «contrato» en cuatro lugares y son cuatro objetos distintos. Conviene
+tenerlo claro antes de tocar nada:
+
+| Pantalla | Qué crea | Dónde queda |
+|---|---|---|
+| Servicios → **PPA nuevo** | el contrato de energía | `ppa_contratos` |
+| MEM → GESCON → **Registrar** | el registro ante XM | `asic_solicitudes` |
+| Finanzas → **Crear contrato de energía** | un contrato del **servicio externo** de Liquidaciones | `/liquidaciones-api/contratos-energia`, otra base |
+| Cumplimiento → **PPA nuevo** | **nada** | memoria del navegador |
+
+El de Cumplimiento (`CumplimientoV2View.vue`, junto a *"arrastra las plantas
+entre contratos para simular"*) construye un objeto en memoria con id de texto
+`__ficticio_N` y bandera `_ficticio`. No hay `POST`. Se pierde al recargar. Pide
+solo nombre, mínimo y máximo MWh porque es lo único que necesita el cálculo de
+cobertura. Las únicas escrituras reales de esa pantalla son
+`POST /ppa/responsables` y `POST /ppa/responsables/asignar`.
+
+Vale un cambio de una palabra en la etiqueta —«PPA simulado»— para que nadie más
+crea que ahí se crea un contrato.
+
+## 3 · Qué consume el front y dónde no cuadra
+
+`app/features/contratos/services/ppa.ts` declara 18 rutas. Estado de cada una:
+
+| Ruta del front | Backend | Estado |
+|---|---|---|
+| `GET /ppa`, `GET /ppa/{id}`, `DELETE /ppa/{id}` | sí | ✅ |
+| `POST /ppa`, `PATCH /ppa/{id}` | sí | ⚠️ **pierde 3 campos** (abajo) |
+| `PUT /ppa/{id}/tarifas`, `PUT /ppa/{id}/compromisos` | sí | ✅ |
+| `POST /ppa/{id}/proyectos` | **no existe** | 🔴 **404** |
+| `GET|POST /ppa/responsables`, `PATCH|DELETE /ppa/responsables/{id}`, `POST /ppa/responsables/asignar` | sí | ✅ |
+| `GET /cumplimiento/ppa/{id}/plantas-inscritas-por-mes` | sí | ✅ |
+| Las 7 de `/asic` | sí | ✅ |
+
+### Hallazgo 1, con la evidencia
+
+El serializer de lectura devuelve `responsable_id`, `comprador_id`, `vendedor_id`.
+El de **escritura** declara los campos como FK de Django, así que las claves que
+acepta son `responsable`, `comprador`, `vendedor`. DRF descarta en silencio lo que
+no reconoce. Ejecutado contra el serializer real:
+
+```
+payload del front:  {..., "responsable_id": 1, "comprador_id": 5, "vendedor_id": 7, ...}
+valido: True
+DESCARTADO: ['responsable_id', 'comprador_id', 'vendedor_id']
+```
+
+Devuelve **201**. El contrato se crea sin responsable, sin comprador y sin
+vendedor; y como `sincronizar_partes()` solo actúa cuando hay un `*_id`, tampoco
+copia nombre ni NIT. El usuario ve el contrato creado y no ve el hueco.
+
+Que es una regresión del port está en el código apagado: `app/schemas/ppa.py:72`
+(`PPAContratoCreate`) declaraba `comprador_id`, `vendedor_id` y `responsable_id`.
+El front se escribió contra ese contrato y nunca se cambió. La corrección natural
+es del lado del backend: aceptar las tres claves `*_id`, que es lo que la API
+publicaba antes y lo que la lectura sigue devolviendo.
+
+Efecto colateral del mismo desajuste: la edición de partes del detalle
+(`guardarPartes`) manda solo nombre y NIT. En un contrato **con** `comprador_id`,
+`sincronizar_partes()` corre después de guardar y **pisa** lo que el usuario
+acaba de escribir con lo que dice la ficha del cliente. En uno sin FK —los que
+crea el wizard hoy— la edición sobrevive. Mismo botón, dos comportamientos.
+
+---
+
+## 4 · Estado de los datos en producción
+
+**35 contratos** (34 vivos, 1 borrado lógico). Vigencia: 24 vigentes, 9 vencidos.
+Rango de fechas: 2023-11-23 → 2041-12-31.
+
+### Cuándo se cargaron
+
+| Fecha | Contratos |
+|---|---|
+| 2026-05-02 … 2026-05-22 (6 días) | 34 |
+| 2026-09-17 | 1 |
+
+La carga es de mayo, casi toda en tres días. El contrato **id 36**, creado el
+2026-09-17 a las 10:40 de Bogotá, tiene **todos los campos en null salvo
+`tipo_contrato='compra'`**: sin código, sin nombre, sin fechas, sin partes. Vale
+la pena confirmar si es una prueba y borrarlo, o si es un intento de creación que
+se quedó a medias.
+
+### Qué tan llenos están los 34 vivos
+
+| Campo | Con dato | Observación |
+|---|---|---|
+| `responsable_id` | 33 | 26 `Unergy`, 7 `Externo`, 1 sin responsable |
+| `vendedor_id` | 24 | |
+| `comprador_id` | **7** | El vínculo con el cliente comprador casi no existe |
+| `comprador_nombre` | 33 | El texto sí está; la FK no |
+| `vendedor_nombre` | 29 | |
+| `tarifa_base` | 11 | Los otros 23 indexan por `ppa_tarifas` |
+| `codigo_sic` | 10 | |
+| `es_comunidad_energetica` | 0 | Nadie ha marcado uno |
+| fechas completas | 33 | Falta el id 36 |
+
+`tipo_contrato`: **21 venta, 13 compra** — ninguno nulo. Ojo con la asimetría que
+esto revela: en los 13 de compra, 12 tienen "Unergy" en `comprador_nombre` pero
+solo 1 tiene `comprador_id`; en los 21 de venta, 9 tienen "Unergy" en
+`vendedor_nombre`. La identidad de Unergy como parte está escrita como texto, no
+como relación.
+
+### Las series y las plantas
+
+| | Contratos vivos que lo tienen | Que **no** lo tienen |
+|---|---|---|
+| ≥1 planta vinculada | 23 | **11** |
+| ≥1 fila en `ppa_tarifas` | 21 | **13** |
+| ≥1 fila en `ppa_compromisos_energia` | 20 | **14** |
+
+Los 11 sin planta son casi todos de la familia Terpel/NEU (ids 4–12) más dos de
+compra (26, 32) y el id 36. Un PPA sin planta **no lo puede medir Cumplimiento**:
+no hay generación contra qué comparar. El código de `firmar()` ya trata esto como
+un caso legítimo pero visible (devuelve `plantas_del_contrato` para que la UI
+avise); por `POST /ppa` no hay ningún aviso equivalente.
+
+### Coherencia de las series con el período del contrato
+
+- **294 filas de `ppa_tarifas` caen fuera** del rango `fecha_inicio`–`fecha_fin`
+  de su contrato. No rompen nada —la facturación busca el mes que necesita— pero
+  son precio declarado para meses en los que el contrato no está vigente.
+- **15 meses del período no tienen tarifa**, en contratos que sí tienen serie
+  cargada. Esos meses no se pueden facturar por tarifa indexada.
+
+Vale la pena decidir si `PUT /ppa/{id}/tarifas` debe recortar al período, como ya
+hace `firmar()` con `tarifas_mensuales()`.
+
+### El vínculo con GESCON: sano. La copia de sus datos: no
+
+**El enlace funciona.** De 34 contratos vivos, **19 tienen registros GESCON por
+FK**, y son exactamente los mismos 19 que coinciden por texto
+(`contrato_interno = numero_codigo_contrato`): ningún contrato depende solo del
+emparejamiento por nombre.
+
+De los 220 registros ASIC, 120 tienen `contrato_ppa_id`. De los 100 que no:
+**ninguno corresponde a un PPA existente** —su `contrato_interno` no coincide con
+ningún contrato— y 70 son compras **UNGC**, que `piscinas.py` documenta como
+GESCON puro, fuera del módulo PPA. Están bien sin enlace.
+
+Lo que sí sobra es la **copia**: `ppa_contratos` carga seis columnas con
+información que pertenece a `asic_solicitudes`.
+
+| Columna | Contratos vivos que la tienen (de 34) |
+|---|---|
+| `gescon_codigo` | 4 |
+| `gescon_fecha_inicio` · `gescon_fecha_fin` | 2 |
+| `gescon_precio` · `gescon_cantidades_kwh` | **0** |
+| `codigo_sic` | 10 |
+
+**Ninguna lógica del backend las lee.** Ni Cumplimiento, ni Facturación, ni las
+piscinas: todas van a `asic_solicitudes`. Lo único que las toca es la sección
+GESCON del detalle del front, que las muestra y deja editarlas a mano.
+
+Y ya divergieron: el contrato **19** declara `codigo_sic = 88749` cuando su
+registro ASIC real es **87553** — y 88749 es el código del contrato **15**.
+
+El problema de fondo no es la sincronización, es la cardinalidad: **un PPA tiene
+muchos registros GESCON** (el contrato 2 tiene 32, el 4 tiene 24, el 1 tiene 21).
+Una columna escalar no puede representar eso. La copia no cabe, no solo está
+desactualizada.
+
+`cumplimiento_mensual` tiene **0 filas**: el cierre mensual nunca se ha corrido.
+Por eso la primera regla de `razones_para_no_borrar()` hoy nunca se activa, y
+cualquier PPA con registros GESCON se protege solo por la segunda.
+
+---
+
+## 5 · El ciclo de vida hoy, de punta a punta
+
+```
+1. NACIMIENTO
+   Wizard PPA → POST /ppa                    ← los 35 de producción
+   (alternativa construida y sin usar: firmar una oferta del CRM)
+
+2. CARGA DE CONDICIONES        dos peticiones más, fuera de la transacción
+   PUT /ppa/{id}/tarifas       precio por (año, mes)
+   PUT /ppa/{id}/compromisos   mínimo y máximo de energía por (año, mes)
+
+3. REGISTRO ANTE EL MERCADO    POST /asic
+   El registro GESCON es lo que conecta el contrato con el despacho real de XM.
+   Regla cruzada: la fecha_fin del PPA no puede ser anterior a la de sus
+   registros, y al revés.
+
+4. OPERACIÓN MENSUAL
+   Cumplimiento    generación de las plantas  vs  ppa_compromisos_energia
+   Facturación     kWh del despacho × (tarifa_base × IPP_mes / IPP_base)
+                   el despacho llega al PPA a través del registro ASIC, no de
+                   la planta: AsicSolicitud.contrato_ppa_id
+   Clasificación   clasificacion_energia_mensual
+
+5. VIGILANCIA
+   Tarea Celery ppa.alertas_vencimiento, diaria a las 8:15 (Bogotá).
+   Crea una alerta por cada umbral cruzado: 90, 60, 30 días.
+   Idempotente por el único (ppa_id, days_to_expiration).
+
+6. FIN
+   La fecha_fin pasa. El contrato queda "vencido" (derivado, no hay columna).
+   comercial.cerrar_contratos_vencidos archiva la oferta asociada — hoy no
+   archiva ninguna, porque ninguna oferta está enlazada.
+   DELETE /ppa/{id} es borrado LÓGICO, y da 409 si cuelgan liquidaciones de
+   cumplimiento o registros GESCON.
+```
+
+---
+
+## 6 · Qué arreglar, en orden
+
+1. **Aceptar `comprador_id`, `vendedor_id` y `responsable_id` en
+   `ContratoEscrituraSerializer`** — con `source=`, o declarando los tres como
+   `PrimaryKeyRelatedField`. Es el arreglo de menor riesgo y el de mayor efecto:
+   restituye el contrato que la API ya publicaba. Con una prueba de endpoint que
+   lo fije.
+2. **Backfill de las tres columnas** en los contratos creados o editados desde el
+   4-sep-2026 (cuando entró Django). Management command, corrido una vez.
+3. **Decidir qué pasa con `POST /ppa/{id}/proyectos`**: construirlo, o quitar el
+   botón del front. Hoy el usuario cree que vinculó una planta y no vinculó nada.
+4. **Unificar las reglas de los dos caminos.** El camino B debería llamar a
+   `contratos_service.validar_fecha_fin_vs_asic` y `sincronizar_partes`, igual que
+   el A. Si se va a introducir el PPA de venta en el CRM, esto es requisito
+   previo, no mejora.
+5. **Pruebas de escritura de `/ppa`.** No hay ninguna; `test_paridad_urls.py`
+   compara rutas, no cuerpos — y esta regresión fue de cuerpo.
+6. **Higiene de datos**: el contrato 36 vacío, los 11 sin planta, los 14 sin
+   compromisos, las 294 tarifas fuera de período. Cada uno es una decisión de
+   negocio, no un bug: hay que preguntarle a quien los cargó.
+7. **Retirar la copia de GESCON.** El detalle deja de mostrar las seis columnas
+   copiadas y muestra los registros ASIC reales del contrato, derivados de la
+   relación que ya existe; se siguen editando donde se editan hoy, en GESCON.
+   Sin nadie leyéndolas, las columnas salen con una migración. Es el cambio que
+   más «una sola fuente de verdad» compra por lo poco que cuesta: hoy nada del
+   backend depende de ellas.
+
+---
+
+## Cómo reproducir las cifras
+
+Las consultas están en los scripts del diagnóstico; todas son `SELECT`. Para
+volver a correrlas contra producción:
+
+```bash
+uv run python manage.py shell -c "exec(open('ruta/al/script.py', encoding='utf-8').read())"
+```
+
+Ojo con el `encoding='utf-8'`: las columnas `año` de `ppa_tarifas` y
+`ppa_compromisos_energia` llevan eñe, y en Windows `open()` sin encoding las
+rompe.
