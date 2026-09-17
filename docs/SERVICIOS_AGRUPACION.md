@@ -2,12 +2,23 @@
 
 Ruta de implementación y el razonamiento detrás. Creado el 2026-09-16.
 
-**Estado: bloque A implementado hasta A3** (ver §9). Lo demás está sin escribir,
-y los bloques B en adelante están **bloqueados**: necesitan la base de datos, y
-el acceso desde local está caído por la allowlist de IP (§8).
+**Estado al 2026-09-17: el bloque A está cerrado y medido** (ver §9). Lo que
+sigue --unificar las definiciones divergentes y quitar las banderas `srv_*`--
+espera un trabajo de DATOS, no de código: las 74 plantas donde bandera y
+contrato no coinciden (§4-ter).
 
-Nada de lo hecho está commiteado ni desplegado, y **no se ha escrito un solo
-dato de producción**.
+Todo está commiteado en la rama `servicios-agrupacion` de los dos repos, **sin
+desplegar**. Lleva dos migraciones que se aplican solas en el deploy: la `0006`
+convierte los 148 contratos de `vigente` a `firmado`, y la `0007` borra
+`pagos_servicio`. Nada se ha escrito a mano en producción.
+
+**Dos cosas se construyeron y se quitaron antes de desplegarlas**, por el mismo
+criterio que este documento defiende en §2: `GET /api/v1/servicios` y los
+módulos `unificado.py` / `consulta.py` que lo alimentaban. Funcionaban y tenían
+pruebas, pero no les quedó ningún consumidor. Están en el historial de git
+(commit *"Servicios: los tres grupos en una sola consulta"*) para el día que se
+migre `ServiciosUnificadoView.vue`. Lo que sí quedó publicado es
+`GET /api/v1/servicios/catalogo`, que el front consume.
 
 ## 1. Qué se quiere
 
@@ -280,12 +291,17 @@ cuatro columnas, y es el único paso irreversible.
 `python manage.py revisar_servicios_banderas` (solo lee; `--csv` saca el detalle
 planta por planta). **190 plantas vivas.**
 
-| Bandera | Con bandera | Con contrato | **Bandera SIN contrato** | Contrato sin bandera |
+| Bandera | Con bandera | Con contrato vivo | **Bandera SIN contrato** | Contrato sin bandera |
 |---|---|---|---|---|
 | `srv_operacion` | 70 | 35 | **39** | 4 |
-| `srv_representacion` | 57 | 63 | **3** | 9 |
-| `srv_cgm` | 58 | 63 | **7** | 12 |
-| `srv_ppa` | 21 | 39 | **5** | 23 |
+| `srv_representacion` | 57 | 53 | **13** | 9 |
+| `srv_cgm` | 58 | 52 | **15** | 9 |
+| `srv_ppa` | 21 | 33 | **7** | 19 |
+
+**"Con contrato vivo", no "con contrato"**: un contrato terminado o vencido no
+respalda una bandera. Exigir vigencia subió el total por corregir de 54 a **74
+plantas** -- representación de 3 a 13 y CGM de 7 a 15 eran contratos vencidos
+que contaban como respaldo. Ver §4-quater.
 
 **La columna que manda es "bandera SIN contrato".** Son las plantas que hoy
 tienen el servicio marcado y ningún contrato que lo respalde: si se borra la
@@ -324,7 +340,69 @@ del comando (`--csv`) es la hoja de revisión.
 
 ### Lo que falta definir antes de la Fase 1
 
-## 4-quater. Criterio de éxito: qué duplicación tiene que desaparecer
+## 4-quater. El estado del contrato: la mitad que faltaba
+
+Encontrado el 2026-09-17, después de escribir el informe de banderas: **nada de
+esto miraba si el contrato seguía vigente.** Un contrato terminado en 2024
+contaba igual que uno firmado la semana pasada.
+
+### Tres lógicas de vencimiento que no se hablaban
+
+| Dónde | Qué miraba | Para qué servía |
+|---|---|---|
+| `semaforo_contrato()` | la **fecha** | solo pintar el color en la vista |
+| `ESTADOS_CONTRATO_VIVO` | el **estado** | informe FMO de O&M |
+| `ESTADOS_QUE_AVISAN` | el **estado** | alerta de aniversario |
+
+Las dos últimas eran **la misma tupla `("vigente", "en_renovacion")` con dos
+nombres**, en dos archivos que no se conocían. Y ninguna miraba la fecha.
+
+### Por qué mirar solo el estado no alcanza
+
+`contratos_servicio.estado` lo pone una persona en el wizard y **nadie lo
+actualiza cuando pasa el tiempo**. Medido: 148 `vigente`, 12 `terminado` — y de
+esos 148, **8 tenían la `fecha_fin` ya pasada**, uno desde junio de 2025.
+
+Eso causaba un bug real. El comentario de la alerta decía *"un contrato
+terminado o vencido no indexa nada, así que avisar de su aniversario es ruido"*,
+pero filtrar por `estado` no lo lograba: esos 8 llevaban meses recibiendo la
+alerta que el autor quiso evitar.
+
+### La solución: calculada, nunca guardada
+
+`apps/contratos/services/vigencia.py` une las dos mitades y expone **dos caras**,
+porque hacen falta las dos:
+
+- `de_contrato()` / `esta_vivo()` — para leer
+- `filtro_vivos()` — como condición de ORM, para consultar
+
+Sin la segunda, cada módulo vuelve a escribir su propio criterio: es justo así
+como aparecieron las tres definiciones de arriba.
+
+**No se guarda a propósito.** Un campo almacenado habría que recalcularlo cuando
+pasa el tiempo, y un campo que nadie recalcula es el problema que esto resuelve
+—el mismo de las banderas `srv_*`—.
+
+Efecto medido: informe FMO 31 → 31 (sin cambio); alerta de aniversario 57 → 49
+(salen los 8 vencidos).
+
+### Y `estado` se quedó solo con lo que alguien decide
+
+```
+vigente | vencido | terminado | en_renovacion
+    ->  firmado | en_renovacion | terminado
+```
+
+`vigente` y `vencido` no eran decisiones: eran consecuencia de la fecha. Su
+mitad la calcula la vigencia. Migración `0006`, que convierte los 148 registros
+dentro del `ALTER COLUMN ... USING` — una sola sentencia DDL, atómica y con
+reversa.
+
+`en_renovacion` se conservó: cuenta como vivo, que era la intención escrita.
+Nunca se ha usado —0 filas y 0 menciones en los 147.102 registros de
+`audit_log`— pero el wizard lo ofrece y tres vistas lo pintan.
+
+## 4-quinquies. Criterio de éxito: qué duplicación tiene que desaparecer
 
 **Requisito de Sara (2026-09-16): este enfoque no puede agregar lógica repetida.
 Al contrario, tiene que consolidar la que ya existe.**
@@ -461,7 +539,9 @@ mapa grupo → subservicios y el orden de presentación. Hoy ese conocimiento es
 regado en `if`s (`apps/clientes/services/vistas.py:126-133`) y en filtros
 literales por todo `apps/`. Archivo nuevo, no rompe nada.
 
-**Paso 2 — Una forma común de servicio.** Un servicio expuesto es:
+**Paso 2 — Una forma común de servicio** *(se construyó y se retiró: era lo que
+alimentaba el endpoint agrupado, y se fue con él. Queda escrito porque el diseño
+sirve si algún día se retoma.)* Un servicio expuesto es:
 
 ```
 grupo, subservicios[], contrato_id, fuente ("servicio" | "ppa"),
@@ -493,7 +573,7 @@ fuente = "ppa"        → partes = { comprador, vendedor }
 fuente = "servicio"   → partes = { contratante, prestador }
 ```
 
-**Esto no contradice la regla de §4-quater.** Lo que no puede repetirse es la
+**Esto no contradice la regla de §4-quinquies.** Lo que no puede repetirse es la
 *lógica* — la misma pregunta respondida de dos formas distintas, como las 4
 definiciones de "planta en operación". Dos campos que se llaman distinto porque
 **significan** cosas distintas no son duplicación: son dos datos.
@@ -504,10 +584,15 @@ Va a la forma común **solo lo que sirve para agrupar, contar o filtrar de forma
 transversal**: grupo, subservicios, plantas, vigencia, estado, semáforo, enlace.
 Todo lo específico de un tipo de contrato se queda donde está, con su nombre.
 
-**Paso 3 — El endpoint agrupado.** `GET /api/v1/servicios` devolviendo los tres
-grupos con sus subservicios, conteos y semáforo. Los endpoints actuales
-(`/contratos-servicio`, los de PPA) **siguen igual** — esto se agrega al lado,
-no los reemplaza.
+**Paso 3 — El catálogo.** `GET /api/v1/servicios/catalogo` devuelve los tres
+grupos con sus subservicios, para que el front no mantenga su propia lista.
+
+Se construyó también un `GET /api/v1/servicios` que devolvía los grupos armados
+con sus conteos y su semáforo, **y se retiró antes de desplegarlo**: el front
+sigue pidiendo `/contratos-servicio` y los de PPA, y el panel de clientes agrupa
+en su propio servicio, así que no le quedó consumidor. Publicar una ruta que
+nadie llama es el error que §2 documenta con `servicio_representacion`. Queda
+una prueba que falla si alguien la vuelve a publicar sin conectarla.
 
 ### Frontend
 
@@ -578,7 +663,7 @@ costo (migración + reescribir el wizard) no se paga con 4 filas.
 
 ### Lo que sigue sin medir
 
-Las **definiciones divergentes de §4-quater** (`AND` vs `OR` en "planta en
+Las **definiciones divergentes de §4-quinquies** (`AND` vs `OR` en "planta en
 operación", bandera con o sin contrato en "planta representada") y la
 **discrepancia banderas `srv_*` vs. contratos**. Son las que el bloque C y el D
 necesitan, y hay que medirlas antes de unificar nada.
@@ -593,36 +678,50 @@ concretas**; no se implementa nada sin ese acuerdo.
 | # | Qué | Riesgo |
 |---|---|---|
 | A1 | ✅ Catálogo de grupos, subservicios y tarifa por subservicio | Ninguno — archivo nuevo |
-| A2 | ✅ Forma común de lectura: servicio unificado, PPA incluido, `plantas` como lista | Bajo — no toca endpoints actuales |
-| A3 | ✅ Endpoints `GET /api/v1/servicios` y `/servicios/catalogo` | Bajo — se agregan al lado |
-| A4 | Front: filtrar por lista de subservicios en vez de igualdad | Bajo — `filtrosServicios.ts` tiene pruebas |
+| A2 | ❌ Forma común de lectura — se construyó y se retiró: sin consumidor | — |
+| A3 | ✅ `GET /api/v1/servicios/catalogo` (el listado agrupado se retiró) | Bajo — se agrega al lado |
+| A4 | ✅ Front: filtrar por pertenencia a la lista de subservicios | Bajo — `filtrosServicios.ts` tiene pruebas |
+| A5 | ✅ El panel de clientes también muestra el CGM | Bajo |
 
-**Hecho al 2026-09-16** (sin commitear, sin desplegar):
+**Lo que quedó en el código** (rama `servicios-agrupacion`, sin desplegar):
 
-- `apps/contratos/services/grupos.py` — el catálogo (A1)
-- `apps/contratos/services/unificado.py` — forma común y agrupación (A2)
-- `apps/contratos/services/consulta.py` — consulta con filtro opcional (A3)
-- `api/v1/servicios/` — los dos endpoints (A3)
-- Pruebas: `tests/test_contratos_grupos_servicio.py` (22),
-  `tests/test_contratos_unificado.py` (20), `tests/test_servicios_agrupados.py` (14)
+- `apps/contratos/services/grupos.py` — el catálogo: grupos, subservicios y qué
+  columna guarda la tarifa de cada uno
+- `apps/contratos/services/vigencia.py` — la definición única de "contrato vivo"
+- `apps/contratos/management/commands/revisar_servicios_banderas.py` — el informe
+- `api/v1/servicios/` — solo el catálogo
+- Pruebas: `test_contratos_grupos_servicio.py` (22),
+  `test_contratos_vigencia.py` (21), `test_servicios_catalogo.py` (5)
 
-Filtros literales retirados: la cadena de `if` servicio→tarifa de
-`apps/clientes/services/vistas.py`, que ahora consume el catálogo.
+**Lo que se retiró antes de desplegar**, por no tener consumidor:
+`services/unificado.py`, `services/consulta.py` y `GET /api/v1/servicios`.
+
+**Duplicación retirada** (§4-quinquies):
+
+- la cadena de `if` servicio→tarifa de `apps/clientes/services/vistas.py`
+- `ESTADOS_CONTRATO_VIVO` y `ESTADOS_QUE_AVISAN` — la misma tupla con dos
+  nombres, ninguna de las dos miraba `fecha_fin`
+- `estado="vigente"` escrito a mano en contabilidad y liquidaciones, ahora
+  `vigencia.filtro_vivos()`
+
+**Y se eliminó `pagos_servicio`**: 0 filas desde mayo, 0 cambios en `audit_log`,
+ninguna prueba, con dos endpoints y ~340 líneas de UI construidas alrededor.
+Confirmado con operaciones. Migración `0007`.
 
 Al cerrar el bloque, la vista Servicios funciona con los tres grupos y el caso
 representación+CGM deja de ser invisible. **Nada de producción cambia de
 comportamiento.**
 
-### Bloque B — Medición (necesita la base)
+### Bloque B — Medición (hecho el 2026-09-17)
 
 | # | Qué | Riesgo |
 |---|---|---|
-| B1 | Informe de discrepancias, solo lectura | Ninguno |
+| B1 | ✅ `manage.py revisar_servicios_banderas` — informe, solo lectura | Ninguno |
 
 Un solo informe que responde las cuatro preguntas abiertas: si representación+CGM
 está en una fila o dos, cuántos contratos de internet tienen datos, dónde
 bandera y contrato no coinciden, y qué plantas cambiarían con cada una de las
-definiciones divergentes de §4-quater. **Sin esto no se abre ningún bloque
+definiciones divergentes de §4-quinquies. **Sin esto no se abre ningún bloque
 siguiente.**
 
 ### Bloque C — Unificar las definiciones divergentes (cambia comportamiento)
@@ -631,7 +730,12 @@ siguiente.**
 |---|---|---|
 | C1 | Una sola definición de "planta en operación" (hoy 4, con `AND` vs `OR`) | Medio — con lista revisada |
 | C2 | Una sola definición de "planta representada" (hoy 4, dos criterios) | Medio — con lista revisada |
-| C3 | Consolidar filas representación+CGM, **si** B1 muestra que están separadas | Medio |
+| C3 | ✅ Cerrado sin trabajo: B1 mostró que están en UNA fila, no separadas | — |
+| C4 | ✅ Una sola definición de "contrato vivo" (`services/vigencia.py`) | Hecho |
+
+C1 y C2 siguen pendientes: 41 plantas difieren entre las dos definiciones de
+"en operación" y 10 entre las de "representada". Las listas salen de
+`manage.py revisar_servicios_banderas`.
 
 ### Bloque D — Fuente única de verdad (§4-ter)
 
@@ -651,7 +755,7 @@ siguiente.**
 
 ### Regla transversal
 
-Al cerrar **cada** paso se cuenta la línea base de §4-quater: los sitios con
+Al cerrar **cada** paso se cuenta la línea base de §4-quinquies: los sitios con
 filtros literales sobre `servicio_aplica`, `srv_*` y `estado="en_operacion"`
 tienen que ser **menos** que al empezar. Un paso que agrega un módulo sin
 retirar filtros está incompleto.
