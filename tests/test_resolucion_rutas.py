@@ -74,7 +74,6 @@ CASOS = [
     ("/api/v1/contratos-servicio/7", "partial_update"),
     ("/api/v1/contratos-servicio/7/facturas", "facturas"),
     ("/api/v1/contratos-servicio/7/facturas/3", "factura"),
-    ("/api/v1/contratos-servicio/7/pagos/3", "pago"),
     # `fronteras/{pk}` contra sus acciones de lista literales.
     ("/api/v1/fronteras/debug-quoia-border", "debug_quoia_border"),
     ("/api/v1/fronteras/quoia/pendientes", "quoia_pendientes"),

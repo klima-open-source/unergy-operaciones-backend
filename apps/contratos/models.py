@@ -72,21 +72,6 @@ class ContratoServicio(Timer):
         db_table = "contratos_servicio"
 
 
-class PagoServicio(Timer):
-    id = models.BigAutoField(primary_key=True)
-    contrato = models.ForeignKey("ContratoServicio", on_delete=models.CASCADE, db_column="contrato_id", related_name="pagos_servicio_por_contrato_id")
-    mes = models.IntegerField()
-    año = models.IntegerField()
-    valor_pagado = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
-    estado = models.CharField(max_length=9, choices=[("pendiente", "pendiente"), ("revisado", "revisado"), ("aprobado", "aprobado")], default="pendiente")
-    enlace_factura = models.CharField(max_length=1000, null=True, blank=True)
-    deleted_at = models.DateTimeField(null=True, blank=True)
-
-    class Meta:
-        db_table = "pagos_servicio"
-        unique_together = [("año", "contrato", "mes")]
-
-
 class Poliza(Timer):
     id = models.BigAutoField(primary_key=True)
     proyecto = models.ForeignKey("proyectos.Proyecto", on_delete=models.DO_NOTHING, db_column="proyecto_id", related_name="polizas")

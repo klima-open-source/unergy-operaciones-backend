@@ -305,7 +305,20 @@ def test_las_rutas_portadas_coinciden_con_las_de_fastapi():
         + "\n  ".join(sin_rutas)
     )
 
-    faltan = fastapi - django_
+    # Rutas de FastAPI que Django NO porta a proposito. No es un port pendiente:
+    # es una funcionalidad retirada, y la paridad no debe exigir que vuelva.
+    RETIRADAS = {
+        # `pagos_servicio` se elimino el 2026-09-17: 0 filas desde que nacio en
+        # mayo, 0 cambios en 147.102 registros de `audit_log`, ninguna tabla que
+        # la referencie, ninguna prueba. Confirmado con operaciones. Ver la
+        # migracion `0007_eliminar_pagos_servicio`.
+        ("/api/v1/contratos-servicio/{}/pagos", "GET"),
+        ("/api/v1/contratos-servicio/{}/pagos", "POST"),
+        ("/api/v1/contratos-servicio/{}/pagos/{}", "PATCH"),
+        ("/api/v1/contratos-servicio/{}/pagos/{}", "DELETE"),
+    }
+
+    faltan = fastapi - django_ - RETIRADAS
     sobran = django_ - fastapi - RUTAS_NUEVAS
 
     assert not faltan, (

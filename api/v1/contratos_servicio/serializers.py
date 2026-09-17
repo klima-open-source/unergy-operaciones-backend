@@ -115,23 +115,6 @@ class FacturaEscrituraSerializer(serializers.ModelSerializer):
         extra_kwargs = {c: {"required": False} for c in fields}
 
 
-class PagoSerializer(serializers.ModelSerializer):
-    contrato_id = serializers.IntegerField(read_only=True)
-
-    class Meta:
-        model = ct_models.PagoServicio
-        fields = [
-            "id", "contrato_id", "año", "mes", "valor_pagado", "estado",
-            "enlace_factura", "created_at", "updated_at",
-        ]
-
-
-class PagoEscrituraSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ct_models.PagoServicio
-        fields = ["año", "mes", "valor_pagado", "estado", "enlace_factura"]
-        extra_kwargs = {c: {"required": False} for c in fields}
-
 
 class FilaIndexacionSerializer(serializers.Serializer):
     anio = serializers.IntegerField()

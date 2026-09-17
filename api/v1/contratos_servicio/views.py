@@ -36,8 +36,6 @@ class ContratoServicioViewSet(
     POST /api/v1/contratos-servicio/fusionar-representacion
     GET|POST /api/v1/contratos-servicio/{id}/facturas[?tipo=]
     PATCH|DELETE /api/v1/contratos-servicio/{id}/facturas/{factura_id}
-    GET|POST /api/v1/contratos-servicio/{id}/pagos[?año=&mes=]
-    PATCH|DELETE /api/v1/contratos-servicio/{id}/pagos/{pago_id}
 
     **En el PATCH, `frontera_ids` ausente y `frontera_ids: []` NO son lo mismo**:
     el primero deja las fronteras como estaban, el segundo las desvincula todas.
@@ -215,47 +213,3 @@ class ContratoServicioViewSet(
         )
         entrada.is_valid(raise_exception=True)
         return Response(cs_serializers.FacturaSerializer(entrada.save()).data)
-
-    # ── Pagos ─────────────────────────────────────────────────────────────
-
-    @action(detail=True, methods=["get", "post"], url_path="pagos")
-    @log_endpoint(name="Operaciones | Contratos | Pagos")
-    def pagos(self, request, pk=None):
-        contrato = self._contrato(pk)
-        if request.method == "GET":
-            filas = ct_models.PagoServicio.objects.filter(contrato=contrato)
-            for parametro, campo in (("año", "año"), ("mes", "mes")):
-                valor = request.query_params.get(parametro)
-                if valor:
-                    if not valor.isdigit():
-                        raise ValidationError({parametro: "Debe ser entero."})
-                    filas = filas.filter(**{campo: int(valor)})
-            return Response(cs_serializers.PagoSerializer(
-                filas.order_by("-año", "-mes"), many=True
-            ).data)
-
-        entrada = cs_serializers.PagoEscrituraSerializer(data=request.data)
-        entrada.is_valid(raise_exception=True)
-        pago = entrada.save(contrato=contrato)
-        return Response(cs_serializers.PagoSerializer(pago).data, status=201)
-
-    @action(
-        detail=True, methods=["patch", "delete"],
-        url_path=r"pagos/(?P<pago_id>[0-9]+)",
-    )
-    @log_endpoint(name="Operaciones | Contratos | Pago")
-    def pago(self, request, pk=None, pago_id=None):
-        pago = ct_models.PagoServicio.objects.filter(
-            pk=pago_id, contrato_id=pk
-        ).first()
-        if pago is None:
-            raise NotFound("Pago no encontrado")
-        if request.method == "DELETE":
-            pago.delete()
-            return Response(status=204)
-
-        entrada = cs_serializers.PagoEscrituraSerializer(
-            pago, data=request.data, partial=True
-        )
-        entrada.is_valid(raise_exception=True)
-        return Response(cs_serializers.PagoSerializer(entrada.save()).data)
