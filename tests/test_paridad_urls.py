@@ -126,11 +126,20 @@ RUTAS_RETIRADAS = {
 #   2026-09-11  GET /facturacion/cumplimiento/export. Excel formulado del valor a
 #               indemnizar por incumplimiento (bolsa SIMEM x incumplida). Nuevo,
 #               no existia en FastAPI.
+#   2026-09-17  GET /generacion-solar/medidores. Los proyectos que tienen medidor
+#               en Gaia, que NO son los de `monitoring`: ese lista el universo de
+#               Generacion Solar (minigranjas con servicio de operacion) y este
+#               lista de que proyectos hay lectura electrica, autoconsumos
+#               incluidos. Lo pide el selector del diagrama fasorial, que dibuja
+#               un medidor y no una planta. En FastAPI no existia: alli el
+#               selector se llenaba con la flota y por eso no se podia pedir el
+#               fasorial de un autoconsumo.
 RUTAS_NUEVAS = {
     ("/api/v1/liquidaciones-api/contratos-energia/{}", "PATCH"),
     ("/api/v1/liquidaciones-api/ipp/sincronizar", "POST"),
     ("/api/v1/facturacion/vs-despachos", "GET"),
     ("/api/v1/facturacion/cumplimiento/export", "GET"),
+    ("/api/v1/generacion-solar/medidores", "GET"),
 }
 
 
