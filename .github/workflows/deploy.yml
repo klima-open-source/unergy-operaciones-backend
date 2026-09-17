@@ -38,7 +38,34 @@ jobs:
     # uploads y su historia git — de esa historia sale el diff que decide si
     # hay que migrar.
     runs-on: [self-hosted, prod]
+    # `packages: read` es lo que le permite al GITHUB_TOKEN leer del registro de
+    # contenedores; sin esto el login de abajo no sirve de nada.
+    permissions:
+      contents: read
+      packages: read
     steps:
+      # El Dockerfile trae el binario de uv de `ghcr.io/astral-sh/uv`. La imagen
+      # es publica, asi que el pull anonimo deberia bastar -- y basto durante
+      # meses. El 2026-09-17 empezo a fallar con `403 Forbidden` al pedir el
+      # token, dos veces seguidas, tambien al reintentar el run.
+      #
+      # El pull anonimo es fragil por dos lados: lo tumba un limite de tasa del
+      # registro, y lo tumba una credencial vieja guardada en el runner --si
+      # alguien hizo `docker login ghcr.io` con un token que despues expiro,
+      # Docker la sigue mandando y el registro responde 403 en vez de dejar
+      # pasar como anonimo. Este runner es propio, asi que ese estado se queda.
+      #
+      # Autenticarse con el token que GitHub ya le da a cada corrida arregla los
+      # dos casos: deja de depender del anonimo, y de paso PISA la credencial
+      # vieja del runner, que no se puede borrar sin entrar por SSH.
+      - name: Login en ghcr.io para el pull de uv
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
       # El .env del servidor se REESCRIBE desde el secret ENV_FILE en cada
       # deploy: la configuracion se cambia en GitHub, no entrando por SSH.
       # Consecuencia: editarlo a mano en el servidor no sirve de nada, el
