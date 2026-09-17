@@ -173,11 +173,25 @@ def test_el_catalogo_y_la_agrupacion_dicen_lo_mismo():
 
 # ── Rutas registradas ─────────────────────────────────────────────────────
 
-def test_las_dos_rutas_existen():
+def test_la_ruta_del_catalogo_existe():
     from django.urls import resolve
 
-    assert resolve("/api/v1/servicios").func is not None
     assert resolve("/api/v1/servicios/catalogo").func is not None
+
+
+def test_no_se_publica_un_listado_que_nadie_consume():
+    """`GET /api/v1/servicios` se quitó antes de desplegarlo: sin consumidor.
+
+    `unificado.agrupar()` y `consulta.agrupados()` siguen probados acá arriba --
+    la lógica no se fue, solo dejó de exponerse.
+    """
+    from django.urls import Resolver404, resolve
+
+    try:
+        resolve("/api/v1/servicios")
+    except Resolver404:
+        return
+    raise AssertionError("el listado agrupado volvió a publicarse sin consumidor")
 
 
 # ── Las relaciones que la consulta precarga ───────────────────────────────
