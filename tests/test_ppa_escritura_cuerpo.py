@@ -1,4 +1,4 @@
-"""El CUERPO de `POST`/`PATCH /ppa`, no solo su ruta.
+"""El CUERPO de todas las escrituras de `/ppa`, no solo sus rutas.
 
 `test_paridad_urls.py` compara las tablas de rutas de los dos backends y no mira
 lo que viaja adentro. Entre el port a Django (2026-09-04) y el 2026-09-17,
@@ -9,7 +9,9 @@ ignora las claves que no reconoce. El contrato quedaba sin partes y sin
 responsable, y nadie lo veía porque ninguna prueba mandaba un cuerpo.
 
 Estas pruebas fijan el contrato con el nombre que la LECTURA ya devolvía y que
-`PPAContratoCreate` de FastAPI recibía. Ver `docs/DIAGNOSTICO_PPA.md` §3.
+`PPAContratoCreate` de FastAPI recibía, y de paso cubren el resto de las
+escrituras del recurso —tarifas, compromisos, el borrado y los responsables—,
+que tampoco tenían ninguna. Ver `docs/DIAGNOSTICO_PPA.md` §3.
 
 El aislamiento en SQLite es el mismo de `test_clientes_duplicado_y_nit.py`: se
 crea una base en memoria y se comprueba que no sea la real.
@@ -237,3 +239,303 @@ def test_la_lectura_y_la_escritura_nombran_igual_las_relaciones(datos):
     for campo in ("comprador_id", "vendedor_id", "responsable_id"):
         assert campo in escritura, f"la escritura no acepta {campo}"
         assert campo in lectura, f"la lectura no devuelve {campo}"
+
+
+# ── Tarifas y compromisos: las dos series REEMPLAZAN ─────────────────────────
+#
+# El `PUT` borra y reinserta en vez de hacer upsert por período, para que un mes
+# que el usuario quitó en pantalla también desaparezca de la base. El precio de
+# esa decisión es que un cuerpo incompleto borra lo que no viene, y eso no
+# estaba cubierto por ninguna prueba.
+
+def _poner_tarifas(datos, pk, filas):
+    return _peticion(
+        datos, "put", f"/api/v1/ppa/{pk}/tarifas", filas, "tarifas", pk=str(pk)
+    )
+
+
+def _poner_compromisos(datos, pk, filas):
+    return _peticion(
+        datos, "put", f"/api/v1/ppa/{pk}/compromisos", filas, "compromisos", pk=str(pk)
+    )
+
+
+def test_las_tarifas_se_guardan_y_vuelven_ordenadas(datos):
+    pk = _crear(datos, CUERPO_MINIMO).data["id"]
+
+    respuesta = _poner_tarifas(datos, pk, [
+        {"año": 2026, "mes": 3, "tarifa": 310.5},
+        {"año": 2026, "mes": 1, "tarifa": 300},
+    ])
+
+    assert respuesta.status_code == 200, respuesta.data
+    assert [(f["año"], f["mes"]) for f in respuesta.data] == [(2026, 1), (2026, 3)]
+
+
+def test_un_segundo_put_de_tarifas_reemplaza_todo(datos):
+    """Lo que no viene en el cuerpo se borra. Es a propósito, y por eso se fija."""
+    pk = _crear(datos, CUERPO_MINIMO).data["id"]
+    _poner_tarifas(datos, pk, [
+        {"año": 2026, "mes": 1, "tarifa": 300},
+        {"año": 2026, "mes": 2, "tarifa": 300},
+    ])
+
+    respuesta = _poner_tarifas(datos, pk, [{"año": 2026, "mes": 2, "tarifa": 320}])
+
+    assert [(f["año"], f["mes"]) for f in respuesta.data] == [(2026, 2)]
+
+
+def test_un_put_de_tarifas_vacio_deja_el_contrato_sin_tarifas(datos):
+    """Mandar una lista vacía borra la tabla entera del contrato: el front no
+    debe llamar a esto cuando el usuario simplemente no cargó tarifas."""
+    from apps.ppa.models import PpaTarifa
+
+    pk = _crear(datos, CUERPO_MINIMO).data["id"]
+    _poner_tarifas(datos, pk, [{"año": 2026, "mes": 1, "tarifa": 300}])
+
+    respuesta = _poner_tarifas(datos, pk, [])
+
+    assert respuesta.status_code == 200
+    assert respuesta.data == []
+    assert PpaTarifa.objects.filter(contrato_id=pk).count() == 0
+
+
+def test_un_mes_fuera_de_rango_no_entra(datos):
+    pk = _crear(datos, CUERPO_MINIMO).data["id"]
+
+    respuesta = _poner_tarifas(datos, pk, [{"año": 2026, "mes": 13, "tarifa": 300}])
+
+    assert respuesta.status_code == 400
+
+
+def test_las_tarifas_de_un_contrato_que_no_existe_son_404(datos):
+    respuesta = _poner_tarifas(datos, 10**9, [{"año": 2026, "mes": 1, "tarifa": 300}])
+
+    assert respuesta.status_code == 404
+
+
+def test_los_compromisos_se_guardan_con_su_maximo_y_su_conteo(datos):
+    pk = _crear(datos, CUERPO_MINIMO).data["id"]
+
+    respuesta = _poner_compromisos(datos, pk, [
+        {"año": 2026, "mes": 1, "energia_minima": 100, "energia_maxima": 150,
+         "cantidad_proyectos": 3},
+    ])
+
+    assert respuesta.status_code == 200, respuesta.data
+    assert respuesta.data[0]["cantidad_proyectos"] == 3
+
+
+def test_el_maximo_y_el_conteo_son_opcionales(datos):
+    """El wizard los marca opcionales: un contrato puede tener solo mínimo."""
+    pk = _crear(datos, CUERPO_MINIMO).data["id"]
+
+    respuesta = _poner_compromisos(datos, pk, [
+        {"año": 2026, "mes": 1, "energia_minima": 100},
+    ])
+
+    assert respuesta.status_code == 200, respuesta.data
+    assert respuesta.data[0]["energia_maxima"] is None
+
+
+def test_un_segundo_put_de_compromisos_reemplaza_todo(datos):
+    pk = _crear(datos, CUERPO_MINIMO).data["id"]
+    _poner_compromisos(datos, pk, [
+        {"año": 2026, "mes": 1, "energia_minima": 100},
+        {"año": 2026, "mes": 2, "energia_minima": 100},
+    ])
+
+    respuesta = _poner_compromisos(datos, pk, [
+        {"año": 2026, "mes": 2, "energia_minima": 120},
+    ])
+
+    assert [(f["año"], f["mes"]) for f in respuesta.data] == [(2026, 2)]
+
+
+# ── El borrado es LÓGICO, y se bloquea si algo cuelga ────────────────────────
+
+def _borrar(datos, pk):
+    return _peticion(datos, "delete", f"/api/v1/ppa/{pk}", None, "destroy", pk=str(pk))
+
+
+def test_borrar_no_saca_la_fila_de_la_base(datos):
+    """Marca `deleted_at` en vez de borrar: el contrato deja de listarse pero el
+    rastro queda, y de él cuelgan registros de otros dominios."""
+    from apps.ppa.models import PpaContrato
+
+    pk = _crear(datos, CUERPO_MINIMO).data["id"]
+
+    respuesta = _borrar(datos, pk)
+
+    assert respuesta.status_code == 204
+    assert PpaContrato.objects.get(pk=pk).deleted_at is not None
+    assert not PpaContrato.objects.filter(pk=pk, deleted_at__isnull=True).exists()
+
+
+def test_no_se_borra_un_contrato_con_registros_gescon(datos):
+    """El registro ante XM es lo que conecta el contrato con el despacho real:
+    borrarlo dejaría esos registros apuntando a un contrato invisible."""
+    from apps.mercado_xm.models import AsicSolicitud
+
+    pk = _crear(datos, CUERPO_MINIMO).data["id"]
+    AsicSolicitud.objects.create(contrato_ppa_id=pk, contrato_interno="UNERGY-TEST-001")
+
+    respuesta = _borrar(datos, pk)
+
+    assert respuesta.status_code == 409
+    assert "GESCON" in str(respuesta.data)
+
+
+def test_no_se_borra_un_contrato_con_cumplimiento_cerrado(datos):
+    from apps.mercado_xm.models import CumplimientoMensual
+
+    pk = _crear(datos, CUERPO_MINIMO).data["id"]
+    CumplimientoMensual.objects.create(contrato_ppa_id=pk, anio=2026, mes=1)
+
+    respuesta = _borrar(datos, pk)
+
+    assert respuesta.status_code == 409
+    assert "cumplimiento" in str(respuesta.data).lower()
+
+
+# ── Responsables: el catálogo que decide quién entra a la matriz ─────────────
+
+def _crear_responsable(datos, cuerpo):
+    return _peticion(datos, "post", "/api/v1/ppa/responsables", cuerpo, "responsables")
+
+
+def _editar_responsable(datos, rid, cuerpo):
+    return _peticion(
+        datos, "patch", f"/api/v1/ppa/responsables/{rid}", cuerpo, "responsable",
+        rid=str(rid),
+    )
+
+
+def _borrar_responsable(datos, rid):
+    return _peticion(
+        datos, "delete", f"/api/v1/ppa/responsables/{rid}", None, "responsable",
+        rid=str(rid),
+    )
+
+
+def _asignar(datos, cuerpo):
+    return _peticion(
+        datos, "post", "/api/v1/ppa/responsables/asignar", cuerpo,
+        "asignar_responsable",
+    )
+
+
+def test_crear_responsable(datos):
+    respuesta = _crear_responsable(
+        datos, {"nombre": "  Tercero S.A.S.  ", "incluir_en_cumplimiento": False}
+    )
+
+    assert respuesta.status_code == 201, respuesta.data
+    assert respuesta.data["nombre"] == "Tercero S.A.S."   # se recorta
+    assert respuesta.data["incluir_en_cumplimiento"] is False
+    assert respuesta.data["n_contratos"] == 0
+
+
+def test_un_responsable_con_nombre_repetido_es_409(datos):
+    """Sin esto el catálogo se llena de variantes del mismo tercero y los
+    filtros de la matriz dejan de agrupar."""
+    respuesta = _crear_responsable(datos, {"nombre": "unergy pruebas"})
+
+    assert respuesta.status_code == 409
+
+
+def test_un_nombre_vacio_no_crea_responsable(datos):
+    respuesta = _crear_responsable(datos, {"nombre": "   "})
+
+    assert respuesta.status_code in (400, 422)
+
+
+def test_editar_responsable_cambia_nombre_y_bandera(datos):
+    rid = datos["responsable"].id
+
+    respuesta = _editar_responsable(
+        datos, rid, {"nombre": "Unergy Renombrado", "incluir_en_cumplimiento": False}
+    )
+
+    assert respuesta.status_code == 200, respuesta.data
+    assert respuesta.data["nombre"] == "Unergy Renombrado"
+    assert respuesta.data["incluir_en_cumplimiento"] is False
+
+
+def test_editar_responsable_no_choca_consigo_mismo(datos):
+    """Guardar sin cambiar el nombre no puede dar 409."""
+    rid = datos["responsable"].id
+
+    respuesta = _editar_responsable(datos, rid, {"nombre": "Unergy Pruebas"})
+
+    assert respuesta.status_code == 200, respuesta.data
+
+
+def test_no_se_borra_un_responsable_con_contratos(datos):
+    """Reasignarlos primero es explícito; dejarlos en null los haría reaparecer
+    en la matriz de cumplimiento sin que nadie se entere."""
+    _crear(datos, {**CUERPO_MINIMO, "responsable_id": datos["responsable"].id})
+
+    respuesta = _borrar_responsable(datos, datos["responsable"].id)
+
+    assert respuesta.status_code == 409
+
+
+def test_se_borra_un_responsable_sin_contratos(datos):
+    from apps.ppa.models import PpaResponsable
+
+    rid = _crear_responsable(datos, {"nombre": "Efímero"}).data["id"]
+
+    respuesta = _borrar_responsable(datos, rid)
+
+    assert respuesta.status_code == 204
+    assert not PpaResponsable.objects.filter(pk=rid).exists()
+
+
+def test_asignar_responsable_a_varios_contratos(datos):
+    from apps.ppa.models import PpaContrato
+
+    uno = _crear(datos, CUERPO_MINIMO).data["id"]
+    otro = _crear(datos, {**CUERPO_MINIMO, "numero_codigo_contrato": "T-2"}).data["id"]
+
+    respuesta = _asignar(datos, {
+        "contrato_ids": [uno, otro], "responsable_id": datos["responsable"].id,
+    })
+
+    assert respuesta.status_code == 200, respuesta.data
+    assert respuesta.data["actualizados"] == 2
+    assert PpaContrato.objects.get(pk=uno).responsable_id == datos["responsable"].id
+
+
+def test_asignar_con_null_desasigna(datos):
+    from apps.ppa.models import PpaContrato
+
+    pk = _crear(
+        datos, {**CUERPO_MINIMO, "responsable_id": datos["responsable"].id}
+    ).data["id"]
+
+    respuesta = _asignar(datos, {"contrato_ids": [pk], "responsable_id": None})
+
+    assert respuesta.status_code == 200, respuesta.data
+    assert PpaContrato.objects.get(pk=pk).responsable_id is None
+
+
+def test_asignar_un_responsable_que_no_existe_es_404(datos):
+    pk = _crear(datos, CUERPO_MINIMO).data["id"]
+
+    respuesta = _asignar(datos, {"contrato_ids": [pk], "responsable_id": 10**9})
+
+    assert respuesta.status_code == 404
+
+
+def test_asignar_no_toca_los_contratos_borrados(datos):
+    """`asignar` filtra por los vivos: un contrato archivado no se revive por
+    estar en la lista."""
+    pk = _crear(datos, CUERPO_MINIMO).data["id"]
+    _borrar(datos, pk)
+
+    respuesta = _asignar(datos, {
+        "contrato_ids": [pk], "responsable_id": datos["responsable"].id,
+    })
+
+    assert respuesta.data["actualizados"] == 0

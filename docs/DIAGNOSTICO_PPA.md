@@ -12,15 +12,15 @@ los dos se tocan, se cita.
 
 ## Resumen: los siete hallazgos
 
-| # | Hallazgo | Gravedad |
-|---|---|---|
-| 1 | `POST`/`PATCH /ppa` **descarta en silencio** `comprador_id`, `vendedor_id` y `responsable_id`. El front manda esas tres claves; el backend espera `comprador`, `vendedor`, `responsable`. Es una regresión del port a Django (FastAPI sí las aceptaba). | 🔴 Alta |
-| 2 | `POST /ppa/{id}/proyectos` **no existe** en el backend. El botón "vincular planta" del detalle da 404. Nunca existió, tampoco en FastAPI. | 🔴 Alta |
-| 3 | El camino "firmar una oferta" (`POST /comercial/ofertas/{id}/firmar`) **no se ha usado nunca**: 0 de 165 ofertas tienen `ppa_contrato_id`. Los 35 PPA se crearon por el otro camino. | 🟠 Media |
-| 4 | `firmar()` y `POST /ppa` **no aplican las mismas reglas**: el primero no valida contra GESCON, no sincroniza partes, nunca escribe `comprador_id` y fija `tipo_contrato="compra"` a mano. | 🟠 Media |
-| 5 | `ppa_contratos` guarda una **copia a mano** de la información de GESCON en seis columnas (`gescon_*`, `codigo_sic`) que ninguna lógica del backend lee, que casi nadie llena, y que ya divergieron de la fuente real. | 🟠 Media |
-| 6 | Datos incompletos: de 34 PPA vivos, **11 no tienen planta vinculada**, **13 no tienen tarifas** y **14 no tienen compromisos de energía**. Sin compromisos, Cumplimiento no puede medir el contrato. | 🟠 Media |
-| 7 | **No hay ni una prueba** que ejerza `POST`/`PATCH /ppa`. Por eso el hallazgo 1 pasó el deploy. | 🟡 Baja |
+| # | Hallazgo | Gravedad | Estado |
+|---|---|---|---|
+| 1 | `POST`/`PATCH /ppa` **descartaba en silencio** `comprador_id`, `vendedor_id` y `responsable_id`. El front manda esas tres claves; el backend esperaba `comprador`, `vendedor`, `responsable`. Regresión del port a Django (FastAPI sí las aceptaba). | 🔴 Alta | ✅ `aecee09a` |
+| 2 | `POST /ppa/{id}/proyectos` **no existe** en el backend —nunca existió, tampoco en FastAPI— y el botón «asociar planta» del detalle daba 404. Se resolvió por el `PATCH`, sin agregar endpoint. | 🔴 Alta | ✅ `2ebe36cf` |
+| 3 | El camino «firmar una oferta» (`POST /comercial/ofertas/{id}/firmar`) **no se ha usado nunca**: 0 de 165 ofertas tienen `ppa_contrato_id`. Los 35 PPA se crearon por el otro camino. | 🟠 Media | abierto |
+| 4 | `firmar()` y `POST /ppa` **no aplican las mismas reglas**: el primero no valida contra GESCON, no sincroniza partes, nunca escribe `comprador_id` y fija `tipo_contrato="compra"` a mano. | 🟠 Media | abierto |
+| 5 | `ppa_contratos` guarda una **copia a mano** de la información de GESCON en seis columnas (`gescon_*`, `codigo_sic`) que ninguna lógica del backend lee, que casi nadie llena, y que ya divergieron de la fuente real. | 🟠 Media | abierto |
+| 6 | Datos incompletos: de los PPA vivos, **11 no tienen planta vinculada**, **13 no tienen tarifas** y **14 no tienen compromisos de energía**. Sin compromisos, Cumplimiento no puede medir el contrato. | 🟠 Media | abierto |
+| 7 | **No había ni una prueba** que ejerciera el cuerpo de una escritura de `/ppa`. Por eso el hallazgo 1 pasó el deploy. Hoy hay 31, en `tests/test_ppa_escritura_cuerpo.py`. | 🟡 Baja | ✅ |
 
 ---
 
@@ -30,7 +30,7 @@ los dos se tocan, se cita.
 
 | Tabla | Modelo | Qué guarda | Filas (2026-09-17) |
 |---|---|---|---|
-| `ppa_contratos` | `PpaContrato` | El contrato: partes, fechas, tarifa base, indexación, cantidades, datos GESCON, tipo. Borrado **lógico** (`deleted_at`). | 35 (34 vivos) |
+| `ppa_contratos` | `PpaContrato` | El contrato: partes, fechas, tarifa base, indexación, cantidades, datos GESCON, tipo. Borrado **lógico** (`deleted_at`). | 35 (33 vivos) |
 | `ppa_contrato_proyectos` | `PpaContratoProyecto` | N↔N contrato ↔ planta. PK compuesta, sin `id`. | 42 |
 | `ppa_tarifas` | `PpaTarifa` | Precio **por (año, mes)**. Único `(contrato, año, mes)`. | 2 433 |
 | `ppa_compromisos_energia` | `PpaCompromisoEnergia` | Mínimo y máximo de energía **por (año, mes)**, en MWh. | 2 432 |
@@ -333,30 +333,56 @@ cualquier PPA con registros GESCON se protege solo por la segunda.
 
 ## 6 · Qué arreglar, en orden
 
-1. **Aceptar `comprador_id`, `vendedor_id` y `responsable_id` en
-   `ContratoEscrituraSerializer`** — con `source=`, o declarando los tres como
-   `PrimaryKeyRelatedField`. Es el arreglo de menor riesgo y el de mayor efecto:
-   restituye el contrato que la API ya publicaba. Con una prueba de endpoint que
-   lo fije.
-2. **Backfill de las tres columnas** en los contratos creados o editados desde el
-   4-sep-2026 (cuando entró Django). Management command, corrido una vez.
-3. **Decidir qué pasa con `POST /ppa/{id}/proyectos`**: construirlo, o quitar el
-   botón del front. Hoy el usuario cree que vinculó una planta y no vinculó nada.
-4. **Unificar las reglas de los dos caminos.** El camino B debería llamar a
-   `contratos_service.validar_fecha_fin_vs_asic` y `sincronizar_partes`, igual que
-   el A. Si se va a introducir el PPA de venta en el CRM, esto es requisito
-   previo, no mejora.
-5. **Pruebas de escritura de `/ppa`.** No hay ninguna; `test_paridad_urls.py`
-   compara rutas, no cuerpos — y esta regresión fue de cuerpo.
-6. **Higiene de datos**: el contrato 36 vacío, los 11 sin planta, los 14 sin
-   compromisos, las 294 tarifas fuera de período. Cada uno es una decisión de
-   negocio, no un bug: hay que preguntarle a quien los cargó.
-7. **Retirar la copia de GESCON.** El detalle deja de mostrar las seis columnas
+### Hecho — Fase 0 (2026-09-17)
+
+1. ✅ **`POST`/`PATCH /ppa` vuelven a aceptar `comprador_id`, `vendedor_id` y
+   `responsable_id`.** Declarados como `PrimaryKeyRelatedField` con `source=`, así
+   que además un id inexistente da 400 en vez de pasar de largo. Commit
+   `aecee09a`.
+2. ✅ **El botón «asociar planta» del detalle vuelve a guardar**, por el `PATCH`
+   que ya existía. No se construyó `POST /ppa/{id}/proyectos` a propósito: habría
+   dos formas de fijar las plantas de un contrato. Commit `2ebe36cf` en el
+   frontend, con `plantasDelContrato.ts` y sus pruebas.
+3. ✅ **Pruebas de cuerpo para todas las escrituras de `/ppa`** —creación,
+   edición, tarifas, compromisos, borrado y responsables— en
+   `tests/test_ppa_escritura_cuerpo.py`. Una de ellas falla si la lectura y la
+   escritura vuelven a nombrar distinto las tres relaciones.
+4. ✅ **El contrato 36 borrado** (lógico). Era una fila vacía creada el
+   2026-09-17. Quedan 33 vivos.
+
+No hubo backfill que hacer: entre el port a Django y el arreglo solo se creó ese
+contrato, así que la regresión no dejó datos históricos dañados. Lo que sí falta
+—los 26 contratos sin `comprador_id`— es anterior al port y se trata abajo.
+
+### Pendiente, por orden de valor
+
+5. **Una sola función de escritura.** `POST /ppa` y `firmar()` aplican reglas
+   distintas sobre la misma tabla (§2). Mover las reglas a
+   `apps/ppa/services/escritura.py::crear_ppa()` y que las dos la llamen; el
+   contrato pasa a crearse **completo o no crearse**, tarifas y compromisos
+   incluidos, que es lo que hoy deja 13 sin tarifas y 14 sin compromisos.
+   Requisito previo: decidir la bifurcación compra/venta de `firmar()`
+   (`DOMINIO_COMERCIAL.md` la marca como el punto más delicado de la etapa).
+6. **Retirar la copia de GESCON.** El detalle deja de mostrar las seis columnas
    copiadas y muestra los registros ASIC reales del contrato, derivados de la
    relación que ya existe; se siguen editando donde se editan hoy, en GESCON.
-   Sin nadie leyéndolas, las columnas salen con una migración. Es el cambio que
-   más «una sola fuente de verdad» compra por lo poco que cuesta: hoy nada del
+   Sin nadie leyéndolas, las columnas salen con una migración. Es lo que más
+   «una sola fuente de verdad» compra por lo poco que cuesta: hoy nada del
    backend depende de ellas.
+7. **Las partes por llave, no por texto.** 26 de 33 contratos vivos no tienen
+   `comprador_id`; el nombre está escrito a mano y casi ninguno resuelve
+   automáticamente contra `clientes` (difieren el punto final, el formato del
+   NIT). Es limpieza con criterio humano, no un script. Ojo con un supuesto que
+   NO se sostiene: **«Unergy» no es un cliente canónico** — hay tres filas
+   (`UNERGY S.A.S`, `UNERGY ENERGIA DIGITAL S.A.S E.S.P`, `Operaciones Unergy`) y
+   los contratos usan dos razones sociales distintas como contraparte. Hay que
+   decidir cuál aplica antes de enlazar nada.
+8. **Higiene del resto de los datos**: los 11 sin planta, los 14 sin compromisos,
+   las 294 tarifas fuera de período. Cada uno es una decisión de negocio, no un
+   bug: hay que preguntarle a quien los cargó.
+9. **Los nombres.** «PPA simulado» en Cumplimiento, y distinguir en Finanzas que
+   ese «contrato de energía» es del servicio externo. Media hora, y elimina la
+   confusión de §2-bis.
 
 ---
 
