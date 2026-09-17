@@ -177,7 +177,23 @@ def _mgs_number(name: str) -> int | None:
 # fallback hardcodeado FRONTERA_NODE_MAP, pero indexado por proyecto_id.
 _PROYECTO_NODE_OVERRIDE: dict[int, tuple[int | None, int | None]] = {
     45: (616, None),  # Minigranja Solar San Pedro — medidor de generación (nodo Gaia 616)
+    # Autoconsumo Nestlé DPA (Valledupar). Un autoconsumo no entrega energía al
+    # SIC, así que no tiene frontera de generación y Gaia no lo lista como
+    # border: el mapa dinámico nunca lo encuentra por más que el nodo exista.
+    # Medidor serie 88865813 → nodo 1670. Sin respaldo: es un solo medidor.
+    59: (1670, None),  # Autoconsumo Nestlé DPA — medidor 88865813 (nodo Gaia 1670)
 }
+
+
+def proyectos_con_node_override() -> set[int]:
+    """Ids de proyecto que tienen nodo por override directo.
+
+    Son los que la resolución dinámica no puede encontrar sola (no existen como
+    border en Gaia), así que quien necesite ENUMERAR proyectos con medidor
+    —y no solo resolver uno— tiene que sumarlos aparte. Ver
+    `_PROYECTO_NODE_OVERRIDE`.
+    """
+    return set(_PROYECTO_NODE_OVERRIDE)
 
 
 def _resolve_frt_and_pair(

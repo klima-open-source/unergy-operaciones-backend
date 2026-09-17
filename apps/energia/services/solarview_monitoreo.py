@@ -545,6 +545,68 @@ def _nodos_gaia(gaia, proyecto_id: int) -> tuple:
     )
 
 
+def proyectos_con_medidor() -> dict:
+    """`{"projects": [{proyecto_id, nombre}]}` — los proyectos con nodo de Gaia.
+
+    Mismo sobre que `monitoreo_flota` (`projects`) a propósito: el selector del
+    fasorial ya sabe leer esa forma, y deja lugar para agregar campos después
+    sin romper a quien la consuma.
+
+    El universo de Generación Solar son las minigranjas con servicio de
+    operación (ver `monitoreo_flota`), y esa regla no se toca acá: esto es otra
+    lista, para otra cosa. El diagrama fasorial no dibuja generación, dibuja la
+    lectura eléctrica de UN medidor, y hay medidores fuera de ese universo.
+
+    El caso que lo destapó (2026-09-17) es el autoconsumo de Nestlé: su nodo
+    existe en Gaia y `monitoreo_detalle(59, incluir_snapshot=True)` responde con
+    `gaia_snapshot`, pero el proyecto no salía en ninguna lista desde la cual
+    elegirlo — el selector del fasorial se llenaba con `monitoreo_flota`, que
+    filtra `tipo_proyecto='minigranja'`.
+
+    Se enumera lo que de verdad tiene nodo, resolviéndolo por el mismo camino
+    que usa el detalle (`find_gaia_node_pair`) en vez de por tipo de proyecto.
+    Así un proyecto nuevo con frontera de generación —o con override— entra
+    solo, sin tocar esta función. No se filtra por `estado`: un proyecto que
+    todavía no está en operación pero ya tiene medidor se puede consultar, y si
+    no hay lectura el fasorial lo dice.
+
+    Cuesta a lo sumo una construcción del mapa dinámico de Quoia, que ya viene
+    cacheado 1 h dentro de `gaia_client`; la lista se cachea aparte como la
+    flota.
+    """
+    from app.services.mgs.gaia_client import (
+        build_db_proyecto_frt_map, find_gaia_node_pair, proyectos_con_node_override,
+    )
+
+    clave = f"medidores:{hoy_col().isoformat()}"
+    if (cacheado := _cache_get(clave)) is not None:
+        return cacheado
+
+    fronteras = list(
+        Frontera.objects.filter(
+            tipo_frontera__in=TIPOS_GENERACION, codigo_frontera__isnull=False,
+        ).values_list("proyecto_id", "codigo_frontera")
+    )
+    mapa_frt = build_db_proyecto_frt_map(fronteras)
+    candidatos = set(mapa_frt) | proyectos_con_node_override()
+
+    gaia = _get_gaia()
+    filas = [
+        {"proyecto_id": pid, "nombre": nombre}
+        for pid, nombre in Proyecto.objects.filter(
+            id__in=candidatos, deleted_at__isnull=True,
+        ).values_list("id", "nombre_comercial")
+        if any(find_gaia_node_pair(
+            gaia=gaia, proyecto_id=pid, db_proyecto_frt_map=mapa_frt,
+        ))
+    ]
+    filas.sort(key=lambda f: (f["nombre"] or ""))
+
+    datos = {"projects": filas}
+    _cache_set(clave, CACHE_TTL_FLOTA, datos)
+    return datos
+
+
 def _curva_potencia(datos: dict | None) -> list[dict]:
     """`[{time, kw}]` de la curva de hoy.
 
