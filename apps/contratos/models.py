@@ -32,7 +32,12 @@ class ContratoServicio(Timer):
     tarifa_base = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
     periodicidad_pago = models.CharField(max_length=10, choices=[("mensual", "mensual"), ("bimestral", "bimestral"), ("trimestral", "trimestral"), ("semestral", "semestral"), ("anual", "anual")], null=True, blank=True)
     indice_indexacion = models.CharField(max_length=50, null=True, blank=True)
-    estado = models.CharField(max_length=13, choices=[("vigente", "vigente"), ("vencido", "vencido"), ("terminado", "terminado"), ("en_renovacion", "en_renovacion")], default="vigente")
+    # Solo lo que una persona decide. `vigente` y `vencido` salieron de acá: eran
+    # consecuencia de `fecha_fin` y nadie los actualizaba -- 8 contratos decían
+    # `vigente` con la fecha pasada. Esa mitad la calcula
+    # `apps.contratos.services.vigencia`, que no se puede desactualizar porque
+    # no se guarda. Ver la migración 0006.
+    estado = models.CharField(max_length=13, choices=[("firmado", "firmado"), ("en_renovacion", "en_renovacion"), ("terminado", "terminado")], default="firmado")
     fecha_firma_contrato = models.DateField(null=True, blank=True)
     fecha_inicio_om = models.DateField(null=True, blank=True)
     renovacion_automatica = models.BooleanField(null=True, blank=True)

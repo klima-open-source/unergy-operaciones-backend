@@ -40,6 +40,13 @@ POR_VENCER = "por_vencer"
 VENCIDO = "vencido"
 TERMINADO = "terminado"
 
+# ── Los `estado` que una persona elige en el wizard ───────────────────────
+# Ojo: NO son los mismos valores de arriba. `estado` dice qué decidió alguien;
+# la vigencia dice qué pasa hoy. Un contrato `firmado` puede estar vencido.
+FIRMADO = "firmado"
+EN_RENOVACION = "en_renovacion"
+ESTADO_TERMINADO = "terminado"
+
 #: Los `estado` que NO cierran el contrato por decisión humana.
 #:
 #: `en_renovacion` cuenta como vivo: es justo cuando la tarifa nueva importa
@@ -47,7 +54,7 @@ TERMINADO = "terminado"
 #: y 0 menciones en los 147.102 registros de `audit_log` (mayo a septiembre de
 #: 2026, cuando dejó de escribirse). Se conserva porque el wizard lo ofrece y
 #: tres vistas lo pintan.
-ESTADOS_NO_CERRADOS = ("vigente", "en_renovacion")
+ESTADOS_NO_CERRADOS = (FIRMADO, EN_RENOVACION)
 
 #: Las vigencias que cuentan como "el contrato está vivo hoy".
 #: `por_vencer` sí cuenta: vence pronto, pero todavía rige.

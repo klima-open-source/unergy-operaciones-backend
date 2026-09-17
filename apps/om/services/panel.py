@@ -130,7 +130,7 @@ def _fila_con_contrato(proyecto, contrato, periodo, ipc, seleccion, documentos):
         periodicidad=contrato.periodicidad_pago,
     )
     fila["estado_contrato"] = (
-        "con_contrato" if contrato.estado == "vigente" else "en_tramite"
+        "con_contrato" if contrato.estado == "firmado" else "en_tramite"
     )
     fila["tipo_proyecto"] = proyecto.tipo_proyecto
     fila["motivo_exclusion"] = seleccion.motivo_exclusion if seleccion else None
@@ -163,7 +163,7 @@ def valor_de_proyecto(proyecto_id: int, periodo: str) -> float | None:
     )
     if contrato is None:
         return None
-    if contrato.estado != "vigente":
+    if contrato.estado != "firmado":
         return 0.0
 
     proyecto = py_models.Proyecto.objects.filter(pk=proyecto_id).first()

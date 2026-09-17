@@ -78,7 +78,7 @@ class OmViewSet(viewsets.GenericViewSet):
                 "valor_base_anual": (
                     float(c.tarifa_base) if c.tarifa_base else None
                 ),
-                "estado": c.estado or "vigente",
+                "estado": c.estado or "firmado",
             }
             for c in contratos
         ]

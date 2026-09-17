@@ -86,7 +86,7 @@ def calculo(periodo: str) -> dict:
             filas.append(_fila_sin_contrato(proyecto, periodo, ipc))
             continue
 
-        estado = "con_contrato" if contrato.estado == "vigente" else "en_tramite"
+        estado = "con_contrato" if contrato.estado == "firmado" else "en_tramite"
         for arrendador in arrendadores_de(contrato):
             fila = _fila(
                 proyecto, contrato, arrendador, periodo, ipc,
@@ -175,7 +175,7 @@ def valor_de_proyecto(proyecto_id: int, periodo: str) -> tuple[float, float] | N
     )
     if contrato is None:
         return None
-    if contrato.estado != "vigente":
+    if contrato.estado != "firmado":
         return (0.0, 0.0)
 
     proyecto = py_models.Proyecto.objects.filter(pk=proyecto_id).first()

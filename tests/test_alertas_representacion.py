@@ -249,10 +249,12 @@ class _Escenario:
         self._enviar = enviar
         self.hoy = HOY
 
-    def crear(self, firma: date, estado: str = "vigente", nombre: str = "Planta"):
+    def crear(self, firma: date, estado: str = "firmado", nombre: str = "Planta",
+              fecha_fin: date | None = None):
         return self._ct.ContratoServicio.objects.create(
             servicio_aplica="representacion", estado=estado,
             nombre_proyecto_ref=nombre, fecha_firma_contrato=firma,
+            fecha_fin=fecha_fin,
             tarifa_cgm="5.000000", tarifa_representacion="5.000000",
         )
 
@@ -353,9 +355,15 @@ def test_el_aniversario_del_ano_siguiente_vuelve_a_avisar(esc):
 # ── Filtro de estado ──────────────────────────────────────────────────────────
 
 def test_no_avisa_contratos_terminados_ni_vencidos(esc):
-    """Un contrato terminado no indexa nada: avisar de su aniversario es ruido."""
+    """Un contrato terminado o vencido no indexa nada: avisarle es ruido.
+
+    El vencido es el caso que el filtro viejo NO veia: `vencido` dejo de ser
+    un estado --lo calcula la fecha-- y mientras se miraba solo `estado`, un
+    contrato con la fecha pasada seguia recibiendo la alerta. En produccion
+    eran 8 el 2026-09-17.
+    """
     esc.crear(date(2024, 7, 7), estado="terminado", nombre="Terminada")
-    esc.crear(date(2024, 7, 7), estado="vencido", nombre="Vencida")
+    esc.crear(date(2024, 7, 7), nombre="Vencida", fecha_fin=date(2025, 1, 1))
 
     assert esc.correr() == 0
     assert esc.avisos() == []

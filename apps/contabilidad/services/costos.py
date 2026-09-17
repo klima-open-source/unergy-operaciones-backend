@@ -40,7 +40,7 @@ def _valor_internet(proyecto, periodo: str) -> float | None:
     )
     if c is None:
         return None
-    if c.estado != "vigente":
+    if c.estado != "firmado":
         return 0.0
     idx = c.indexacion_anual or c.indexacion_mensual or []
     t = _tarifa_indexada_periodo(idx, c.tarifa_mensual, c.fecha_firma_contrato, periodo)
@@ -186,7 +186,7 @@ def elegir_contrato_representacion(contratos):
 
     def _puntaje(c):
         tarifas = sum(1 for t in (c.tarifa_representacion, c.tarifa_cgm, c.tarifa_admin) if t)
-        return (c.estado == "vigente", tarifas, c.id)
+        return (c.estado == "firmado", tarifas, c.id)
 
     return max(contratos, key=_puntaje)
 

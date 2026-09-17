@@ -206,8 +206,15 @@ def representamos():
     """
     from apps.contratos.models import ContratoServicio
 
+    from apps.contratos.services import vigencia as vigencia_service
+    from apps.plataforma.services.fechas import hoy_col
+
+    # "Vigente" es `vigencia.filtro_vivos`, la misma definicion que usan el
+    # informe FMO y la alerta de aniversario: estado no cerrado Y fecha que
+    # todavia rige. Comparar solo el estado dejaba pasar los vencidos.
     con_contrato = ContratoServicio.objects.filter(
-        proyecto_id=OuterRef("pk"), servicio_aplica="representacion", estado="vigente",
+        vigencia_service.filtro_vivos(hoy_col()),
+        proyecto_id=OuterRef("pk"), servicio_aplica="representacion",
     )
     return Q(srv_representacion=True) | Q(Exists(con_contrato))
 

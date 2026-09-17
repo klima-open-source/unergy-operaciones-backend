@@ -24,7 +24,7 @@ HOY = date(2026, 9, 17)
 
 
 class ContratoFalso:
-    def __init__(self, estado="vigente", fecha_fin=None):
+    def __init__(self, estado="firmado", fecha_fin=None):
         self.estado = estado
         self.fecha_fin = fecha_fin
 
@@ -59,7 +59,7 @@ def test_sin_fecha_fin_es_vigente():
 
 def test_el_caso_que_los_filtros_viejos_no_veian():
     """`estado='vigente'` con la fecha pasada NO está vivo."""
-    contrato = ContratoFalso(estado="vigente", fecha_fin=date(2025, 6, 19))
+    contrato = ContratoFalso(estado="firmado", fecha_fin=date(2025, 6, 19))
     assert vigencia.de_contrato(contrato, HOY) == "vencido"
     assert vigencia.esta_vivo(contrato, HOY) is False
 
@@ -101,10 +101,10 @@ def test_el_filtro_y_la_funcion_no_pueden_divergir():
 
 
 @pytest.mark.parametrize("estado,fecha_fin,vivo", [
-    ("vigente", None, True),
-    ("vigente", date(2030, 1, 1), True),
-    ("vigente", date(2026, 10, 15), True),
-    ("vigente", date(2025, 6, 19), False),
+    ("firmado", None, True),
+    ("firmado", date(2030, 1, 1), True),
+    ("firmado", date(2026, 10, 15), True),
+    ("firmado", date(2025, 6, 19), False),
     ("en_renovacion", None, True),
     ("terminado", None, False),
     ("terminado", date(2030, 1, 1), False),
@@ -123,3 +123,27 @@ def test_las_dos_tuplas_duplicadas_desaparecieron():
 
     assert not hasattr(monitoreo_queryset, "ESTADOS_CONTRATO_VIVO")
     assert not hasattr(alertas_representacion, "ESTADOS_QUE_AVISAN")
+
+
+# ── Los estados que una persona puede elegir ──────────────────────────────
+
+def test_estado_solo_tiene_los_tres_que_alguien_decide():
+    """`vigente` y `vencido` salieron: eran consecuencia de la fecha, no decisiones.
+
+    Mientras estuvieron, el wizard dejaba marcar "vigente" un contrato cuya
+    fecha ya había pasado -- 8 contratos así en producción el 2026-09-17.
+    """
+    from apps.contratos.models import ContratoServicio
+
+    valores = {v for v, _ in ContratoServicio._meta.get_field("estado").choices}
+    assert valores == {"firmado", "en_renovacion", "terminado"}
+
+
+def test_el_default_es_firmado():
+    from apps.contratos.models import ContratoServicio
+
+    assert ContratoServicio._meta.get_field("estado").default == "firmado"
+
+
+def test_los_estados_no_cerrados_salen_del_catalogo_y_no_de_literales():
+    assert vigencia.ESTADOS_NO_CERRADOS == (vigencia.FIRMADO, vigencia.EN_RENOVACION)
