@@ -90,6 +90,15 @@ class GeneracionSolarViewSet(viewsets.GenericViewSet):
     def monitoring(self, request):
         return Response(sv.monitoreo_flota())
 
+    @action(detail=False, methods=["get"], url_path="medidores")
+    def medidores(self, request):
+        # Los proyectos que tienen medidor en Gaia, que NO son los mismos que
+        # los de `monitoring`: ese lista el universo de Generación Solar
+        # (minigranjas con servicio de operación) y este lista de qué
+        # proyectos hay lectura eléctrica, autoconsumos incluidos. Lo usa el
+        # selector del diagrama fasorial.
+        return Response(sv.proyectos_con_medidor())
+
     @action(
         detail=False, methods=["get"],
         url_path=r"monitoring/(?P<proyecto_id>[0-9]+)",
