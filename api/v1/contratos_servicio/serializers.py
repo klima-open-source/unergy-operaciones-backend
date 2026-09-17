@@ -3,6 +3,7 @@
 from rest_framework import serializers
 
 from apps.contratos import models as ct_models
+from apps.contratos.services import grupos as grupos_service
 from apps.facturacion import models as fa_models
 from apps.proyectos import models as py_models
 
@@ -21,6 +22,13 @@ class ContratoSerializer(serializers.ModelSerializer):
     proyecto = serializers.SerializerMethodField()
     frontera_ids = serializers.SerializerMethodField()
     enlace_drive = serializers.SerializerMethodField()
+    # Se AGREGAN junto a `servicio_aplica`, que no se toca: el front filtra por
+    # ese campo y migra a estos cuando quiera. `subservicios` es lista porque un
+    # contrato de representación+CGM cubre los dos, y `servicio_aplica` -- que
+    # admite un solo valor -- solo puede nombrar uno; el otro queda invisible.
+    # Ver `docs/SERVICIOS_AGRUPACION.md`.
+    grupo = serializers.SerializerMethodField()
+    subservicios = serializers.SerializerMethodField()
 
     class Meta:
         model = ct_models.ContratoServicio
@@ -37,6 +45,12 @@ class ContratoSerializer(serializers.ModelSerializer):
             "nombre_comercial": obj.proyecto.nombre_comercial,
             "tipo_proyecto": obj.proyecto.tipo_proyecto,
         }
+
+    def get_grupo(self, obj) -> str | None:
+        return grupos_service.grupo_de_contrato(obj)
+
+    def get_subservicios(self, obj) -> list[str]:
+        return grupos_service.subservicios_de(obj)
 
     def get_frontera_ids(self, obj) -> list[int]:
         return [
