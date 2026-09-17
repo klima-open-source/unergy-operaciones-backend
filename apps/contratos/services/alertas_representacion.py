@@ -32,6 +32,7 @@ import os
 from datetime import date
 
 from apps.contratos.models import AlertaAniversario, ContratoServicio
+from apps.contratos.services import vigencia as vigencia_service
 from apps.om.models import OmIpcTasa
 from apps.plataforma.services.fechas import hoy_col
 from apps.ppa.services.vencimientos import correos_de_alerta, elegir_umbral
@@ -42,10 +43,15 @@ logger = logging.getLogger("operaciones.contratos.alertas")
 # aciertan: ver `revisar_aniversarios`.
 AVISOS = (30, 15)
 
-# Un contrato terminado o vencido no indexa nada, así que avisar de su
-# aniversario es ruido. `en_renovacion` sí avisa: es justo cuando la tarifa
-# nueva importa.
-ESTADOS_QUE_AVISAN = ("vigente", "en_renovacion")
+# A quiénes se les avisa: a los contratos vivos. Un contrato terminado o vencido
+# no indexa nada, así que avisar de su aniversario es ruido.
+#
+# La definición vive en `apps.contratos.services.vigencia`. Antes era una tupla
+# de estados acá (`ESTADOS_QUE_AVISAN`), la MISMA que
+# `api/v1/monitoreo/queryset.py` tenía con otro nombre, y ninguna de las dos
+# miraba `fecha_fin` -- así que la intención de arriba no se cumplía: el
+# 2026-09-17 había 8 contratos de representación vencidos (uno desde junio de
+# 2025) que decían `estado='vigente'` y seguían recibiendo la alerta.
 
 FILA_TARIFA = (
     '<tr><td style="padding:6px 0;color:#6B5F80">Nueva tarifa {etiqueta}</td>'
@@ -176,8 +182,8 @@ def tarifa_indexada(tarifa: float | None, anio_aniversario: int, numero: int,
 def contratos_de_representacion() -> list[dict]:
     """Los contratos de representación vivos y con fecha de firma."""
     filas = ContratoServicio.objects.filter(
+        vigencia_service.filtro_vivos(hoy_col()),
         servicio_aplica="representacion", fecha_firma_contrato__isnull=False,
-        estado__in=ESTADOS_QUE_AVISAN,
     ).select_related("proyecto")
     return [{
         "id": r.id,

@@ -38,7 +38,9 @@ from django.core.management.base import BaseCommand
 
 from apps.contratos.models import ContratoServicio
 from apps.contratos.services import grupos
-from apps.ppa.models import PpaContratoProyecto
+from apps.contratos.services import vigencia as vigencia_service
+from apps.plataforma.services.fechas import hoy_col
+from apps.ppa.models import PpaContrato, PpaContratoProyecto
 from apps.proyectos.models import Proyecto
 
 #: Bandera → qué subservicios la respaldarían, según los contratos.
@@ -50,7 +52,7 @@ RESPALDO = {
 
 
 class Command(BaseCommand):
-    help = "Compara las banderas srv_* contra los contratos. Solo lee."
+    help = "Compara las banderas srv_* contra los contratos vivos. Solo lee."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -63,8 +65,14 @@ class Command(BaseCommand):
             p.id: p for p in Proyecto.objects.filter(deleted_at__isnull=True)
         }
         subservicios = self._subservicios_por_planta(plantas)
+        # Solo los PPA vivos, por la misma razón que los contratos de servicio.
+        # `ppa_contratos` no tiene columna `estado`: su vigencia es de fechas.
+        ppa_vivos = PpaContrato.objects.filter(
+            vigencia_service.filtro_ppa_vivos(hoy_col()), deleted_at__isnull=True,
+        )
         con_ppa = {
             pid for pid in PpaContratoProyecto.objects
+            .filter(contrato__in=ppa_vivos)
             .values_list("proyecto_id", flat=True) if pid in plantas
         }
 
@@ -81,9 +89,19 @@ class Command(BaseCommand):
 
     @staticmethod
     def _subservicios_por_planta(plantas) -> dict[int, set[str]]:
-        """Qué subservicios cubren los contratos de cada planta."""
+        """Qué subservicios cubren los contratos VIVOS de cada planta.
+
+        Solo los vivos: un contrato terminado o vencido no respalda una bandera.
+        La definición es `vigencia.filtro_vivos`, la misma que usan el informe
+        FMO y la alerta de aniversario -- incluida la mitad que falta en un
+        filtro por `estado` a secas: el 2026-09-17 había 8 contratos de
+        representación con la fecha fin pasada que decían `estado='vigente'`.
+        """
         salida: dict[int, set[str]] = {}
-        for contrato in ContratoServicio.objects.filter(proyecto__isnull=False):
+        vivos = ContratoServicio.objects.filter(
+            vigencia_service.filtro_vivos(hoy_col()), proyecto__isnull=False,
+        )
+        for contrato in vivos:
             if contrato.proyecto_id in plantas:
                 salida.setdefault(contrato.proyecto_id, set()).update(
                     grupos.subservicios_de(contrato)

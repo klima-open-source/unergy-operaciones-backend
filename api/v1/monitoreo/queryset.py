@@ -12,17 +12,22 @@ import logging
 from datetime import date
 
 from apps.contratos import models as ct_models
+from apps.contratos.services import vigencia as vigencia_service
 from apps.energia.services import unergy_api
 from apps.monitoreo.services import solenium_inversores
 from apps.proyectos import models as py_models
 from apps.proyectos.services import portafolios as portafolios_service
+from apps.plataforma.services.fechas import hoy_col
 
 logger = logging.getLogger("operaciones.monitoreo")
 
 # La disponibilidad garantizada es la misma en todos los contratos de O&M.
 DISPONIBILIDAD_GARANTIZADA_PCT = "97"
 PRESTADOR_POR_DEFECTO = "Unergy S.A.S."
-ESTADOS_CONTRATO_VIVO = ("vigente", "en_renovacion")
+# La definicion de "contrato vivo" vive en `apps.contratos.services.vigencia`.
+# Antes era una tupla de estados aca, y la MISMA tupla con otro nombre en
+# `alertas_representacion`; ninguna miraba `fecha_fin`, asi que un contrato
+# con la fecha pasada pero `estado='vigente'` contaba como vivo.
 # "operacion" NUNCA se usa como `servicio_aplica`: el contrato de O&M real es
 # "mantenimiento". Filtrar por "operacion" devolvía 0 filas siempre.
 SERVICIO_OM = "mantenimiento"
@@ -81,10 +86,8 @@ def build_portfolios() -> dict:
 def _contrato_om(proyecto):
     return (
         ct_models.ContratoServicio.objects
-        .filter(
-            proyecto=proyecto, servicio_aplica=SERVICIO_OM,
-            estado__in=ESTADOS_CONTRATO_VIVO,
-        )
+        .filter(vigencia_service.filtro_vivos(hoy_col()))
+        .filter(proyecto=proyecto, servicio_aplica=SERVICIO_OM)
         .first()
     )
 
@@ -109,7 +112,8 @@ def build_all_contratos() -> dict:
     contratos = []
     consulta = (
         ct_models.ContratoServicio.objects
-        .filter(servicio_aplica=SERVICIO_OM, estado__in=ESTADOS_CONTRATO_VIVO)
+        .filter(vigencia_service.filtro_vivos(hoy_col()))
+        .filter(servicio_aplica=SERVICIO_OM)
         .select_related("proyecto")
     )
     for contrato in consulta:
