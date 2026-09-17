@@ -125,43 +125,45 @@ def servicios_contratos(cliente_id: int, hoy: date | None = None) -> list[dict]:
 
     proyectos = _proyectos_por_id({c.proyecto_id for c in contratos if c.proyecto_id})
 
-    def _tarifa(c):
-        """La tarifa relevante según el tipo de servicio del contrato.
+    def _tarifa(c, subservicio):
+        """La tarifa de ESE subservicio dentro del contrato.
 
-        La correspondencia subservicio → columna vive una sola vez, en
-        `apps/contratos/services/grupos.py`. Esta vista muestra UNA tarifa por
-        contrato, así que toma la del primer subservicio: para Operación es la
-        única que hay, y en representación+CGM es la de representación, igual
-        que antes.
+        No existe "la tarifa del contrato": uno que cubre representación y CGM
+        tiene una distinta para cada uno. La correspondencia subservicio →
+        columna vive una sola vez, en `apps/contratos/services/grupos.py`.
 
         Un `servicio_aplica` fuera del catálogo (`promotor`, `rec` — valores que
         existieron en el enum) cae a `tarifa_base`, que es lo que hacía la
-        cadena de `if` que esto reemplaza.
+        cadena de `if` que esto reemplazó.
         """
-        subservicios = grupos_servicio.subservicios_de(c)
-        if not subservicios:
-            return _num(c.tarifa_base)
-        return _num(grupos_servicio.tarifa_de(c, subservicios[0]))
+        valor = grupos_servicio.tarifa_de(c, subservicio)
+        return _num(valor if valor is not None else c.tarifa_base)
 
+    # Un contrato aparece bajo CADA subservicio que cubre, no solo bajo el que
+    # diga `servicio_aplica`. Los 91 contratos que cubren representación y CGM
+    # salían solo como "representación", igual que pasaba en la vista Servicios:
+    # el campo admite un valor y el otro subservicio quedaba invisible.
     grupos: dict[str, list] = defaultdict(list)
     for c in contratos:
-        grupos[c.servicio_aplica].append({
-            "contrato_id": c.id,
-            "proyecto_id": c.proyecto_id,
-            "proyecto_nombre": proyectos[c.proyecto_id].nombre_comercial
-            if c.proyecto_id in proyectos else None,
-            "numero_contrato": c.numero_contrato,
-            "fecha_inicio": _fecha(c.fecha_inicio),
-            "fecha_fin": _fecha(c.fecha_fin),
-            "estado": c.estado,
-            "semaforo": "vencido" if c.estado == "terminado"
-            else semaforo_contrato(c.fecha_fin, hoy),
-            "renovacion_automatica": c.renovacion_automatica,
-            "tarifa": _tarifa(c),
-            "enlace_drive": _enlace_documento(
-                c.cliente_documentos_comerciales_por_contrato_servicio_id.all()
-            ),
-        })
+        subservicios = grupos_servicio.subservicios_de(c) or [c.servicio_aplica]
+        for subservicio in subservicios:
+            grupos[subservicio].append({
+                "contrato_id": c.id,
+                "proyecto_id": c.proyecto_id,
+                "proyecto_nombre": proyectos[c.proyecto_id].nombre_comercial
+                if c.proyecto_id in proyectos else None,
+                "numero_contrato": c.numero_contrato,
+                "fecha_inicio": _fecha(c.fecha_inicio),
+                "fecha_fin": _fecha(c.fecha_fin),
+                "estado": c.estado,
+                "semaforo": "vencido" if c.estado == "terminado"
+                else semaforo_contrato(c.fecha_fin, hoy),
+                "renovacion_automatica": c.renovacion_automatica,
+                "tarifa": _tarifa(c, subservicio),
+                "enlace_drive": _enlace_documento(
+                    c.cliente_documentos_comerciales_por_contrato_servicio_id.all()
+                ),
+            })
 
     salida = []
     for serv, filas in grupos.items():
@@ -240,8 +242,11 @@ def panel_360(cliente: Cliente, hoy: date | None = None) -> dict:
             "renovacion_automatica": renovacion_combinada(
                 [c.renovacion_automatica for c in serv_planta + ppa_planta]
             ),
+            # Cada subservicio que cubre la planta, no solo `servicio_aplica`:
+            # un contrato de representación+CGM aportaba únicamente el primero.
             "servicios": sorted(
-                {c.servicio_aplica for c in serv_planta}
+                {sub for c in serv_planta
+                 for sub in (grupos_servicio.subservicios_de(c) or [c.servicio_aplica])}
                 | ({"ppa"} if ppa_planta else set())
             ),
             "participacion_actual": part_actual,
@@ -267,6 +272,10 @@ def panel_360(cliente: Cliente, hoy: date | None = None) -> dict:
         "proyecto_nombre": proyectos[c.proyecto_id].nombre_comercial
         if c.proyecto_id in proyectos else None,
         "servicio": c.servicio_aplica,
+        # `servicio` se conserva tal cual --el front lo lee-- y `subservicios`
+        # dice lo que ese campo no puede: los dos que cubre un contrato de
+        # representación+CGM.
+        "subservicios": grupos_servicio.subservicios_de(c),
         "tarifa_representacion": _num(c.tarifa_representacion),
         "tarifa_cgm": _num(c.tarifa_cgm),
         "tarifa_base": _num(c.tarifa_base),
@@ -279,6 +288,7 @@ def panel_360(cliente: Cliente, hoy: date | None = None) -> dict:
         "id": c.id,
         "fuente": "servicio",
         "tipo": c.servicio_aplica,
+        "subservicios": grupos_servicio.subservicios_de(c),
         "numero": c.numero_contrato,
         "proyectos": [proyectos[c.proyecto_id].nombre_comercial]
         if c.proyecto_id in proyectos else [],
