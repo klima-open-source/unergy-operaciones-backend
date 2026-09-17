@@ -4,7 +4,6 @@ import logging
 from datetime import datetime, timezone
 
 from django.db import transaction
-from django.shortcuts import get_object_or_404
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, ValidationError
@@ -16,6 +15,7 @@ from api.permissions import RolePermission
 from apps.clientes.services import documentos as documentos_service
 from apps.ppa import models as ppa_models
 from apps.ppa.services import contratos as contratos_service
+from apps.ppa.services import escritura as escritura_service
 from apps.ppa.services import responsables as responsables_service
 
 from . import queryset as ppa_queryset
@@ -55,7 +55,9 @@ class PpaViewSet(
     queryset = ppa_models.PpaContrato.objects.filter(deleted_at__isnull=True)
 
     def get_serializer_class(self):
-        if self.action in ("create", "partial_update"):
+        if self.action == "create":
+            return ppa_serializers.ContratoCreacionSerializer
+        if self.action == "partial_update":
             return ppa_serializers.ContratoEscrituraSerializer
         return ppa_serializers.ContratoSerializer
 
@@ -95,25 +97,44 @@ class PpaViewSet(
     # ── Escritura ─────────────────────────────────────────────────────────
 
     def create(self, request, *args, **kwargs):
+        """Crea el contrato COMPLETO: plantas, tarifas y compromisos incluidos.
+
+        Toda la lógica está en `escritura.crear_ppa`, que es también la que usa
+        `/comercial/ofertas/{id}/firmar`. Antes cada camino aplicaba sus propias
+        reglas sobre la misma tabla (ver `docs/DIAGNOSTICO_PPA.md` §2).
+
+        La respuesta trae `avisos`: lo que quedó cojo —sin plantas, sin tarifas,
+        sin compromisos— para que la UI lo muestre. No son errores; el contrato
+        existe.
+        """
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        datos = serializer.validated_data
+        datos = dict(serializer.validated_data)
+
+        # `tipo_contrato` sale de `datos` y viaja como parámetro propio: la
+        # función no lo adivina. Ausente = "venta", que es la convención que ya
+        # leen los seis módulos de Cumplimiento con `(tipo or "venta")`.
+        tipo = datos.pop("tipo_contrato", None) or "venta"
         proyecto_ids = datos.pop("proyecto_ids", None) or []
+        tarifas = datos.pop("tarifas", None) or []
+        compromisos = datos.pop("compromisos", None) or []
         enlace = datos.pop("carpeta_link", None)
 
-        with transaction.atomic():
-            contrato = ppa_models.PpaContrato.objects.create(**datos)
-            self._validar(contrato)
-            contratos_service.fijar_proyectos(contrato, proyecto_ids)
-            contratos_service.sincronizar_partes(contrato)
-            if enlace:
-                documentos_service.set_enlace(
-                    ppa_contrato_id=contrato.id, url=enlace, nombre=NOMBRE_ENLACE
-                )
-        return Response(
-            ppa_serializers.ContratoSerializer(self._contrato(contrato.pk)).data,
-            status=201,
-        )
+        try:
+            resultado = escritura_service.crear_ppa(
+                tipo_contrato=tipo, datos=datos, proyecto_ids=proyecto_ids,
+                tarifas=tarifas, compromisos=compromisos, carpeta_link=enlace,
+            )
+        except contratos_service.ReglaPpa as exc:
+            raise NoProcesable(str(exc))
+        except ValueError as exc:
+            raise NoProcesable(str(exc))
+
+        cuerpo = ppa_serializers.ContratoSerializer(
+            self._contrato(resultado.contrato.pk)
+        ).data
+        cuerpo["avisos"] = resultado.avisos
+        return Response(cuerpo, status=201)
 
     def partial_update(self, request, *args, **kwargs):
         contrato = self._contrato(kwargs["pk"])

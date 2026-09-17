@@ -539,3 +539,141 @@ def test_asignar_no_toca_los_contratos_borrados(datos):
     })
 
     assert respuesta.data["actualizados"] == 0
+
+
+# ── Fase 1: una sola función de escritura ────────────────────────────────────
+#
+# `crear_ppa()` es la única forma de crear un PPA. Lo que se fija acá son las
+# tres decisiones que la función toma, y que antes dependían de por dónde
+# entrara el contrato (ver `apps/ppa/services/escritura.py`).
+
+def test_el_contrato_se_crea_completo_en_una_transaccion(datos):
+    """Contrato, plantas, tarifas y compromisos de un solo golpe. Antes eran
+    tres peticiones sin transacción común, y de ahí salieron 13 contratos sin
+    tarifas y 14 sin compromisos."""
+    from apps.ppa.models import PpaCompromisoEnergia, PpaContratoProyecto, PpaTarifa
+    from apps.proyectos.models import Proyecto
+
+    planta = Proyecto.objects.create(nombre_comercial="Planta Uno")
+
+    respuesta = _crear(datos, {
+        **CUERPO_MINIMO,
+        "proyecto_ids": [planta.id],
+        "tarifas": [{"año": 2026, "mes": 1, "tarifa": 300}],
+        "compromisos": [{"año": 2026, "mes": 1, "energia_minima": 100}],
+    })
+
+    assert respuesta.status_code == 201, respuesta.data
+    pk = respuesta.data["id"]
+    assert PpaContratoProyecto.objects.filter(contrato_id=pk).count() == 1
+    assert PpaTarifa.objects.filter(contrato_id=pk).count() == 1
+    assert PpaCompromisoEnergia.objects.filter(contrato_id=pk).count() == 1
+
+
+def test_si_una_serie_falla_no_queda_contrato_a_medias(datos):
+    """El punto de la transacción: un cuerpo con una tarifa inválida no deja el
+    contrato creado y sin tarifas, que es como quedaban antes."""
+    from apps.ppa.models import PpaContrato
+
+    antes = PpaContrato.objects.count()
+
+    respuesta = _crear(datos, {
+        **CUERPO_MINIMO,
+        "tarifas": [{"año": 2026, "mes": 99, "tarifa": 300}],
+    })
+
+    assert respuesta.status_code == 400
+    assert PpaContrato.objects.count() == antes
+
+
+def test_la_respuesta_avisa_de_lo_que_quedo_cojo(datos):
+    """Sin plantas, sin tarifas y sin compromisos: se crea igual —es legítimo,
+    la planta puede no existir todavía— pero la UI tiene con qué avisar."""
+    respuesta = _crear(datos, CUERPO_MINIMO)
+
+    assert respuesta.status_code == 201, respuesta.data
+    avisos = " ".join(respuesta.data["avisos"]).lower()
+    assert "plantas" in avisos
+    assert "tarifas" in avisos
+    assert "compromisos" in avisos
+
+
+def test_un_contrato_completo_no_trae_avisos(datos):
+    from apps.proyectos.models import Proyecto
+
+    planta = Proyecto.objects.create(nombre_comercial="Planta Dos")
+
+    respuesta = _crear(datos, {
+        **CUERPO_MINIMO,
+        "proyecto_ids": [planta.id],
+        "tarifas": [{"año": 2026, "mes": 1, "tarifa": 300}],
+        "compromisos": [{"año": 2026, "mes": 1, "energia_minima": 100}],
+    })
+
+    assert respuesta.data["avisos"] == []
+
+
+def test_el_tipo_de_contrato_nunca_se_adivina():
+    """La guarda que protege el punto más delicado del dominio: grabar el tipo
+    equivocado invierte comprador y vendedor, y eso llega a la facturación sin
+    fallar de forma visible."""
+    import pytest as _pytest
+
+    from apps.ppa.services import escritura
+
+    with _pytest.raises(ValueError, match="tipo_contrato"):
+        escritura.crear_ppa(tipo_contrato="arrendamiento", datos={})
+
+    with _pytest.raises(ValueError, match="tipo_contrato"):
+        escritura.crear_ppa(tipo_contrato=None, datos={})
+
+
+def test_sin_tipo_en_el_cuerpo_el_contrato_es_de_venta(datos):
+    """«Ausente» ya significa venta en todo el sistema: seis módulos de
+    Cumplimiento leen `(tipo or "venta") == "compra"`. La API lo hace explícito
+    antes de llamar al servicio, que no admite ausente."""
+    from apps.ppa.models import PpaContrato
+
+    cuerpo = {k: v for k, v in CUERPO_MINIMO.items() if k != "tipo_contrato"}
+
+    respuesta = _crear(datos, cuerpo)
+
+    assert respuesta.status_code == 201, respuesta.data
+    assert PpaContrato.objects.get(pk=respuesta.data["id"]).tipo_contrato == "venta"
+
+
+def test_las_dos_series_siguen_siendo_opcionales(datos):
+    """El wizard puede seguir mandando solo el contrato: las series tienen su
+    propio PUT para editarlas después."""
+    respuesta = _crear(datos, CUERPO_MINIMO)
+
+    assert respuesta.status_code == 201, respuesta.data
+    assert respuesta.data["tarifas"] == []
+    assert respuesta.data["compromisos_energia"] == []
+
+
+def test_crear_sigue_sincronizando_partes_y_validando_gescon(datos):
+    """Las dos reglas que `POST /ppa` ya aplicaba no se perdieron al mover la
+    lógica al servicio."""
+    respuesta = _crear(datos, {
+        **CUERPO_MINIMO, "comprador_id": datos["comprador"].id,
+    })
+
+    assert respuesta.data["comprador_nombre"] == "Comprador S.A.S."
+
+
+def test_la_fecha_fin_anterior_a_un_registro_gescon_es_422(datos):
+    """La regla cruzada con GESCON, ahora desde el servicio. Un registro que
+    termina después dejaría la planta «vigente» más allá del contrato."""
+    from apps.mercado_xm.models import AsicSolicitud
+    from apps.ppa.models import PpaContrato
+
+    AsicSolicitud.objects.create(
+        contrato_interno="UNERGY-TEST-001", fecha_fin="2035-12-31",
+    )
+    antes = PpaContrato.objects.count()
+
+    respuesta = _crear(datos, CUERPO_MINIMO)   # termina en 2030-12-31
+
+    assert respuesta.status_code == 422
+    assert PpaContrato.objects.count() == antes, "el contrato no debió quedar creado"

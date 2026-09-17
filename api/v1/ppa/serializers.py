@@ -153,6 +153,28 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
         extra_kwargs = {c: {"required": False} for c in fields}
 
 
+class ContratoCreacionSerializer(ContratoEscrituraSerializer):
+    """`POST /ppa`: el contrato Y sus dos series, en un solo cuerpo.
+
+    Separado del de edición porque solo la creación las acepta: el wizard hacía
+    tres peticiones seguidas sin transacción común —contrato, luego tarifas,
+    luego compromisos— y si la segunda fallaba el contrato quedaba a medias sin
+    que nadie se enterara. Así quedaron 13 contratos sin tarifas y 14 sin
+    compromisos. Para EDITAR las series siguen estando `PUT /ppa/{id}/tarifas` y
+    `PUT /ppa/{id}/compromisos`, que reemplazan el conjunto.
+
+    Las dos son opcionales: un contrato se puede crear sin ellas y la respuesta
+    lo avisa (ver `apps.ppa.services.escritura`).
+    """
+
+    tarifas = TarifaEntradaSerializer(many=True, required=False)
+    compromisos = CompromisoEntradaSerializer(many=True, required=False)
+
+    class Meta(ContratoEscrituraSerializer.Meta):
+        fields = ContratoEscrituraSerializer.Meta.fields + ["tarifas", "compromisos"]
+        extra_kwargs = ContratoEscrituraSerializer.Meta.extra_kwargs
+
+
 class ResponsableSerializer(serializers.ModelSerializer):
     n_contratos = serializers.IntegerField(read_only=True, default=0)
 

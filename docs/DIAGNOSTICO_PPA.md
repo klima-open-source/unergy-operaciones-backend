@@ -17,7 +17,7 @@ los dos se tocan, se cita.
 | 1 | `POST`/`PATCH /ppa` **descartaba en silencio** `comprador_id`, `vendedor_id` y `responsable_id`. El front manda esas tres claves; el backend esperaba `comprador`, `vendedor`, `responsable`. Regresión del port a Django (FastAPI sí las aceptaba). | 🔴 Alta | ✅ `aecee09a` |
 | 2 | `POST /ppa/{id}/proyectos` **no existe** en el backend —nunca existió, tampoco en FastAPI— y el botón «asociar planta» del detalle daba 404. Se resolvió por el `PATCH`, sin agregar endpoint. | 🔴 Alta | ✅ `2ebe36cf` |
 | 3 | El camino «firmar una oferta» (`POST /comercial/ofertas/{id}/firmar`) **no se ha usado nunca**: 0 de 165 ofertas tienen `ppa_contrato_id`. Los 35 PPA se crearon por el otro camino. | 🟠 Media | abierto |
-| 4 | `firmar()` y `POST /ppa` **no aplican las mismas reglas**: el primero no valida contra GESCON, no sincroniza partes, nunca escribe `comprador_id` y fija `tipo_contrato="compra"` a mano. | 🟠 Media | abierto |
+| 4 | `firmar()` y `POST /ppa` **aplicaban reglas distintas** sobre la misma tabla. Ahora los dos llaman a `escritura.crear_ppa()`, que tiene las reglas una sola vez y exige el tipo de contrato en vez de adivinarlo. | 🟠 Media | ✅ Fase 1 |
 | 5 | `ppa_contratos` guarda una **copia a mano** de la información de GESCON en seis columnas (`gescon_*`, `codigo_sic`) que ninguna lógica del backend lee, que casi nadie llena, y que ya divergieron de la fuente real. | 🟠 Media | abierto |
 | 6 | Datos incompletos: de los PPA vivos, **11 no tienen planta vinculada**, **13 no tienen tarifas** y **14 no tienen compromisos de energía**. Sin compromisos, Cumplimiento no puede medir el contrato. | 🟠 Media | abierto |
 | 7 | **No había ni una prueba** que ejerciera el cuerpo de una escritura de `/ppa`. Por eso el hallazgo 1 pasó el deploy. Hoy hay 31, en `tests/test_ppa_escritura_cuerpo.py`. | 🟡 Baja | ✅ |
@@ -102,24 +102,46 @@ al período de suministro, y mueve la oferta a `firmado` con su historial.
 **0 de 165 ofertas tienen `ppa_contrato_id`.** El camino está construido y
 probado, pero ningún PPA de producción nació por ahí.
 
-### Lo que hace uno y el otro no
+### Lo que hacía uno y el otro no — resuelto en la Fase 1
+
+Así estaban los dos caminos antes del 2026-09-17. Se deja la tabla porque explica
+de dónde salen los datos torcidos que hay en producción:
 
 | | `POST /ppa` | `firmar()` |
 |---|---|---|
 | Valida `fecha_fin` contra GESCON | ✅ | ❌ |
-| `sincronizar_partes` (nombre/NIT desde el cliente) | ✅ | ❌ (copia el vendedor a mano) |
-| Escribe `comprador_id` | ✅ (intenta — ver hallazgo 1) | ❌ nunca |
-| Escribe `responsable_id` | ✅ (intenta — ver hallazgo 1) | ❌ nunca |
+| `sincronizar_partes` (nombre/NIT desde el cliente) | ✅ | ❌ (copiaba el vendedor a mano) |
+| Escribe `comprador_id` / `responsable_id` | ✅ | ❌ nunca |
 | Elige `tipo_contrato` | ✅ del payload | ❌ fijo en `"compra"` |
 | Crea `ppa_tarifas` | ❌ (petición aparte) | ✅ en la misma transacción |
 | Crea `ppa_compromisos_energia` | ❌ (petición aparte) | ❌ nunca |
 | Enlaza la oferta | ❌ | ✅ |
 | Todo en una transacción | ✅ el contrato; no las series | ✅ completo |
 
-El punto 5 de esa tabla es el que `DOMINIO_COMERCIAL.md` marca como *"el punto más
-delicado de toda la etapa"*: cuando se introduzca el PPA de venta en el CRM,
-`firmar()` grabaría al cliente como vendedor **al revés**, y el error llega hasta
-la facturación sin fallar de forma visible.
+**Hoy las reglas viven en `apps/ppa/services/escritura.py::crear_ppa()`** y los dos
+caminos la llaman. Lo que queda propio de cada uno es de dónde salen los datos:
+el wizard los recibe del formulario, `firmar()` los saca de la oferta y además
+enlaza y mueve de estado.
+
+Tres cosas que la función fija, y que antes dependían del camino:
+
+- **El tipo de contrato es un parámetro obligatorio.** `TIPO_PPA_POR_OFERTA` mapea
+  el tipo de oferta al de contrato y revienta con uno desconocido. Un default
+  silencioso grabaría al cliente del lado equivocado el día que exista la oferta
+  de venta, y eso llega hasta la facturación sin fallar de forma visible — es lo
+  que `DOMINIO_COMERCIAL.md` llama «el punto más delicado de toda la etapa».
+- **Un contrato sin plantas se crea, pero avisa.** El caso es legítimo (la planta
+  puede no existir todavía como `Proyecto`), así que no se bloquea; el resultado
+  trae `avisos` y la UI los muestra.
+- **Todo o nada.** Contrato, plantas, tarifas y compromisos en una transacción.
+  `POST /ppa` acepta las dos series en el mismo cuerpo y el wizard las manda
+  juntas al crear. Al editar siguen yendo por su `PUT`, porque ése reemplaza el
+  conjunto y mandarlo en cada edición borraría las series de quien solo vino a
+  corregir una fecha.
+
+Sigue abierto lo que no es del contrato sino del CRM: **ninguna oferta se ha
+firmado nunca** (0 de 165), y `firmar()` todavía no escribe a Unergy como
+comprador — la contraparte se pasa como dato, no está cableada.
 
 ---
 
@@ -354,22 +376,54 @@ No hubo backfill que hacer: entre el port a Django y el arreglo solo se creó es
 contrato, así que la regresión no dejó datos históricos dañados. Lo que sí falta
 —los 26 contratos sin `comprador_id`— es anterior al port y se trata abajo.
 
+### Hecho — Fase 1 (2026-09-17)
+
+5. ✅ **Una sola función de escritura.** `apps/ppa/services/escritura.py::crear_ppa()`
+   tiene las reglas una vez; `POST /ppa` y `firmar()` la llaman. El contrato se
+   crea completo —plantas, tarifas y compromisos— en una transacción, o no se
+   crea. El tipo de contrato es parámetro obligatorio con guarda. La respuesta
+   trae `avisos` de lo que quedó cojo.
+6. ✅ **`firmar()` cubierto por pruebas.** No tenía ninguna: las que existían
+   (`test_comercial_pipeline_oferta.py`, `test_comercial_ficha_operativa.py`)
+   ejercen el árbol FastAPI apagado. Once pruebas nuevas en
+   `tests/test_comercial_firmar_ppa.py`, incluidas las dos reglas que este camino
+   ahora hereda.
+7. ✅ **`apps/comercial/services/documentos.py` eliminado.** Era un duplicado
+   exacto de `apps.clientes.services.documentos.set_enlace` y, al mover la
+   escritura del enlace a `crear_ppa`, se quedó sin un solo llamador.
+
 ### Pendiente, por orden de valor
 
-5. **Una sola función de escritura.** `POST /ppa` y `firmar()` aplican reglas
-   distintas sobre la misma tabla (§2). Mover las reglas a
-   `apps/ppa/services/escritura.py::crear_ppa()` y que las dos la llamen; el
-   contrato pasa a crearse **completo o no crearse**, tarifas y compromisos
-   incluidos, que es lo que hoy deja 13 sin tarifas y 14 sin compromisos.
-   Requisito previo: decidir la bifurcación compra/venta de `firmar()`
-   (`DOMINIO_COMERCIAL.md` la marca como el punto más delicado de la etapa).
-6. **Retirar la copia de GESCON.** El detalle deja de mostrar las seis columnas
+8. **Partir `firmar()`: el CRM enlaza, no crea.** *(decidido por Sara el
+   2026-09-17; pendiente de construir)*
+
+   El diálogo de firma deja de pedir las condiciones del contrato. El comercial
+   marca la oferta como firmada y **elige** el PPA —de una lista, o creándolo en
+   Contratos y volviendo—; `firmar()` se queda solo con lo que es del CRM:
+   enlazar `oferta.ppa_contrato_id`, mover a «firmado» y dejar el historial.
+
+   Por qué: nunca se ha usado —**0 de 165 ofertas**— y pide exactamente las
+   mismas condiciones que el wizard, con menos alcance (no crea compromisos, no
+   escribe comprador ni responsable). La duplicación que queda no está en las
+   reglas, que ya se unificaron en la Fase 1, sino en que hay **dos puertas para
+   crear un contrato** y una no la usa nadie.
+
+   Por qué NO se borra entero: es lo único que escribe el enlace entre la oferta
+   y su PPA, y de ese enlace dependen `cerrar_contratos_vencidos` y la etapa
+   «Operando» del modelo objetivo. Sin él, el pipeline seguiría adivinando el
+   contrato de cada oferta emparejando por planta —el camino implícito que
+   `pipeline.py` documenta como necesario justamente porque el enlace está vacío.
+
+   Coincide con la regla del empalme: *«Desde Firmado la verdad vive en el
+   CONTRATO. El CRM sólo LEE»* (`DOMINIO_COMERCIAL.md`, Etapa 3).
+
+9. **Retirar la copia de GESCON.** El detalle deja de mostrar las seis columnas
    copiadas y muestra los registros ASIC reales del contrato, derivados de la
    relación que ya existe; se siguen editando donde se editan hoy, en GESCON.
    Sin nadie leyéndolas, las columnas salen con una migración. Es lo que más
    «una sola fuente de verdad» compra por lo poco que cuesta: hoy nada del
    backend depende de ellas.
-7. **Las partes por llave, no por texto.** 26 de 33 contratos vivos no tienen
+10. **Las partes por llave, no por texto.** 26 de 33 contratos vivos no tienen
    `comprador_id`; el nombre está escrito a mano y casi ninguno resuelve
    automáticamente contra `clientes` (difieren el punto final, el formato del
    NIT). Es limpieza con criterio humano, no un script. Ojo con un supuesto que
@@ -377,10 +431,10 @@ contrato, así que la regresión no dejó datos históricos dañados. Lo que sí
    (`UNERGY S.A.S`, `UNERGY ENERGIA DIGITAL S.A.S E.S.P`, `Operaciones Unergy`) y
    los contratos usan dos razones sociales distintas como contraparte. Hay que
    decidir cuál aplica antes de enlazar nada.
-8. **Higiene del resto de los datos**: los 11 sin planta, los 14 sin compromisos,
+11. **Higiene del resto de los datos**: los 11 sin planta, los 14 sin compromisos,
    las 294 tarifas fuera de período. Cada uno es una decisión de negocio, no un
    bug: hay que preguntarle a quien los cargó.
-9. **Los nombres.** «PPA simulado» en Cumplimiento, y distinguir en Finanzas que
+12. **Los nombres.** «PPA simulado» en Cumplimiento, y distinguir en Finanzas que
    ese «contrato de energía» es del servicio externo. Media hora, y elimina la
    confusión de §2-bis.
 
