@@ -716,26 +716,29 @@ exige solapamiento de tokens además de similitud.
 
 ### Lo que queda
 
-1. **Que `firmar()` escriba las DOS partes.** Hoy pone `vendedor_id` desde la
-   oferta y deja `comprador_id` vacío, así que exigir las dos partes en la API
-   dejaría al CRM sin poder firmar. Decidido con Sara el 2026-09-18: **Unergy es
-   un cliente más**, y se busca su fila en `clientes` por NIT, guardado en la
-   configuración.
+1. ~~Que `firmar()` escriba las dos partes.~~ **HECHO el 2026-09-18**, pero no
+   en `firmar()`: en **`crear_ppa`**, que desde `3f1eebc1` es la única puerta de
+   creación. Así lo aplican los DOS caminos --la API y el CRM-- en vez de solo
+   uno; esa asimetría es justo el problema que `crear_ppa` vino a resolver.
 
-   El reparto sale del `tipo_contrato`, que `crear_ppa` ya exige como parámetro
-   obligatorio justo porque define quién va de cada lado:
+   Unergy es un cliente más, identificado por `UNERGY_NIT` (en el `.env`, porque
+   es un dato de la empresa y no una regla). El lado sale del `tipo_contrato`,
+   que ya era parámetro obligatorio precisamente porque define quién va de cada
+   lado:
 
    | `tipo_contrato` | comprador | vendedor |
    |---|---|---|
    | `compra` (Unergy compra) | Unergy | el cliente de la oferta |
    | `venta` (Unergy vende) | el cliente de la oferta | Unergy |
 
-   Pendiente de confirmar contra la base: que Unergy ya exista como cliente. Es
-   muy probable —el `prestador` de los contratos de representación es Unergy—
-   pero no se pudo verificar el 2026-09-18.
+   Si falta el ajuste **avisa, no bloquea**: dejar al CRM sin poder firmar por un
+   ajuste que falta sería peor que el hueco que esto tapa. Tampoco elige nada si
+   dos clientes comparten el NIT: son un duplicado que hay que fusionar.
 
-   `apps/comercial/services/escritura.py` lo está editando Sara en otra rama, así
-   que este cambio espera a que ella cierre, para no pisarse.
+   **Falta poner `UNERGY_NIT` en el `.env`** (en el secret `ENV_FILE` para
+   producción) y confirmar contra la base que Unergy existe como cliente --muy
+   probable, es el `prestador` de los contratos de representación--. Hasta
+   entonces la función avisa en cada PPA nuevo.
 
 2. **Correr el backfill.** El comando ya está escrito:
    `manage.py vincular_partes_contratos`. Por defecto solo informa; escribe con

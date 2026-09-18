@@ -39,6 +39,12 @@ load_dotenv(BASE_DIR / ".env", override=False)
 
 ENTORNO = os.getenv("ENVIRONMENT", "development").lower()
 
+# El NIT de Unergy, para reconocer cual fila de `clientes` es la propia empresa.
+# En un PPA una de las dos partes es SIEMPRE Unergy --compra o vende-- y sin esto
+# ese lado queda vacio. Ver `apps/clientes/services/unergy.py`. Va en el .env
+# porque es un dato de la empresa, no una regla del codigo.
+UNERGY_NIT = os.getenv("UNERGY_NIT", "")
+
 SECRET_KEY = os.getenv("SECRET_KEY", "")
 # La variable se llama ENVIRONMENT, no ENV -- asi la define el .env y asi la lee
 # `app/core/config.py`. Con el nombre equivocado esto daba DEBUG=True SIEMPRE,
