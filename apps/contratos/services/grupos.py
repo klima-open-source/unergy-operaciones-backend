@@ -156,6 +156,41 @@ def subservicio_de_ppa(contrato_ppa) -> str:
     return COMPRA if contrato_ppa.tipo_contrato == COMPRA else VENTA
 
 
+def filtro_subservicio(subservicio: str):
+    """El mismo criterio de `subservicios_de()`, como condición de ORM.
+
+    Existe porque `subservicios_de()` trabaja sobre un objeto ya traído y no
+    sirve dentro de un `filter()`. Sin esta cara, cada módulo escribe el criterio
+    a mano -- y lo que escribían era `servicio_aplica="representacion"`, que NO
+    distingue representación de CGM: los dos subservicios comparten esa etiqueta
+    porque el campo admite un solo valor. Un contrato que solo cubre CGM entraba
+    en los filtros de representación.
+
+    Para Operación la etiqueta sí alcanza: ahí cada subservicio tiene su propio
+    contrato.
+
+    Ojo con el borde: un contrato de `representacion_cgm` SIN ninguna tarifa cae
+    a `servicio_aplica` en `subservicios_de()` --para que un contrato recién
+    creado no desaparezca de su pestaña-- y este filtro hace lo mismo, con la
+    condición sobre la tarifa del OTRO subservicio en nulo.
+    """
+    from django.db.models import Q
+
+    if grupo_de(subservicio) != REPRESENTACION_CGM:
+        return Q(servicio_aplica=subservicio)
+
+    columna = COLUMNA_TARIFA[subservicio]
+    otro = CGM if subservicio == REPRESENTACION else REPRESENTACION
+    return Q(servicio_aplica__in=SUBSERVICIOS[REPRESENTACION_CGM]) & (
+        Q(**{f"{columna}__isnull": False})
+        # Sin ninguna tarifa cargada manda la etiqueta, igual que en
+        # `subservicios_de()`.
+        | (Q(**{f"{columna}__isnull": True})
+           & Q(**{f"{COLUMNA_TARIFA[otro]}__isnull": True})
+           & Q(servicio_aplica=subservicio))
+    )
+
+
 def catalogo() -> list[dict]:
     """El catálogo completo, como lo expone la API.
 

@@ -534,6 +534,64 @@ que correr cuando vuelva.
 - **Dónde va la validación de la decisión 3**: en el serializer de
   `contratos_servicio`, en el wizard, o en los dos.
 
+## 4-octies. De cinco definiciones de "planta en operación" a dos
+
+Diagnóstico del 2026-09-18. Eran cuatro en §4-quinquies; revisando de nuevo
+aparecieron **cinco**:
+
+| Criterio | Dónde |
+|---|---|
+| `estado` **AND** `srv_operacion` | `om/panel.py`, `arriendos/panel.py` |
+| `srv_operacion` **OR** `estado` | `proyectos/portafolios.py` |
+| `estado` **AND** `srv` **AND** minigranja | `energia/solarview_monitoreo.py` |
+| solo `estado` del proyecto | `api/v1/om/views.py` |
+| solo `srv_operacion` | alarmas de desconexión, informe FMO |
+
+### Por qué son cinco: se mezclaron dos preguntas
+
+Cada sitio combinó a su manera dos cosas que responden a preguntas distintas:
+
+- **"¿la planta está energizada?"** → `proyectos.estado`
+- **"¿le prestamos operación?"** → hoy la bandera; mañana el contrato
+
+Como nadie las separó, cada módulo eligió su propio `AND` o `OR`. No fue una
+decisión: fue divergencia acumulada.
+
+### Cómo quedan en dos
+
+Al aplicar la regla de §4-sexies —*contrato del servicio, y vigente*— cada
+pregunta responde lo suyo:
+
+```
+¿le prestamos operación?   ->  ¿tiene contrato vivo de mantenimiento,
+                               arriendo o internet?
+¿está energizada?          ->  estado = "en_operacion"
+```
+
+Un módulo que necesite las dos las pide **por separado y explícito**, en vez de
+heredar la combinación que alguien eligió una vez.
+
+Lo concreto: una función `plantas_con_servicio("operacion")` --una consulta que
+devuelve un conjunto de ids, igual que `comunidades.plantas_en_comunidad()`-- y
+los cinco sitios la consumen. Las cinco variantes pasan a ser una llamada.
+
+**Cuándo:** con el bloque D, no antes. Aplicarlo hoy sacaría 36 plantas del
+sondeo MGS, las alarmas y el informe FMO -- las que operan sin contrato de
+operación cargado (§4-ter).
+
+### Lo mismo pasaba con los subservicios, y eso YA se corrigió
+
+`liquidaciones` y `contabilidad/panel` preguntaban "¿esta planta está
+representada?" filtrando por `servicio_aplica="representacion"`. Esa etiqueta la
+comparten representación y CGM --el campo admite un solo valor-- así que un
+contrato que solo cubre CGM contaba como representación. Ahora usan
+`grupos.filtro_subservicio()`, la cara de ORM del catálogo.
+
+`costos.py` y `alertas_representacion` **siguen filtrando por la etiqueta, y está
+bien**: ellos buscan el contrato del GRUPO y después leen cada tarifa por
+separado. La distinción importa: filtrar por grupo y filtrar por subservicio son
+preguntas distintas, y solo la segunda necesitaba el catálogo.
+
 ## 5. Cómo estructurarlo — dos opciones
 
 ### Opción A — Derivar los subservicios al leer (sin cambio de esquema)

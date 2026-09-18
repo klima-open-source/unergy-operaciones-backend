@@ -169,3 +169,71 @@ def test_catalogo_expone_los_subservicios_de_cada_grupo():
     assert por_grupo["operacion"] == ["mantenimiento", "arriendo", "internet"]
     assert por_grupo["representacion_cgm"] == ["representacion", "cgm"]
     assert por_grupo["ppa"] == ["compra", "venta"]
+
+
+# ── El filtro de ORM y la función tienen que decir lo mismo ───────────────
+
+def _coincide(contrato, subservicio):
+    """Evalúa el `Q` del filtro contra un contrato en memoria.
+
+    Django no expone una forma directa de probar un `Q` sin base, así que se
+    interpretan sus condiciones: son pocas y de una sola forma (`campo__isnull`,
+    `campo`, `campo__in`).
+    """
+    from apps.contratos.services.grupos import filtro_subservicio
+
+    def evaluar(nodo):
+        resultados = []
+        for hijo in nodo.children:
+            if hasattr(hijo, "children"):
+                resultados.append(evaluar(hijo))
+                continue
+            clave, esperado = hijo
+            if clave.endswith("__isnull"):
+                valor = getattr(contrato, clave[: -len("__isnull")], None)
+                resultados.append((valor is None) == esperado)
+            elif clave.endswith("__in"):
+                resultados.append(getattr(contrato, clave[: -len("__in")], None) in esperado)
+            else:
+                resultados.append(getattr(contrato, clave, None) == esperado)
+        return all(resultados) if nodo.connector == "AND" else any(resultados)
+
+    return evaluar(filtro_subservicio(subservicio))
+
+
+@pytest.mark.parametrize("aplica,tar_rep,tar_cgm", [
+    ("representacion", Decimal("1"), Decimal("2")),   # cubre los dos
+    ("representacion", Decimal("1"), None),           # solo representación
+    ("representacion", None, Decimal("2")),           # solo CGM, mal etiquetado
+    ("representacion", None, None),                   # sin tarifas: manda la etiqueta
+    ("cgm", None, None),                              # idem, etiquetado cgm
+    ("cgm", None, Decimal("2")),
+])
+def test_el_filtro_dice_lo_mismo_que_la_funcion(aplica, tar_rep, tar_cgm):
+    """Si divergen, una consulta y una lectura devuelven conjuntos distintos."""
+    contrato = ContratoFalso(aplica, tarifa_representacion=tar_rep, tarifa_cgm=tar_cgm)
+    esperados = set(grupos.subservicios_de(contrato))
+    for sub in ("representacion", "cgm"):
+        assert _coincide(contrato, sub) == (sub in esperados), (
+            f"{aplica} rep={tar_rep} cgm={tar_cgm}: el filtro y la función "
+            f"no coinciden en '{sub}'"
+        )
+
+
+@pytest.mark.parametrize("subservicio", ["mantenimiento", "arriendo", "internet"])
+def test_en_operacion_el_filtro_es_la_etiqueta(subservicio):
+    """Ahí cada subservicio tiene su propio contrato: la etiqueta alcanza."""
+    from apps.contratos.services.grupos import filtro_subservicio
+
+    assert filtro_subservicio(subservicio).children == [("servicio_aplica", subservicio)]
+
+
+def test_el_caso_que_motivo_el_filtro():
+    """Un contrato con solo tarifa CGM NO debe entrar en el filtro de representación.
+
+    Es lo que hacían `liquidaciones` y `contabilidad` al filtrar por
+    `servicio_aplica="representacion"`: ese contrato lleva esa etiqueta.
+    """
+    contrato = ContratoFalso("representacion", tarifa_cgm=Decimal("2"))
+    assert _coincide(contrato, "cgm") is True
+    assert _coincide(contrato, "representacion") is False
