@@ -77,6 +77,20 @@ class OportunidadOferta(Timer):
     fecha_tentativa_inicio = models.DateField(null=True, blank=True)
     fecha_fin_tentativa = models.DateField(null=True, blank=True)
     contrato_firmado = models.CharField(max_length=150, null=True, blank=True)
+    # NO borrar sin mirar: aunque ningun servicio del backend lo interpreta, el
+    # frontend SI lo pinta. `OfertasPanel.vue` arma con el la columna "Servicios
+    # buscados" (`detalle.servicios`) y la linea FPO (`detalle.fpo`). Borrarlo
+    # dejaria esa columna en blanco en produccion sin que nada falle.
+    #
+    # Es data del cargue masivo de Excel y esta CONGELADO: ningun flujo lo
+    # escribe --ni el front ni la API-- asi que solo puede encoger. Por eso
+    # tampoco viaja ya en los serializers de escritura: un blob sin esquema que
+    # acepta escritura es como se llena de basura.
+    #
+    # Su forma de hecho es {"servicios": [...], "fpo": "..."}. Pendiente medir
+    # contra produccion cuantas ofertas lo traen y que valores tiene `servicios`
+    # antes de decidir si `fpo` merece ser columna y `servicios` alinearse con
+    # los subservicios de `apps/contratos/services/grupos.py`.
     detalle = models.JSONField(null=True, blank=True)
     seguimientos = models.IntegerField(default=0)
     fecha_ultima_respuesta = models.DateField(null=True, blank=True)
@@ -100,3 +114,78 @@ class OportunidadOfertaProyecto(models.Model):
 
     class Meta:
         db_table = "oportunidad_oferta_proyectos"
+
+
+class OportunidadOfertaVersion(Timer):
+    """Una propuesta concreta de una oferta. APPEND-ONLY: no se editan.
+
+    **Reofertar no crea otra oferta: le agrega una versión.** La oferta conserva
+    su identidad —el consecutivo NUNCA cambia— y lo que varía son las
+    condiciones de cada propuesta. Antes había un solo `documento_url` y un
+    `precio_detalle` de texto que se sobrescribían: reofertar borraba la
+    propuesta anterior sin rastro. Ver `docs/DOMINIO_COMERCIAL.md`, O-8 y O-9.
+
+    Es el mismo patrón que la bitácora de Prospección: un registro inmutable del
+    que se derivan los estados. Por eso no hay ni `PATCH` ni `DELETE` sobre una
+    versión; corregir es agregar la siguiente.
+
+    **`fecha_aceptacion` es la pieza que conecta con el contrato.** Responde cuál
+    de las tres propuestas fue la que se firmó, y de ahí salen las condiciones
+    con las que nace el PPA. Sin ella el contrato no sabría con qué precio nacer.
+
+    Lo que guarda es lo que el CONTRATO necesita, no todo lo que dice el PDF de
+    la oferta. La modalidad, las garantías y la forma de pago son idénticas en
+    todas las ofertas revisadas y nada en la plataforma ramifica por ellas: viven
+    en el documento, que está en Drive.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    oferta = models.ForeignKey(
+        "OportunidadOferta", on_delete=models.CASCADE, db_column="oferta_id",
+        related_name="versiones",
+    )
+    # 1, 2, 3… por oferta. Lo asigna el servicio, no el cliente.
+    numero = models.IntegerField()
+    # Sin fecha de envío la versión es un BORRADOR: se está preparando.
+    fecha_envio = models.DateField(null=True, blank=True)
+    # La versión que el cliente aceptó. Como mucho una por oferta.
+    fecha_aceptacion = models.DateField(null=True, blank=True)
+    documento_url = models.CharField(max_length=1000, null=True, blank=True)
+    # Las dos condiciones de indexación que el contrato necesita y la oferta no
+    # guardaba en ninguna parte.
+    indice_indexacion = models.CharField(max_length=50, null=True, blank=True)
+    # Mes base en YYYY-MM, como lo guarda `ppa_contratos`. En el PDF es la fila
+    # "Precio Base": los precios son pesos constantes de ese mes.
+    periodo_indexacion_base = models.CharField(max_length=7, null=True, blank=True)
+    que_cambio = models.TextField(null=True, blank=True)
+    creado_por_usuario = models.ForeignKey(
+        "plataforma.Usuario", on_delete=models.DO_NOTHING,
+        db_column="creado_por_usuario_id", null=True, blank=True,
+        related_name="oferta_versiones_creadas",
+    )
+
+    class Meta:
+        db_table = "oportunidad_oferta_versiones"
+        unique_together = [("oferta", "numero")]
+
+
+class OportunidadOfertaVersionPrecio(models.Model):
+    """El precio por año de una versión. Es la tabla 2 del PDF de la oferta.
+
+    En tabla aparte y no en un JSON por dos razones: es la misma forma que
+    `ppa_tarifas` —a donde van estos precios al firmar, expandidos a filas
+    mensuales recortadas al período— y así el año único lo garantiza la base en
+    vez de el código.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    version = models.ForeignKey(
+        "OportunidadOfertaVersion", on_delete=models.CASCADE,
+        db_column="version_id", related_name="precios",
+    )
+    anio = models.IntegerField()
+    precio = models.DecimalField(max_digits=12, decimal_places=4)
+
+    class Meta:
+        db_table = "oportunidad_oferta_version_precios"
+        unique_together = [("version", "anio")]
