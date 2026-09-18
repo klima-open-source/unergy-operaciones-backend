@@ -31,12 +31,23 @@ def _numero(request, nombre, defecto, minimo, maximo=None):
     return valor
 
 
+def _corte(request) -> date | None:
+    """`?corte=YYYY-MM-DD`: la fecha a REPLICAR. None = el corte de hoy."""
+    crudo = request.query_params.get("corte")
+    if crudo in (None, ""):
+        return None
+    try:
+        return date.fromisoformat(crudo)
+    except ValueError:
+        raise ValidationError({"corte": "Fecha inválida, usar YYYY-MM-DD."})
+
+
 @class_logger_wrapper(name="Operaciones | Garantías | Proyecciones")
 class GarantiaProyeccionViewSet(viewsets.GenericViewSet):
     """Precobro de garantía XM: cálculo en vivo y snapshot semanal.
 
-    GET  /api/v1/garantias/proyecciones[?plantas_nuevas=&kwh_planta_nueva=]
-    POST /api/v1/garantias/proyecciones/snapshot   calcula y GUARDA
+    GET  /api/v1/garantias/proyecciones[?plantas_nuevas=&kwh_planta_nueva=&corte=YYYY-MM-DD]
+    POST /api/v1/garantias/proyecciones/snapshot[?corte=]   calcula y GUARDA
     GET  /api/v1/garantias/proyecciones/historial
     GET|PUT /api/v1/garantias/proyecciones/pagado
     POST /api/v1/garantias/proyecciones/balcttos?anio=&mes=  sube el archivo
@@ -62,15 +73,17 @@ class GarantiaProyeccionViewSet(viewsets.GenericViewSet):
         }
 
     def list(self, request, *args, **kwargs):
-        """Las dos estimaciones al corte de hoy. No persiste nada."""
+        """Las dos estimaciones al corte. `?corte=YYYY-MM-DD` replica un corte
+        pasado (precio y generación de ese día); sin él, es el de hoy. No persiste."""
         return Response(
-            proyecciones_service.en_vivo(**self._parametros(request))
+            proyecciones_service.en_vivo(hoy=_corte(request), **self._parametros(request))
         )
 
     @action(detail=False, methods=["post"], url_path="snapshot")
     @log_endpoint(name="Operaciones | Garantías | Snapshot")
     def snapshot(self, request):
-        resultado = proyecciones_service.en_vivo(**self._parametros(request))
+        # `?corte=` permite congelar un corte pasado que no se guardó en su momento.
+        resultado = proyecciones_service.en_vivo(hoy=_corte(request), **self._parametros(request))
         filas = proyecciones_service.guardar_snapshot(resultado)
         return Response({
             "guardadas": len(filas),
@@ -152,8 +165,8 @@ class GarantiaProyeccionViewSet(viewsets.GenericViewSet):
             })
 
         # Total a repartir = el que estima el modelo para el mes siguiente (M+1),
-        # que es la garantía mensual que precobra XM.
-        resultado = proyecciones_service.en_vivo()
+        # que es la garantía mensual que precobra XM. `?corte=` replica un corte pasado.
+        resultado = proyecciones_service.en_vivo(hoy=_corte(request))
         ventana = next(
             (v for v in resultado["ventanas"] if v["clave"] == "mes_siguiente"), None
         )

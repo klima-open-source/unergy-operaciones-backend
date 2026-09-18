@@ -22,8 +22,13 @@ DIAS_PRECIO_BOLSA = 25
 LIMITE_HISTORIAL = 200
 
 
-def _balance(anio: int, mes: int) -> dict:
-    """El balance del período, real o proyectado según sea pasado o futuro."""
+def _balance(anio: int, mes: int, corte: date | None = None) -> dict:
+    """El balance del período, real o proyectado según sea pasado o futuro.
+
+    `corte` fija la fecha "hoy" del cálculo: para el corte de hoy es None (usa el
+    reloj), pero al replicar un corte pasado se pasa esa fecha y el balance usa la
+    generación real HASTA ese día, no hasta hoy.
+    """
     from apps.mercado_xm.services.cumplimiento.balance_energia import (
         calcular_balance, calcular_balance_proyectado,
     )
@@ -31,18 +36,23 @@ def _balance(anio: int, mes: int) -> dict:
     # incluir_todos=True: la garantía es la exposición de TODA la empresa ante XM, así
     # que NO se aplica el filtro de "responsables ocultos" de Cumplimiento (p. ej.
     # "Externo"). XM cobra esos contratos igual; excluirlos subcontaría la garantía.
-    hoy = hoy_col()
+    hoy = corte or hoy_col()
     if (anio, mes) > (hoy.year, hoy.month):
-        return calcular_balance_proyectado(anio, mes, incluir_todos=True)
-    return calcular_balance(anio, mes, incluir_todos=True)
+        return calcular_balance_proyectado(anio, mes, hoy=hoy, incluir_todos=True)
+    return calcular_balance(anio, mes, hoy=hoy, incluir_todos=True)
 
 
-def _precio_bolsa() -> float | None:
+def _precio_bolsa(hasta: date | None = None) -> float | None:
+    """Promedio de bolsa de los 7 días conocidos HASTA `hasta` (default: hoy).
+
+    Al replicar un corte pasado se pasa esa fecha y el precio es el de ese
+    viernes, no el de hoy.
+    """
     from app.services.simem_bolsa import precio_bolsa_prom_7d
 
-    hoy = date.today()
-    inicio = hoy - timedelta(days=DIAS_PRECIO_BOLSA)
-    return precio_bolsa_prom_7d(inicio.isoformat(), hoy.isoformat())
+    hasta = hasta or date.today()
+    inicio = hasta - timedelta(days=DIAS_PRECIO_BOLSA)
+    return precio_bolsa_prom_7d(inicio.isoformat(), hasta.isoformat())
 
 
 def _regulatorio(anio: int, mes: int) -> dict:
@@ -149,8 +159,10 @@ def en_vivo(hoy: date | None = None, *, plantas_nuevas: int = 0,
     hoy = hoy or hoy_col()
     resultado = proyecciones(
         hoy,
-        calcular_balance_fn=_balance,
-        precio_fn=_precio_bolsa,
+        # El corte se enhebra al balance y al precio para poder REPLICAR un corte
+        # pasado (mismo precio 7d y misma generación que ese día), no solo el de hoy.
+        calcular_balance_fn=lambda anio, mes: _balance(anio, mes, corte=hoy),
+        precio_fn=lambda: _precio_bolsa(hasta=hoy),
         regulatorio_fn=_regulatorio,
         plantas_nuevas=plantas_nuevas,
         kwh_planta_nueva=kwh_planta_nueva,
