@@ -1,56 +1,118 @@
 """Atribución de la garantía por contrato.
 
-La garantía la genera el DÉFICIT horario (la compra en bolsa que fuerzan los
-mínimos horarios de ciertos contratos). El BalCttos —cruzado hora a hora por
-`app.services.balcttos.deficit_por_contrato`— dice cuánto déficit aporta cada
-contrato; acá se reparte el total de garantía por ese peso, para poder cobrarle
-a cada cliente su parte.
+Solo generan garantía los contratos **PLC** (Pague lo Contratado: si no cubren su
+mínimo tienen que comprar en bolsa) o los que tienen un **duplicado** (energía
+vendida que no existe → toda va a compra en bolsa). Los PLG sin duplicado son
+ruido y quedan fuera.
 
-`repartir` es PURA (peso → monto). El mapeo de código de contrato a proyecto y
-cliente vive en `mapear_contratos`, que sí toca la base.
+El peso de cada contrato sale del **resumen de Cumplimiento**, que ya cruza el
+compromiso contra la generación:
+    peso = compras_bolsa_mwh (si es PLC) + exposicion_bolsa_duplicados_mwh (siempre)
+El total de garantía (lo que estima el modelo, o el real del corte) se reparte
+por ese peso. `repartir` y `pesos_por_contrato_desde_resumen` son PURAS; lo que
+toca la base (`plc_numeros`, el resumen, la persistencia) está aislado y se puede
+inyectar en las pruebas.
+
+Nota (v2, mensual): el resumen netea el déficit al mes, así que un PLC de piso
+HORARIO que cumple su total mensual (BIA, Nitro) sale en 0. Afinar eso pide los
+mínimos horarios y es un paso aparte.
 """
 
 
-def mapear_contratos(codigos: list[str]) -> dict[str, dict]:
-    """{codigo_sic_contrato: {'proyecto_id', 'proyecto', 'contrato_interno'}}.
+def plc_numeros() -> set[str]:
+    """`numero_codigo_contrato` de los contratos marcados PLC.
 
-    Aislado (toca la base) para poder inyectar un doble en las pruebas, igual que
-    `_plantas_contratos_de` en el balance. Un código puede tener varias versiones
-    en `asic_solicitudes` (modificaciones): gana la más reciente con proyecto.
+    El campo vive en `asic_solicitudes.modalidad_pago` ('plc'/'plg'); su código de
+    contrato interno (`contrato_interno`) es el que el resumen usa como
+    `numero_codigo_contrato`. Aislado (toca la base) para inyectar un doble en las
+    pruebas.
     """
     from apps.mercado_xm.models import AsicSolicitud
 
-    filas = (
+    return set(
         AsicSolicitud.objects
-        .filter(codigo_sic_contrato__in=[c for c in codigos if c])
-        .select_related("proyecto")
-        .order_by("codigo_sic_contrato", "-fecha_inicio", "-id")
+        .filter(modalidad_pago="plc", contrato_interno__isnull=False)
+        .values_list("contrato_interno", flat=True)
     )
-    salida: dict[str, dict] = {}
-    for a in filas:
-        cod = a.codigo_sic_contrato
-        if cod in salida and salida[cod]["proyecto_id"] is not None:
-            continue  # ya tenemos una versión con proyecto
-        salida[cod] = {
-            "proyecto_id": a.proyecto_id,
-            "proyecto": a.proyecto.nombre_comercial if a.proyecto_id else None,
-            "contrato_interno": a.nombre_interno or a.contrato_interno,
+
+
+def pesos_por_contrato_desde_resumen(contratos: list[dict],
+                                     plc_numeros: set[str]) -> tuple[dict, dict]:
+    """Peso de cada contrato para el reparto, desde el resumen de Cumplimiento.
+
+    peso = compras_bolsa_mwh (si el contrato es PLC) + exposicion_bolsa_duplicados_mwh.
+    Solo entran los de peso > 0 (los PLG sin duplicado dan 0 y quedan fuera).
+
+    Devuelve `(pesos, meta)`: `pesos={numero_codigo: peso}` para `repartir`, y
+    `meta={numero_codigo: {contrato, comprador, es_plc, es_duplicado}}`.
+    """
+    pesos: dict[str, float] = {}
+    meta: dict[str, dict] = {}
+    for c in contratos:
+        num = c.get("numero_codigo_contrato")
+        if not num:
+            continue
+        es_plc = num in plc_numeros
+        dup = float(c.get("exposicion_bolsa_duplicados_mwh") or 0)
+        compras = float(c.get("compras_bolsa_mwh") or 0)
+        peso = (compras if es_plc else 0.0) + dup
+        if peso <= 0:
+            continue
+        pesos[num] = round(peso, 6)
+        meta[num] = {
+            "contrato": c.get("nombre_interno"),
+            "comprador": c.get("comprador_nombre"),
+            "es_plc": es_plc,
+            "es_duplicado": dup > 0,
         }
-    return salida
+    return pesos, meta
 
 
-def garantia_por_contrato_de_bytes(contenido: bytes, total_garantia: float, *,
-                                   mapear_fn=mapear_contratos) -> list[dict]:
-    """Pipeline completo: parsea el BalCttos, mapea a proyecto/cliente y reparte
-    `total_garantia` por el déficit de cada contrato. `mapear_fn` inyectable."""
-    from app.services.balcttos import deficit_por_contrato_de_bytes
+def repartir(por_contrato: dict[str, float], total_garantia: float) -> list[dict]:
+    """Reparte `total_garantia` entre los contratos proporcional a su peso.
 
-    parseado = deficit_por_contrato_de_bytes(contenido)
-    por_contrato = parseado["por_contrato"]
-    mapa = mapear_fn(list(por_contrato.keys()))
-    return atribuir(por_contrato, total_garantia, mapa=mapa,
-                    comprador=parseado["comprador"])
+    `por_contrato` = {codigo: peso_mwh}. Una fila por contrato con peso > 0,
+    ordenada de mayor a menor monto: {'codigo', 'deficit_mwh', 'pct', 'monto'}.
+    Suma exacta a `total_garantia`. Vacío si no hay peso.
+    """
+    positivos = {c: m for c, m in por_contrato.items() if m and m > 0}
+    total_mwh = sum(positivos.values())
+    if total_mwh <= 0:
+        return []
+    filas = []
+    for codigo, mwh in positivos.items():
+        pct = mwh / total_mwh
+        filas.append({
+            "codigo": codigo,
+            "deficit_mwh": round(mwh, 6),
+            "pct": round(pct, 6),
+            "monto": round(total_garantia * pct, 2),
+        })
+    filas.sort(key=lambda f: f["monto"], reverse=True)
+    return filas
 
+
+def garantia_por_contrato(year: int, month: int, total_garantia: float, *,
+                          resumen_fn=None, plc_fn=plc_numeros) -> list[dict]:
+    """Reparto de la garantía del mes entre los contratos que la generan.
+
+    Pipeline: resumen de Cumplimiento → pesos (PLC + duplicados) → reparte el
+    total. `resumen_fn` y `plc_fn` se inyectan en las pruebas.
+    """
+    if resumen_fn is None:
+        from apps.mercado_xm.services.cumplimiento.resumen import resumen as resumen_fn
+
+    contratos = resumen_fn(year, month, incluir_todos=True).get("contratos") or []
+    pesos, meta = pesos_por_contrato_desde_resumen(contratos, plc_fn())
+    filas = repartir(pesos, total_garantia)
+    for f in filas:
+        f.update(meta.get(f["codigo"], {}))
+    return filas
+
+
+# ---------------------------------------------------------------------------
+# Persistencia
+# ---------------------------------------------------------------------------
 
 def guardar_atribucion(fecha_corte, anio: int, mes: int, total_garantia: float,
                        filas: list[dict]) -> int:
@@ -95,47 +157,3 @@ def leer_atribucion(anio: int, mes: int, fecha_corte=None) -> list[dict]:
         }
         for f in filas
     ]
-
-
-def repartir(por_contrato: dict[str, float], total_garantia: float) -> list[dict]:
-    """Reparte `total_garantia` entre los contratos proporcional a su déficit.
-
-    `por_contrato` = {codigo: deficit_mwh}. Devuelve una fila por contrato con
-    déficit > 0, ordenada de mayor a menor monto:
-        {'codigo', 'deficit_mwh', 'pct', 'monto'}.
-    Suma exacta a `total_garantia`. Vacío si no hay déficit.
-    """
-    positivos = {c: m for c, m in por_contrato.items() if m and m > 0}
-    total_mwh = sum(positivos.values())
-    if total_mwh <= 0:
-        return []
-    filas = []
-    for codigo, mwh in positivos.items():
-        pct = mwh / total_mwh
-        filas.append({
-            "codigo": codigo,
-            "deficit_mwh": round(mwh, 6),
-            "pct": round(pct, 6),
-            "monto": round(total_garantia * pct, 2),
-        })
-    filas.sort(key=lambda f: f["monto"], reverse=True)
-    return filas
-
-
-def atribuir(por_contrato: dict[str, float], total_garantia: float, *,
-             mapa: dict[str, dict], comprador: dict[str, str]) -> list[dict]:
-    """`repartir` + enriquecido con contrato/proyecto/cliente.
-
-    `mapa` = {codigo: {'proyecto_id', 'proyecto', 'contrato_interno'}} (de
-    `mapear_contratos`); `comprador` = {codigo: codigo_sic_comprador} (del
-    BalCttos). Un código sin mapa NO se pierde: queda con contrato/proyecto en
-    None, para que la suma siga cuadrando con el total.
-    """
-    filas = repartir(por_contrato, total_garantia)
-    for f in filas:
-        m = mapa.get(f["codigo"]) or {}
-        f["contrato"] = m.get("contrato_interno")
-        f["proyecto"] = m.get("proyecto")
-        f["proyecto_id"] = m.get("proyecto_id")
-        f["comprador"] = comprador.get(f["codigo"])
-    return filas

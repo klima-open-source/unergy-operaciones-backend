@@ -134,12 +134,14 @@ class GarantiaProyeccionViewSet(viewsets.GenericViewSet):
     @action(detail=False, methods=["get", "post"], url_path="atribucion")
     @log_endpoint(name="Operaciones | Garantías | Atribución por contrato")
     def atribucion(self, request):
-        """Reparte la garantía entre los contratos que la generan (su déficit).
+        """Reparte la garantía entre los contratos que la generan.
 
-        POST (con el BalCttos en `archivo`): cruza el déficit horario por
-        contrato, lo reparte sobre el total de garantía que ESTIMA el modelo para
-        la ventana del mes siguiente, lo guarda y lo devuelve.
-        GET: el último reparto guardado de esa ventana (`?anio=&mes=`), sin recalcular.
+        Solo cargan garantía los PLC (que no cubren su mínimo) o los que tienen
+        duplicado; el peso sale del resumen de Cumplimiento (no de un archivo).
+
+        POST: reparte el total que ESTIMA el modelo para el mes siguiente (M+1),
+        lo guarda y lo devuelve.
+        GET: el último reparto guardado de esa ventana (`?anio=&mes=`).
         """
         if request.method == "GET":
             anio = int(_numero(request, "anio", None, 2020, 2050))
@@ -148,10 +150,6 @@ class GarantiaProyeccionViewSet(viewsets.GenericViewSet):
                 "anio": anio, "mes": mes,
                 "contratos": atribucion_service.leer_atribucion(anio, mes),
             })
-
-        archivo = request.FILES.get("archivo")
-        if archivo is None:
-            raise ValidationError({"archivo": "Falta el archivo BalCttos."})
 
         # Total a repartir = el que estima el modelo para el mes siguiente (M+1),
         # que es la garantía mensual que precobra XM.
@@ -163,7 +161,9 @@ class GarantiaProyeccionViewSet(viewsets.GenericViewSet):
             raise ValidationError({"modelo": "El modelo no devolvió la ventana del mes siguiente."})
         total = ventana.get("garantia_total") or 0.0
 
-        filas = atribucion_service.garantia_por_contrato_de_bytes(archivo.read(), total)
+        filas = atribucion_service.garantia_por_contrato(
+            ventana["anio"], ventana["mes"], total
+        )
         fecha_corte = date.fromisoformat(resultado["fecha_corte"])
         guardadas = atribucion_service.guardar_atribucion(
             fecha_corte, ventana["anio"], ventana["mes"], total, filas

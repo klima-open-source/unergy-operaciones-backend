@@ -5,8 +5,6 @@ import openpyxl
 
 from app.services.balcttos import (
     _norm,
-    deficit_por_contrato,
-    deficit_por_contrato_de_bytes,
     neto_compras_bolsa,
     neto_compras_bolsa_de_bytes,
     proyectar_neto_mwh,
@@ -15,53 +13,6 @@ from app.services.balcttos import (
 
 def _fila(concepto, fecha, horas):
     return {"concepto": concepto, "fecha": fecha, "horas": horas}
-
-
-def _fila_c(concepto, fecha, codigo, comprador, horas):
-    return {"concepto": concepto, "fecha": fecha, "codigo": codigo,
-            "comprador": comprador, "horas": horas}
-
-
-def test_deficit_por_contrato_reparte_cada_hora_proporcional_a_la_obligacion():
-    # Hora 0: solo C1 demanda (1000 kWh); deficit 500 -> todo a C1.
-    # Hora 1: C1 y C2 demandan 500 c/u; deficit 200 -> 100 y 100.
-    # Esperado: C1 = (500+100)/1000 = 0.6 MWh ; C2 = 100/1000 = 0.1 MWh
-    def horas(v0, v1):
-        return [v0, v1] + [0.0] * 22
-    filas = [
-        _fila_c("CONTRATO DE VENTA", "2026-08-01", "C1", "TPLC", horas(1000.0, 500.0)),
-        _fila_c("CONTRATO DE VENTA", "2026-08-01", "C2", "NEUC", horas(0.0, 500.0)),
-        _fila_c("NETO DE COMPRAS EN BOLSA", "2026-08-01", None, None, horas(500.0, 200.0)),
-    ]
-    out = deficit_por_contrato(filas)
-    assert out["por_contrato"]["C1"] == 0.6
-    assert out["por_contrato"]["C2"] == 0.1
-    assert out["total_mwh"] == 0.7
-
-
-def test_deficit_hora_sin_obligacion_no_se_reparte():
-    # Deficit en una hora donde ningun contrato demanda: no se puede atribuir,
-    # queda fuera del reparto (pero el total refleja solo lo atribuido).
-    def horas(v):
-        return [v] + [0.0] * 23
-    filas = [
-        _fila_c("CONTRATO DE VENTA", "2026-08-01", "C1", "TPLC", horas(0.0)),
-        _fila_c("NETO DE COMPRAS EN BOLSA", "2026-08-01", None, None, horas(300.0)),
-    ]
-    out = deficit_por_contrato(filas)
-    assert out["por_contrato"] == {}
-    assert out["total_mwh"] == 0.0
-
-
-def test_deficit_por_contrato_guarda_comprador():
-    def horas(v):
-        return [v] + [0.0] * 23
-    filas = [
-        _fila_c("CONTRATO DE VENTA", "2026-08-01", "C1", "TPLC", horas(1000.0)),
-        _fila_c("NETO DE COMPRAS EN BOLSA", "2026-08-01", None, None, horas(1000.0)),
-    ]
-    out = deficit_por_contrato(filas)
-    assert out["comprador"]["C1"] == "TPLC"
 
 
 def test_norm_quita_acentos():
@@ -112,30 +63,6 @@ def _xlsx_balcttos_bytes():
 def test_lee_xlsx_en_memoria():
     out = neto_compras_bolsa_de_bytes(_xlsx_balcttos_bytes())
     assert out["total_mwh"] == 24.0
-
-
-def _xlsx_balcttos_contratos_bytes():
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.append(["FechaDocumento", "CONCEPTO", "MERCADO", "CODIGO CONTRATO", "COMPRADOR",
-               "VENDEDOR", "TIPO DE DESPACHO", "TIPO ASIGNA"] + [f"HORA {h:02d}" for h in range(1, 25)])
-    # Hora 0: solo C1 (1000); Hora 1: C1 y C2 (500 c/u)
-    ws.append(["2026-08-01", "CONTRATO DE VENTA", "NO REGULADO", "C1", "TPLC",
-               "UNGG", "PC", "NB"] + [1000.0, 500.0] + [0.0] * 22)
-    ws.append(["2026-08-01", "CONTRATO DE VENTA", "NO REGULADO", "C2", "NEUC",
-               "UNGG", "PC", "NB"] + [0.0, 500.0] + [0.0] * 22)
-    ws.append(["2026-08-01", "NETO DE COMPRAS EN BOLSA", "NACIONAL", None, None,
-               "UNGG", "", ""] + [500.0, 200.0] + [0.0] * 22)
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
-
-
-def test_deficit_por_contrato_de_bytes_lee_codigo_y_atribuye():
-    out = deficit_por_contrato_de_bytes(_xlsx_balcttos_contratos_bytes())
-    assert out["por_contrato"]["C1"] == 0.6
-    assert out["por_contrato"]["C2"] == 0.1
-    assert out["comprador"]["C1"] == "TPLC"
 
 
 def test_proyectar_neto_extrapola_tasa_diaria_real():
