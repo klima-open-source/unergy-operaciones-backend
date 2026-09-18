@@ -70,6 +70,7 @@ class ContratoSerializer(serializers.ModelSerializer):
             "gescon_codigo", "gescon_fecha_inicio", "gescon_fecha_fin",
             "gescon_precio", "gescon_cantidades_kwh", "codigo_sic",
             "tipo_contrato", "renovacion_automatica", "es_comunidad_energetica",
+            "fecha_entrada_comunidad",
             "proyectos", "tarifas", "compromisos_energia", "carpeta_link",
             "estado_cumplimiento", "dias_restantes", "cobertura_actual_pct",
             "created_at", "updated_at",
@@ -119,6 +120,7 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
             "gescon_codigo", "gescon_fecha_inicio", "gescon_fecha_fin",
             "gescon_precio", "gescon_cantidades_kwh", "codigo_sic",
             "tipo_contrato", "renovacion_automatica", "es_comunidad_energetica",
+            "fecha_entrada_comunidad",
             "proyecto_ids", "carpeta_link",
         ]
         extra_kwargs = {c: {"required": False} for c in fields}

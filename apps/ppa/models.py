@@ -47,6 +47,13 @@ class PpaContrato(Timer):
     tipo_contrato = models.CharField(max_length=20, null=True, blank=True, default="venta")
     renovacion_automatica = models.BooleanField(null=True, blank=True)
     es_comunidad_energetica = models.BooleanField(null=True, blank=True)
+    # Desde cuándo la planta está en la comunidad, que NO es cuándo arranca el
+    # PPA. Marca el corte a partir del cual dejan de prestarse representación y
+    # CGM; ver `apps.contratos.services.grupos.presta_servicio`.
+    fecha_entrada_comunidad = models.DateField(null=True, blank=True)
+    # El nombre vive acá y no en la planta: cinco plantas de la misma
+    # comunidad guardaban cinco copias del mismo texto.
+    nombre_comunidad = models.CharField(max_length=255, null=True, blank=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:

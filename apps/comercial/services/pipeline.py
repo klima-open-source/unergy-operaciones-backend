@@ -1058,9 +1058,34 @@ def _clasificacion(proyecto) -> dict:
         "tipo_tecnologia": _valor_enum(proyecto.tipo_tecnologia),
         "tipo_proyecto": _valor_enum(proyecto.tipo_proyecto),
         # Ortogonal a todo lo anterior: cualquier planta puede o no pertenecer a
-        # una comunidad energética.
-        "es_comunidad_energetica": bool(proyecto.es_comunidad_energetica),
-        "nombre_comunidad": proyecto.nombre_comunidad,
+        # una comunidad energética. Sale del PPA, que es donde se negocia -- el
+        # proyecto tenía sus propias columnas y nada las sincronizaba, el mismo
+        # problema que las banderas `srv_*`. Ver la migración
+        # `proyectos/0008_quitar_comunidad_del_proyecto`.
+        **_comunidad_de(proyecto),
+    }
+
+
+def _comunidad_de(proyecto) -> dict:
+    """Si la planta está en una comunidad energética, y en cuál.
+
+    Una consulta por planta, que es lo que esta ficha necesita: se arma de a
+    una. Para listados hay que usar `comunidades.plantas_en_comunidad()`, que
+    resuelve todas de un golpe.
+    """
+    from apps.ppa.models import PpaContrato
+
+    ppa = (
+        PpaContrato.objects
+        .filter(proyectos_vinculados__proyecto_id=proyecto.id,
+                deleted_at__isnull=True, es_comunidad_energetica=True)
+        .order_by("-fecha_entrada_comunidad", "-fecha_inicio")
+        .first()
+    )
+    return {
+        "es_comunidad_energetica": ppa is not None,
+        "nombre_comunidad": ppa.nombre_comunidad if ppa else None,
+        "fecha_entrada_comunidad": ppa.fecha_entrada_comunidad if ppa else None,
     }
 
 

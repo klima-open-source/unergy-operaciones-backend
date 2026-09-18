@@ -54,8 +54,6 @@ class Proyecto(Timer):
     operador_red = models.ForeignKey("fronteras.OperadorRed", on_delete=models.DO_NOTHING, db_column="operador_red_id", null=True, blank=True, related_name="proyectos_por_operador_red_id")
     project_id_solenium = models.CharField(max_length=100, null=True, blank=True)
     project_id_solarview = models.CharField(max_length=100, null=True, blank=True)
-    es_comunidad_energetica = models.BooleanField(default=False)
-    nombre_comunidad = models.CharField(max_length=255, null=True, blank=True)
     srv_operacion = models.BooleanField(default=False)
     srv_representacion = models.BooleanField(default=False)
     srv_cgm = models.BooleanField(default=False)

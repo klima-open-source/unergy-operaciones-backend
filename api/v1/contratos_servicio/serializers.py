@@ -3,7 +3,9 @@
 from rest_framework import serializers
 
 from apps.contratos import models as ct_models
+from apps.contratos.services import comunidades as comunidades_service
 from apps.contratos.services import grupos as grupos_service
+from apps.plataforma.services.fechas import hoy_col
 from apps.facturacion import models as fa_models
 from apps.proyectos import models as py_models
 
@@ -90,6 +92,32 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
         model = ct_models.ContratoServicio
         exclude = ["proyecto"]
         extra_kwargs = {"servicio_aplica": {"required": False}}
+
+    def validate(self, datos):
+        """Una planta en comunidad energética no recibe representación ni CGM.
+
+        La validación vive acá y no solo en el front porque es la API la que de
+        verdad impide guardarlo: el wizard puede saltarse, una llamada directa
+        no. El texto sale de `comunidades.motivo_bloqueo` para que el mensaje
+        sea el mismo en los dos lados.
+
+        Se valida sobre los datos YA combinados con la instancia: en un PATCH
+        que solo cambia la planta, `servicio_aplica` no viene en el cuerpo.
+        """
+        proyecto = datos.get("proyecto", getattr(self.instance, "proyecto", None))
+        servicio = datos.get(
+            "servicio_aplica", getattr(self.instance, "servicio_aplica", None)
+        )
+        if proyecto is None or servicio is None:
+            return datos
+
+        motivo = comunidades_service.motivo_bloqueo(
+            proyecto.id, servicio,
+            comunidades_service.plantas_en_comunidad(hoy_col()),
+        )
+        if motivo:
+            raise serializers.ValidationError({"proyecto_id": motivo})
+        return datos
 
 
 class FacturaSerializer(serializers.ModelSerializer):
