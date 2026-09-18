@@ -478,6 +478,62 @@ que hoy entran en un módulo y no en otro. Cuál de las variantes gana es decisi
 de negocio, y hay que verla con la lista de plantas afectadas delante — el mismo
 método de la Fase 3 en §4-bis.
 
+## 4-sexies. Comunidades energéticas: una regla de exclusión
+
+**Contado por Sara el 2026-09-18.** Unergy está entrando al negocio de
+comunidades energéticas, y eso se negocia **dentro del PPA**.
+
+> Si un PPA entra a comunidad energética, a esas plantas **ya no se les presta
+> representación ni CGM**.
+
+Es la primera regla de este tipo. Hasta acá todo era "tiene contrato vigente →
+tiene el servicio"; esto agrega **combinaciones que no deben existir**.
+
+### Lo que ya hay en el modelo, sin conectar
+
+Tres campos existen desde antes y nada los relaciona con los servicios:
+
+```
+proyectos.es_comunidad_energetica      (booleano, default False)
+proyectos.nombre_comunidad             (texto)
+ppa_contratos.es_comunidad_energetica  (booleano, admite nulo)
+```
+
+Y el pipeline comercial ya tiene un tipo de oportunidad `comunidad_energetica`.
+
+### Las tres decisiones (Sara, 2026-09-18)
+
+**1. La marca vive en el CONTRATO y se deriva al proyecto.** Se negocia en el
+PPA, así que `ppa_contratos.es_comunidad_energetica` es la fuente y el campo del
+proyecto sale de ahí. Es el mismo criterio que se aplicó a las banderas `srv_*`:
+el dato vive donde se decide, no duplicado en la planta.
+
+**2. Al entrar a comunidad, el contrato de Representación y CGM se TERMINA.** No
+se deja vencer: se cierra. Encaja con el modelo de `estado` que quedó tras la
+migración 0006 -- `terminado` es justamente la decisión humana de cerrar un
+contrato, y la vigencia calculada lo respeta sobre cualquier fecha.
+
+**3. El sistema debe IMPEDIR crear un contrato de representación a una planta en
+comunidad.** No es solo una alerta: es una validación.
+
+### Efecto sobre las 74 plantas por corregir (§4-ter)
+
+**Una planta en comunidad energética que no tenga contrato de representación NO
+es un error**: es lo correcto. Esas plantas salen de la lista de pendientes en
+vez de cargarles un contrato.
+
+Cuánto cambia el número está **sin medir**: el acceso a la base se perdió otra
+vez el 2026-09-18 (la IP de Sara volvió a rotar, ver §8). Es lo primero que hay
+que correr cuando vuelva.
+
+### Lo que queda por definir
+
+- **Qué pasa con un contrato vigente hasta 2030** cuando la planta entra a
+  comunidad en 2027. La decisión 2 dice que se termina, pero falta si eso lo
+  hace una persona o el sistema al marcar el PPA.
+- **Dónde va la validación de la decisión 3**: en el serializer de
+  `contratos_servicio`, en el wizard, o en los dos.
+
 ## 5. Cómo estructurarlo — dos opciones
 
 ### Opción A — Derivar los subservicios al leer (sin cambio de esquema)
