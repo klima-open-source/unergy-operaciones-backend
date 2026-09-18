@@ -26,6 +26,7 @@ from api.v1.proyectos.serializers import ProyectoDesdeCrmSerializer
 from apps.comercial import models as co_models
 from apps.comercial.services import (
     actualizacion, consultas, escritura, mantenimiento, pipeline, salidas,
+    versiones,
 )
 from apps.fronteras.models import OperadorRed
 from apps.proyectos.models import Proyecto
@@ -57,6 +58,8 @@ class ComercialViewSet(viewsets.GenericViewSet):
     GET|POST /api/v1/comercial/oportunidades/{id}/ofertas
     GET  /api/v1/comercial/ofertas  ·  PATCH|DELETE /api/v1/comercial/ofertas/{id}
     POST /api/v1/comercial/ofertas/{id}/estado · /firmar · /seguimiento
+    GET|POST /api/v1/comercial/ofertas/{id}/versiones
+    POST /api/v1/comercial/ofertas/{id}/versiones/{numero}/aceptar
     POST /api/v1/comercial/ofertas/vincular-proyectos
     GET  /api/v1/comercial/proyectos-operando
     POST /api/v1/comercial/backfill · /dedup-clientes · /aplicar-actualizacion
@@ -550,6 +553,62 @@ class ComercialViewSet(viewsets.GenericViewSet):
         oferta.seguimientos = (oferta.seguimientos or 0) + 1
         oferta.save(update_fields=["seguimientos"])
         return Response(consultas.oferta_completa(oferta))
+
+    # ── Versiones de la oferta ────────────────────────────────────────────
+
+    @action(
+        detail=False, methods=["get", "post"],
+        url_path=r"ofertas/(?P<oferta_id>\d+)/versiones",
+    )
+    def oferta_versiones(self, request, oferta_id=None):
+        """Las propuestas de una oferta. Reofertar es agregar una, no editar.
+
+        `GET` las devuelve de la más nueva a la más vieja: la que interesa es la
+        última. `POST` agrega la siguiente y le asigna el número; sin
+        `fecha_envio` nace como borrador.
+
+        **No hay `PATCH` ni `DELETE` a propósito.** Son append-only: de eso
+        depende que la cronología sea confiable, igual que en la bitácora de
+        Prospección. Ver `docs/DOMINIO_COMERCIAL.md`, O-8 y O-9.
+        """
+        oferta = self._oferta(oferta_id)
+
+        if request.method == "GET":
+            filas = (
+                oferta.versiones.prefetch_related("precios").order_by("-numero")
+            )
+            return Response(
+                co_serializers.VersionOfertaSerializer(filas, many=True).data
+            )
+
+        entrada = co_serializers.VersionOfertaCrearSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        version = versiones.agregar(oferta, dict(entrada.validated_data), request.user)
+        return Response(
+            co_serializers.VersionOfertaSerializer(version).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(
+        detail=False, methods=["post"],
+        url_path=r"ofertas/(?P<oferta_id>\d+)/versiones/(?P<numero>\d+)/aceptar",
+    )
+    def aceptar_version(self, request, oferta_id=None, numero=None):
+        """Marca cuál propuesta aceptó el cliente. Es la que se firmará.
+
+        De acá saldrán las condiciones con las que nace el PPA, así que como
+        mucho puede haber una aceptada por oferta: dos harían ambiguo con qué
+        precio se firma.
+        """
+        oferta = self._oferta(oferta_id)
+        version = oferta.versiones.filter(numero=numero).first()
+        if version is None:
+            raise NotFound(f"La oferta no tiene una versión {numero}")
+
+        entrada = co_serializers.AceptarVersionSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        versiones.aceptar(version, entrada.validated_data["fecha_aceptacion"])
+        return Response(co_serializers.VersionOfertaSerializer(version).data)
 
     @action(detail=False, methods=["post"], url_path="ofertas/vincular-proyectos")
     def vincular_proyectos(self, request):
