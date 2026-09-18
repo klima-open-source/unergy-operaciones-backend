@@ -417,12 +417,38 @@ contrato, así que la regresión no dejó datos históricos dañados. Lo que sí
    Coincide con la regla del empalme: *«Desde Firmado la verdad vive en el
    CONTRATO. El CRM sólo LEE»* (`DOMINIO_COMERCIAL.md`, Etapa 3).
 
-9. **Retirar la copia de GESCON.** El detalle deja de mostrar las seis columnas
-   copiadas y muestra los registros ASIC reales del contrato, derivados de la
-   relación que ya existe; se siguen editando donde se editan hoy, en GESCON.
-   Sin nadie leyéndolas, las columnas salen con una migración. Es lo que más
-   «una sola fuente de verdad» compra por lo poco que cuesta: hoy nada del
-   backend depende de ellas.
+9. **Retirar la copia de GESCON** — *paso 1 hecho el 2026-09-18; falta la
+   migración.*
+
+   ✅ **Nadie escribe ya las seis columnas.** Salieron de las tres pantallas que
+   las tecleaban: el paso «GESCON» del wizard (que pasa a ser «Resumen»), la
+   sección GESCON del detalle, y `PPAView.vue` —ésa la eliminó la rama
+   `arreglo-acordeon`, que redirige `/proyectos/{id}/ppa` a la vista unificada—.
+   También salió el resumen de la copia en el panel de Cumplimiento.
+
+   ✅ **En su lugar se muestran los registros reales**, que ya estaban ahí: tanto
+   el detalle como Cumplimiento tenían una tabla de `asic_solicitudes` justo
+   debajo de la copia. No hubo que construir nada nuevo; hubo que **borrar** lo
+   que sobraba.
+
+   ✅ `GET /asic?contrato_ppa_id=` — el filtro por LLAVE que faltaba. El detalle
+   lo usa y deja el emparejamiento por `contrato_interno` como respaldo para los
+   registros históricos sin FK, igual que hace `validar_fecha_fin_vs_asic`.
+
+   ⏳ **Falta la migración que borra las columnas**, a propósito: `ppa_contratos`
+   vive en la base compartida `operations` y otro servicio de Unergy podría
+   leerlas directo. Antes de aplicarla hay que confirmar que no. Cuando se
+   confirme, el paso 2 es:
+
+   - quitar los seis campos de `PpaContrato` (`apps/ppa/models.py`),
+   - quitarlos de `ContratoSerializer` y `ContratoEscrituraSerializer`,
+   - `makemigrations ppa` → `RemoveField` × 6,
+   - y de la `ContratoPpa` del frontend (`types.ts`).
+
+   Los datos que se perderían son 16 valores: `gescon_codigo` en 4 contratos,
+   cada fecha en 2, `codigo_sic` en 10, y **cero** en precio y cantidades. Uno de
+   ellos ya está mal (el contrato 19 declara el `codigo_sic` del 15).
+
 10. **Las partes por llave, no por texto.** 26 de 33 contratos vivos no tienen
    `comprador_id`; el nombre está escrito a mano y casi ninguno resuelve
    automáticamente contra `clientes` (difieren el punto final, el formato del
