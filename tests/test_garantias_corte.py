@@ -48,6 +48,15 @@ def test_en_vivo_enhebra_el_corte_al_precio_y_al_balance(monkeypatch):
     monkeypatch.setattr(svc, "_precio_bolsa", fake_precio)
     monkeypatch.setattr(svc, "neto_de_ventana", lambda a, m, d: None)
     monkeypatch.setattr(svc, "pagado_por_periodo", lambda: {})
+    # `_regulatorio` va a buscar el archivo del mes a Google Drive. Sin este
+    # parche la prueba solo pasa en una máquina con `GOOGLE_SERVICE_ACCOUNT_JSON`
+    # configurado -- en CI no lo hay, y ahí fallaba. Lo que se prueba acá es que
+    # el corte se enhebre al precio y al balance; el costo regulatorio no
+    # participa, así que basta con que devuelva su forma.
+    monkeypatch.setattr(
+        svc, "_regulatorio",
+        lambda anio, mes: {"valor": 0.0, "anio": anio, "mes": mes, "fallback": False},
+    )
 
     r = svc.en_vivo(hoy=corte)
 
