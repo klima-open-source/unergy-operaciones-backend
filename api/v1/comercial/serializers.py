@@ -85,7 +85,6 @@ class OfertaCrearSerializer(serializers.Serializer):
     fecha_fin_tentativa = serializers.DateField(required=False, allow_null=True, default=None)
     contrato_firmado = serializers.CharField(required=False, allow_null=True, allow_blank=True, default=None)
     documento_url = serializers.CharField(required=False, allow_null=True, allow_blank=True, default=None)
-    detalle = serializers.JSONField(required=False, allow_null=True, default=None)
     # Ficha operativa DECLARADA: solo aplica cuando la planta no existe como
     # Proyecto. Si lo tiene, manda el Proyecto (ver `ficha_operativa`).
     municipio = serializers.CharField(required=False, allow_null=True, allow_blank=True, default=None)
@@ -115,7 +114,6 @@ class OfertaActualizarSerializer(serializers.Serializer):
     fecha_tentativa_inicio = serializers.DateField(required=False, allow_null=True)
     fecha_fin_tentativa = serializers.DateField(required=False, allow_null=True)
     contrato_firmado = serializers.CharField(required=False, allow_null=True, allow_blank=True)
-    detalle = serializers.JSONField(required=False, allow_null=True)
     fecha_ultima_respuesta = serializers.DateField(required=False, allow_null=True)
     seguimientos = serializers.IntegerField(required=False, allow_null=True, min_value=0)
     documento_url = serializers.CharField(required=False, allow_null=True, allow_blank=True)

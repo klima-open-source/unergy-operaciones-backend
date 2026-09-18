@@ -2,6 +2,7 @@
 
 from rest_framework import serializers
 
+from apps.clientes import models as cl_models
 from apps.ppa import models as ppa_models
 
 
@@ -100,6 +101,32 @@ class ContratoSerializer(serializers.ModelSerializer):
 
 
 class ContratoEscrituraSerializer(serializers.ModelSerializer):
+    """Escritura de un contrato PPA.
+
+    **Las tres relaciones viajan como `<rol>_id`, igual que en la lectura.** Si
+    se dejan con el nombre que les da el ORM (`comprador`, `vendedor`,
+    `responsable`), DRF descarta en silencio las claves que manda el frontend
+    —`comprador_id` y compañía— y el contrato se crea SIN partes y SIN
+    responsable, devolviendo 201. Fue exactamente lo que pasó entre el port a
+    Django (2026-09-04) y este arreglo; `PPAContratoCreate` de FastAPI las
+    recibía con `_id` y el front nunca cambió. Ver `docs/DIAGNOSTICO_PPA.md` §3.
+
+    `PrimaryKeyRelatedField` además valida: un id que no existe da 400 en vez de
+    pasar de largo.
+    """
+
+    responsable_id = serializers.PrimaryKeyRelatedField(
+        source="responsable", queryset=ppa_models.PpaResponsable.objects.all(),
+        required=False, allow_null=True,
+    )
+    comprador_id = serializers.PrimaryKeyRelatedField(
+        source="comprador", queryset=cl_models.Cliente.objects.all(),
+        required=False, allow_null=True,
+    )
+    vendedor_id = serializers.PrimaryKeyRelatedField(
+        source="vendedor", queryset=cl_models.Cliente.objects.all(),
+        required=False, allow_null=True,
+    )
     proyecto_ids = serializers.ListField(
         child=serializers.IntegerField(), required=False, allow_null=True
     )
@@ -110,8 +137,8 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
     class Meta:
         model = ppa_models.PpaContrato
         fields = [
-            "numero_codigo_contrato", "nombre_interno", "responsable",
-            "comprador", "vendedor", "comprador_nombre", "comprador_nit",
+            "numero_codigo_contrato", "nombre_interno", "responsable_id",
+            "comprador_id", "vendedor_id", "comprador_nombre", "comprador_nit",
             "vendedor_nombre", "vendedor_nit", "fecha_inicio", "fecha_fin",
             "tarifa_base", "indice_indexacion", "periodicidad_indexacion",
             "periodo_indexacion_base", "valor_indexacion_base",
@@ -124,6 +151,28 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
             "proyecto_ids", "carpeta_link",
         ]
         extra_kwargs = {c: {"required": False} for c in fields}
+
+
+class ContratoCreacionSerializer(ContratoEscrituraSerializer):
+    """`POST /ppa`: el contrato Y sus dos series, en un solo cuerpo.
+
+    Separado del de edición porque solo la creación las acepta: el wizard hacía
+    tres peticiones seguidas sin transacción común —contrato, luego tarifas,
+    luego compromisos— y si la segunda fallaba el contrato quedaba a medias sin
+    que nadie se enterara. Así quedaron 13 contratos sin tarifas y 14 sin
+    compromisos. Para EDITAR las series siguen estando `PUT /ppa/{id}/tarifas` y
+    `PUT /ppa/{id}/compromisos`, que reemplazan el conjunto.
+
+    Las dos son opcionales: un contrato se puede crear sin ellas y la respuesta
+    lo avisa (ver `apps.ppa.services.escritura`).
+    """
+
+    tarifas = TarifaEntradaSerializer(many=True, required=False)
+    compromisos = CompromisoEntradaSerializer(many=True, required=False)
+
+    class Meta(ContratoEscrituraSerializer.Meta):
+        fields = ContratoEscrituraSerializer.Meta.fields + ["tarifas", "compromisos"]
+        extra_kwargs = ContratoEscrituraSerializer.Meta.extra_kwargs
 
 
 class ResponsableSerializer(serializers.ModelSerializer):

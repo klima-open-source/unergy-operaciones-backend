@@ -27,7 +27,6 @@ from apps.comercial import models as co_models
 from apps.comercial.services import (
     actualizacion, consultas, escritura, mantenimiento, pipeline, salidas,
 )
-from apps.comun.config import settings
 from apps.fronteras.models import OperadorRed
 from apps.proyectos.models import Proyecto
 from apps.proyectos.services.unicidad import (
@@ -525,15 +524,19 @@ class ComercialViewSet(viewsets.GenericViewSet):
         entrada = co_serializers.FirmarOfertaSerializer(data=request.data)
         entrada.is_valid(raise_exception=True)
         datos = dict(entrada.validated_data)
-        contrato, n_plantas = escritura.firmar(oferta, datos, request.user)
+        resultado = escritura.firmar(oferta, datos, request.user)
         return Response({
             "oferta": consultas.oferta_completa(oferta),
-            "ppa_contrato_id": contrato.id,
-            "tarifas_creadas": len(escritura.tarifas_mensuales(datos)),
+            "ppa_contrato_id": resultado.contrato.id,
+            # Los conteos salen del resultado y no se recalculan: antes
+            # `tarifas_creadas` volvía a expandir la tabla de precios acá, y dos
+            # cuentas de lo mismo pueden dejar de coincidir.
+            "tarifas_creadas": resultado.tarifas,
             # Firmar con 0 plantas es legítimo —la planta puede no existir todavía
             # como Proyecto— pero Cumplimiento no puede medir ese PPA, así que el
             # dato viaja para que la UI avise en vez de dejarlo pasar en silencio.
-            "plantas_del_contrato": n_plantas,
+            "plantas_del_contrato": resultado.plantas,
+            "avisos": resultado.avisos,
         }, status=status.HTTP_201_CREATED)
 
     @action(

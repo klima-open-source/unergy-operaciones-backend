@@ -1,9 +1,8 @@
 """ViewSet de GESCON/ASIC."""
 
-from django.shortcuts import get_object_or_404
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 
 from api.exceptions import Conflict, NoProcesable
@@ -49,7 +48,7 @@ class AsicViewSet(
 ):
     """Registros GESCON ante el ASIC.
 
-    GET    /api/v1/asic[?codigo_sic_contrato=&contrato_interno=&proyecto_id=]
+    GET    /api/v1/asic[?codigo_sic_contrato=&contrato_interno=&proyecto_id=&contrato_ppa_id=]
     POST   /api/v1/asic                        → 201
     PATCH  /api/v1/asic/{id}
     DELETE /api/v1/asic/{id}                   → 204; 409 si alimenta Cumplimiento
@@ -77,11 +76,22 @@ class AsicViewSet(
         return asic_serializers.SolicitudSerializer
 
     def list(self, request, *args, **kwargs):
+        """Los registros GESCON, filtrables.
+
+        **`contrato_ppa_id` filtra por la LLAVE; `contrato_interno`, por texto.**
+        Los dos existen porque el emparejamiento por código de contrato es el
+        respaldo histórico, pero la llave es la fuente de verdad: si alguien
+        edita `numero_codigo_contrato`, el filtro por texto deja de encontrar los
+        registros y la llave no. Es el filtro que usa el detalle del PPA para
+        mostrar sus registros reales en vez de la copia que vivía en
+        `ppa_contratos` (ver `docs/DIAGNOSTICO_PPA.md` §4).
+        """
         consulta = mx_models.AsicSolicitud.objects.select_related("proyecto")
         for parametro, campo in (
             ("codigo_sic_contrato", "codigo_sic_contrato"),
             ("contrato_interno", "contrato_interno"),
             ("proyecto_id", "proyecto_id"),
+            ("contrato_ppa_id", "contrato_ppa_id"),
         ):
             valor = request.query_params.get(parametro)
             if valor:

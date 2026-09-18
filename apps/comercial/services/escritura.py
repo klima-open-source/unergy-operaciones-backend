@@ -26,19 +26,30 @@ from apps.comercial.models import (
     Oportunidad, OportunidadEstadoHistorial, OportunidadOferta,
     OportunidadOfertaProyecto,
 )
-from apps.comercial.services.documentos import set_enlace_documento
 from apps.comercial.services.pipeline import col_now, estado_a_resultado
 from apps.comercial.services.salidas import _SEG_TIPO, norm_codigo, valor
 from apps.comun.nombre_matching import parece_persona_juridica
 from apps.fronteras.models import OperadorRed
-from apps.ppa.models import PpaContrato, PpaContratoProyecto, PpaTarifa
+from apps.ppa.services import escritura as ppa_escritura
 from apps.proyectos.models import Proyecto
 
 _RE_CONSECUTIVO = re.compile(r"No\.\s*(\d+)")
 
-# Los dos tipos de oferta que desembocan en un PPA. Las de servicios
-# (representación, CGM) van a `contratos_servicio` y no son contratos de energía.
-TIPOS_ENERGIA = ("compra_energia", "comunidad_energetica")
+# Qué tipo de PPA produce cada tipo de oferta. Las de servicios (representación,
+# CGM) no están acá: van a `contratos_servicio` y no son contratos de energía.
+#
+# **Es un mapa explícito y no un default, a propósito.** Antes `firmar()` grababa
+# `tipo_contrato="compra"` a mano, y funciona solo porque el CRM todavía no tiene
+# ofertas de venta. El día que las tenga, un default silencioso grabaría al
+# cliente del lado equivocado —vendedor cuando es comprador— y ese error no falla
+# de forma visible: llega hasta la facturación con las partes invertidas. Con el
+# mapa, un tipo de oferta nuevo revienta acá en vez de grabar mal.
+# `DOMINIO_COMERCIAL.md` lo llama «el punto más delicado de toda la etapa».
+TIPO_PPA_POR_OFERTA = {
+    "compra_energia": "compra",        # Unergy COMPRA: el cliente vende
+    "comunidad_energetica": "compra",
+}
+TIPOS_ENERGIA = tuple(TIPO_PPA_POR_OFERTA)
 
 
 def get_oportunidad(id: int) -> Oportunidad:
@@ -355,14 +366,23 @@ def tarifas_mensuales(datos: dict) -> list[dict]:
     return filas
 
 
-def firmar(oferta: OportunidadOferta, datos: dict, usuario) -> tuple[PpaContrato, int]:
+def firmar(oferta: OportunidadOferta, datos: dict, usuario):
     """Crea el PPA con las condiciones pactadas y lo enlaza a la oferta.
 
-    Devuelve `(contrato, n_plantas)`.
+    Devuelve el `Resultado` de `ppa.services.escritura.crear_ppa`, con el
+    contrato, los conteos y los avisos de lo que quedó cojo.
+
+    **El contrato lo crea `crear_ppa`, no esta función.** Hasta el 2026-09-17
+    había dos caminos con reglas distintas sobre `ppa_contratos`: éste no
+    validaba contra GESCON ni sincronizaba las partes, y el del wizard no
+    escribía las tarifas. Acá solo queda lo que es del CRM —de dónde salen los
+    datos y qué le pasa a la oferta—; las reglas del contrato viven en un solo
+    sitio. Ver `docs/DIAGNOSTICO_PPA.md` §2.
     """
     if oferta.ppa_contrato_id:
         raise Conflict(f"La oferta ya tiene el contrato PPA {oferta.ppa_contrato_id}")
-    if valor(oferta.tipo) not in TIPOS_ENERGIA:
+    tipo_oferta = valor(oferta.tipo)
+    if tipo_oferta not in TIPO_PPA_POR_OFERTA:
         raise NoProcesable(
             "Solo las ofertas de energía (compra o comunidad energética) derivan "
             "en un PPA; las de servicios usan el contrato de representación"
@@ -370,45 +390,41 @@ def firmar(oferta: OportunidadOferta, datos: dict, usuario) -> tuple[PpaContrato
     op = get_oportunidad(oferta.oportunidad_id)
     cliente = Cliente.objects.filter(pk=op.cliente_id).first()
     plantas = plantas_de_la_oferta(oferta)
-    filas_tarifa = tarifas_mensuales(datos)
 
     with transaction.atomic():
-        contrato = PpaContrato.objects.create(
-            numero_codigo_contrato=(
-                datos.get("numero_codigo_contrato") or norm_codigo(oferta.numero_oferta)
-            ),
-            nombre_interno=datos.get("nombre_interno") or oferta.planta_nombre,
-            # Unergy COMPRA la energía al generador: el cliente de la oferta vende.
-            vendedor_id=op.cliente_id,
-            vendedor_nombre=cliente.razon_social_nombre if cliente else None,
-            vendedor_nit=cliente.nit_cedula if cliente else None,
-            fecha_inicio=datos.get("fecha_inicio"),
-            fecha_fin=datos.get("fecha_fin"),
-            tarifa_base=datos.get("tarifa_base") or tarifa_del_primer_anio(datos),
-            indice_indexacion=datos.get("indice_indexacion"),
-            periodo_indexacion_base=datos.get("periodo_indexacion_base"),
-            cantidad_minima_kwh_mes=datos.get("cantidad_minima_kwh_mes"),
-            tipo_contrato="compra",
-            # La característica pasa a vivir en el CONTRATO: si mañana se borra la
-            # oferta, el PPA sigue sabiendo lo que es.
-            es_comunidad_energetica=(valor(oferta.tipo) == "comunidad_energetica"),
+        resultado = ppa_escritura.crear_ppa(
+            tipo_contrato=TIPO_PPA_POR_OFERTA[tipo_oferta],
+            datos={
+                "numero_codigo_contrato": (
+                    datos.get("numero_codigo_contrato")
+                    or norm_codigo(oferta.numero_oferta)
+                ),
+                "nombre_interno": datos.get("nombre_interno") or oferta.planta_nombre,
+                # Unergy COMPRA la energía al generador: el cliente de la oferta
+                # vende. `crear_ppa` sincroniza nombre y NIT desde esa FK.
+                "vendedor_id": op.cliente_id,
+                "vendedor_nombre": cliente.razon_social_nombre if cliente else None,
+                "vendedor_nit": cliente.nit_cedula if cliente else None,
+                "fecha_inicio": datos.get("fecha_inicio"),
+                "fecha_fin": datos.get("fecha_fin"),
+                "tarifa_base": datos.get("tarifa_base") or tarifa_del_primer_anio(datos),
+                "indice_indexacion": datos.get("indice_indexacion"),
+                "periodo_indexacion_base": datos.get("periodo_indexacion_base"),
+                "cantidad_minima_kwh_mes": datos.get("cantidad_minima_kwh_mes"),
+                # La característica pasa a vivir en el CONTRATO: si mañana se
+                # borra la oferta, el PPA sigue sabiendo lo que es.
+                "es_comunidad_energetica": tipo_oferta == "comunidad_energetica",
+            },
+            # TODAS las plantas de la oferta, no solo la del `proyecto_id`: una
+            # oferta que cubre dos plantas debe firmar un contrato con las dos, o
+            # Cumplimiento mediría el compromiso entero contra la generación de
+            # media planta.
+            proyecto_ids=[p.id for p in plantas],
+            tarifas=tarifas_mensuales(datos),
+            carpeta_link=datos.get("carpeta_link"),
         )
-        # TODAS las plantas de la oferta, no solo la del `proyecto_id`: una oferta
-        # que cubre dos plantas debe firmar un contrato con las dos, o Cumplimiento
-        # mediría el compromiso entero contra la generación de media planta.
-        PpaContratoProyecto.objects.bulk_create([
-            PpaContratoProyecto(contrato_id=contrato.id, proyecto_id=p.id) for p in plantas
-        ])
-        if datos.get("carpeta_link"):
-            set_enlace_documento(
-                ppa_contrato_id=contrato.id, url=datos["carpeta_link"],
-                nombre="Enlace Drive del contrato",
-            )
-        PpaTarifa.objects.bulk_create([
-            PpaTarifa(contrato_id=contrato.id, **fila) for fila in filas_tarifa
-        ])
 
-        oferta.ppa_contrato_id = contrato.id
+        oferta.ppa_contrato_id = resultado.contrato.id
         campos = ["ppa_contrato_id"]
         anterior = valor(oferta.estado)
         if anterior != "firmado":
@@ -422,4 +438,4 @@ def firmar(oferta: OportunidadOferta, datos: dict, usuario) -> tuple[PpaContrato
             campos += ["estado", "estado_desde", "resultado"]
         oferta.save(update_fields=campos)
 
-    return contrato, len(plantas)
+    return resultado
