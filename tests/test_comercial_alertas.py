@@ -57,3 +57,77 @@ def test_umbral_configurable():
 def test_referencia_futura_no_da_dias_negativos():
     dias, alerta = calcular_alerta("oportunidad", AHORA + timedelta(days=1), None, 5, AHORA)
     assert (dias, alerta) == (0, False)
+
+
+# ── La alerta honesta: quién habló y qué le mandamos ─────────────────────────
+#
+# Antes `calcular_alerta` tomaba la gestion MAS RECIENTE de cualquier tipo. El
+# efecto: le escribias el lunes, no respondia, le insistias el jueves, y la
+# alerta se reiniciaba el jueves aunque el cliente siguiera mudo. Contestaba
+# "hace cuanto que no pasa nada" en vez de "hace cuanto que no nos responden".
+# Ver DOMINIO_COMERCIAL.md, P-9 y O-11.
+
+def _hace_dias(dias, ahora):
+    from datetime import timedelta
+
+    return ahora - timedelta(days=dias)
+
+
+def test_insistir_ya_no_reinicia_el_contador():
+    """El caso que motivo el campo: solo cuentan las ENTRANTES, y una gestion
+    saliente ni siquiera llega a `calcular_alerta`."""
+    from datetime import datetime, timezone
+
+    from apps.comercial.services.pipeline import calcular_alerta
+
+    ahora = datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc)
+    # El cliente contesto hace 20 dias; nosotros insistimos hace 2, pero eso no
+    # entra como `ultima_respuesta`.
+    dias, alerta = calcular_alerta(
+        "oferta", _hace_dias(40, ahora), _hace_dias(20, ahora), 5, ahora,
+    )
+
+    assert dias == 20
+    assert alerta is True
+
+
+def test_mandar_una_propuesta_nueva_si_reinicia():
+    """No es la misma trampa: una version enviada es una pregunta nueva, no una
+    insistencia sobre la misma."""
+    from datetime import datetime, timezone
+
+    from apps.comercial.services.pipeline import calcular_alerta
+
+    ahora = datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc)
+    dias, alerta = calcular_alerta(
+        "oferta", _hace_dias(40, ahora), _hace_dias(20, ahora), 5, ahora,
+        ultimo_envio=_hace_dias(2, ahora),
+    )
+
+    assert dias == 2
+    assert alerta is False
+
+
+def test_gana_el_hecho_mas_reciente_de_los_tres():
+    from datetime import datetime, timezone
+
+    from apps.comercial.services.pipeline import calcular_alerta
+
+    ahora = datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc)
+    dias, _ = calcular_alerta(
+        "oferta", _hace_dias(40, ahora), _hace_dias(3, ahora), 5, ahora,
+        ultimo_envio=_hace_dias(9, ahora),
+    )
+
+    assert dias == 3, "la respuesta del cliente es mas reciente que el envio"
+
+
+def test_sin_respuesta_ni_envio_cuenta_desde_la_etapa():
+    from datetime import datetime, timezone
+
+    from apps.comercial.services.pipeline import calcular_alerta
+
+    ahora = datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc)
+    dias, alerta = calcular_alerta("oferta", _hace_dias(11, ahora), None, 5, ahora)
+
+    assert (dias, alerta) == (11, True)

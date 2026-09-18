@@ -305,7 +305,8 @@ class ComercialViewSet(viewsets.GenericViewSet):
             ],
             "gestiones": [
                 {"id": g.id, "tipo": g.tipo, "descripcion": g.descripcion,
-                 "fecha": g.fecha, "usuario_id": g.usuario_id, "oferta_id": g.oferta_id}
+                 "direccion": g.direccion, "fecha": g.fecha,
+                 "usuario_id": g.usuario_id, "oferta_id": g.oferta_id}
                 for g in gestiones
             ],
             "historial": [
@@ -364,12 +365,13 @@ class ComercialViewSet(viewsets.GenericViewSet):
 
         g = co_models.OportunidadGestion.objects.create(
             oportunidad_id=id, oferta_id=datos.get("oferta_id"), tipo=datos["tipo"],
-            descripcion=datos["descripcion"],
+            descripcion=datos["descripcion"], direccion=datos["direccion"],
             fecha=datos.get("fecha") or pipeline.col_now(),
             usuario_id=request.user.id,
         )
         return Response({
             "id": g.id, "tipo": g.tipo, "descripcion": g.descripcion,
+            "direccion": g.direccion,
             "fecha": g.fecha, "oferta_id": g.oferta_id,
         }, status=status.HTTP_201_CREATED)
 

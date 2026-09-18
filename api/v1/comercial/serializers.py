@@ -132,9 +132,18 @@ class EstadoCambioSerializer(serializers.Serializer):
     estado = serializers.ChoiceField(choices=ESTADOS)
 
 
+DIRECCIONES_GESTION = ["saliente", "entrante"]
+
+
 class GestionCrearSerializer(serializers.Serializer):
     tipo = serializers.ChoiceField(choices=TIPOS_GESTION)
     descripcion = serializers.CharField(min_length=1)
+    # Quién habló. OBLIGATORIO en las nuevas: de este campo depende que la alerta
+    # cuente «hace cuánto que no nos responden» y no «hace cuánto que no pasa
+    # nada». Las gestiones viejas lo tienen en NULL y se siguen contando como
+    # antes, pero una entrada nueva sin dirección volvería a romper el cálculo.
+    # Ver `docs/DOMINIO_COMERCIAL.md`, P-9.
+    direccion = serializers.ChoiceField(choices=DIRECCIONES_GESTION)
     fecha = serializers.DateTimeField(required=False, allow_null=True, default=None)
     # A cuál oferta se refiere. NULL = gestión DEL CLIENTE: cuenta para todas sus
     # ofertas, que es como se comportaban todas antes de 2026-08-19.
