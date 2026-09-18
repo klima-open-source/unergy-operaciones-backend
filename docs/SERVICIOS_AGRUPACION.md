@@ -592,6 +592,57 @@ bien**: ellos buscan el contrato del GRUPO y después leen cada tarifa por
 separado. La distinción importa: filtrar por grupo y filtrar por subservicio son
 preguntas distintas, y solo la segunda necesitaba el catálogo.
 
+## 4-nonies. Cuántos contratos por planta, y el costo que sale mal
+
+**Regla de negocio (Sara, 2026-09-18):**
+
+> En **GD** hay un único contrato de Representación y CGM por planta.
+> En **minigranjas** hay **uno por inversionista**, y sus tarifas pueden diferir.
+
+### Lo que ya estaba bien
+
+`representacion_dedup` agrupa por `(inversionista + planta)`, no solo por planta,
+y su comentario dice *"Baraya tiene tres"*: reconoce que varios contratos en una
+minigranja son legítimos. **No hay riesgo de fusionar contratos reales.**
+
+El catálogo, la vigencia y las comunidades trabajan contrato por contrato, así
+que les da igual cuántos haya. Y los conteos ya distinguen contratos de plantas.
+
+### Lo que está mal: el costo de representación del panel contable
+
+`apps/contabilidad/services/costos.py` hace:
+
+```python
+c = elegir_contrato_representacion(...)   # elige UNO de varios
+t_rep = tarifa_indexada(c.tarifa_representacion, ...) × kwh
+```
+
+y el panel reparte ese costo por participación.
+
+Su docstring trata los contratos múltiples como **duplicados sucios** --*"66 filas
+para 38 proyectos y algunas se contradicen"*--. Y en parte lo eran: el seed creó
+duplicados. Pero **en minigranjas no son duplicados**: son un contrato por
+inversionista, y con tarifas distintas el cálculo sale mal para todos.
+
+Ejemplo: tres inversionistas con 3,0 / 5,0 / 7,0 $/kWh y 50/30/20 de
+participación. Hoy se toma una sola tarifa y se reparte; lo correcto es la de
+cada uno, ponderada.
+
+**Conviven dos conceptos que se parecen y no son lo mismo:** duplicados del seed
+(que hay que fusionar) y contratos por inversionista (que hay que conservar y
+usar cada uno).
+
+### Por qué no se arregló todavía
+
+Toca **cifras contables** que alguien concilia contra el ER, y no se pudo medir:
+el acceso a la base estaba caído el 2026-09-18. Cambiar un cálculo financiero
+sin ver su efecto es lo que no se hace.
+
+`python manage.py revisar_tarifas_por_inversionista` (solo lee) queda listo para
+correr apenas haya acceso: dice en cuántas plantas cambiaría el costo, cuánto se
+desvía cada una y qué tarifa tiene cada inversionista. **Con esos números se
+decide el arreglo, y contabilidad valida el antes/después.**
+
 ## 5. Cómo estructurarlo — dos opciones
 
 ### Opción A — Derivar los subservicios al leer (sin cambio de esquema)
