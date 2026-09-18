@@ -76,7 +76,7 @@ def calculo(periodo: str) -> dict:
     }
     contratos = _contrato_por_proyecto()
     proyectos = py_models.Proyecto.objects.filter(
-        estado="en_operacion", srv_operacion=True
+        deleted_at__isnull=True, estado="en_operacion", srv_operacion=True
     ).order_by("nombre_comercial")
 
     filas, total = [], 0

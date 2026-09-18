@@ -10,6 +10,7 @@ def proyectos_con_relay():
     a qué preguntarle, y una planta sin `srv_operacion` no la operamos nosotros.
     """
     return py_models.Proyecto.objects.filter(
+        deleted_at__isnull=True,
         estado="en_operacion",
         project_id_solenium__isnull=False,
         tipo_proyecto="minigranja",
