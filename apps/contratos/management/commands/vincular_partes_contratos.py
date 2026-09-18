@@ -6,10 +6,12 @@
     python manage.py vincular_partes_contratos --csv partes.csv
     python manage.py vincular_partes_contratos --aplicar
 
-Para qué. Las cinco partes que nombra un contrato --contratante, prestador e
-inversionista en `contratos_servicio`; comprador y vendedor en `ppa_contratos`--
-tienen clave foránea a `clientes`, y la auditoría del 2026-08-27 encontró 0 de
-162 contratos con el vínculo puesto. Eran dos causas: el autocompletado perdía
+Para qué. Las SEIS partes que nombra un contrato --contratante, prestador e
+inversionista en `contratos_servicio`; comprador y vendedor en `ppa_contratos`;
+y el arrendador en `arr_arrendador`-- tienen clave foránea a `clientes`, y la
+auditoría del 2026-08-27 encontró 0 de 162 contratos con el vínculo puesto. El
+arrendador ni siquiera tenía la columna: nació el 2026-09-18, así que TODAS sus
+filas están sin vincular. Eran dos causas: el autocompletado perdía
 el id al teclear, y `ContratoEscrituraSerializer` descartaba en silencio la clave
 `contratante_id` que el frontend sí mandaba. Las dos están corregidas
 (`docs/SERVICIOS_AGRUPACION.md` §4-decies), pero eso solo arregla lo que se
@@ -39,6 +41,7 @@ import csv
 
 from django.core.management.base import BaseCommand
 
+from apps.arriendos.models import ArrArrendador
 from apps.contratos.models import ContratoServicio
 from apps.contratos.services import partes as partes_service
 from apps.ppa.models import PpaContrato
@@ -51,7 +54,14 @@ OBJETIVOS = (
      (("contratante", True), ("prestador", True), ("inversionista", False))),
     (PpaContrato, "ppa_contratos",
      (("comprador", True), ("vendedor", True))),
+    # El arrendador es la sexta parte, y su vinculo (`cliente_id`) nacio el
+    # 2026-09-18: TODAS sus filas estan sin vincular. Su campo de texto se llama
+    # `nombre` a secas, no `<rol>_nombre`, y no tiene NIT.
+    (ArrArrendador, "arr_arrendador", (("cliente", False),)),
 )
+
+#: Rol → el campo de texto del que sale el nombre, cuando no es `<rol>_nombre`.
+CAMPO_NOMBRE = {"cliente": "nombre"}
 
 
 def _vivos(modelo):
@@ -85,7 +95,8 @@ class Command(BaseCommand):
             for contrato in _vivos(modelo):
                 cambios = []
                 for rol, tiene_nit in roles:
-                    nombre = getattr(contrato, f"{rol}_nombre", None)
+                    campo = CAMPO_NOMBRE.get(rol, f"{rol}_nombre")
+                    nombre = getattr(contrato, campo, None)
                     nit = getattr(contrato, f"{rol}_nit", None) if tiene_nit else None
 
                     if getattr(contrato, f"{rol}_id", None):

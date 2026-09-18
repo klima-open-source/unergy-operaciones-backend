@@ -714,6 +714,56 @@ backfill hecho **y** la API exigiendo el FK. Adivinar por nombre ya produjo un
 falso positivo real ("BALI ENERGY S.A.S." contra "INENERGY S.A.S."), y por eso
 exige solapamiento de tokens además de similitud.
 
+### El arrendador: la SEXTA parte, y la que no tenia donde vincularse
+
+Descubierto el 2026-09-18 al listar los pendientes. Las partes de un contrato no
+son cinco, son **seis**: contratante, prestador e inversionista
+(`contratos_servicio`), comprador y vendedor (`ppa_contratos`), y **el
+arrendador** (`arr_arrendador`).
+
+De el solo se guardaba `nombre`. **Sin NIT, sin FK, sin nada** -- y el arrendador
+FACTURA: el panel dice textualmente que "cada uno factura su parte con su propio
+IVA". Quien emitia esa factura buscaba el NIT fuera del sistema.
+
+Lo hecho:
+
+- `arr_arrendador.cliente_id` (migracion `arriendos/0004`), NULL y sin exigencia
+  en la base: las filas existentes siguen funcionando.
+- El mismo `SelectorCliente` en los dos sitios donde se gestionan arrendadores
+  (el wizard de arriendo y `OperacionView`), y obligatorio: sin cliente no hay
+  NIT con que facturar.
+- `vincular_partes_contratos` tambien los recorre.
+
+### El IVA del arrendador sale de su cliente
+
+Habia dos formas de responder a la misma pregunta: el arrendador tenia un
+`responsable_iva` suelto y `calcular_iva` aplicaba **19% fijo**, mientras los
+clientes ya tenian tasas configurables por servicio y por proyecto
+(`cliente_tasa_servicio`), que es lo que usan las facturas de Representacion,
+CGM y Administracion.
+
+Decidido con Sara que se derive del cliente. **Esto toca facturacion**, asi que
+se hizo de forma que no mueva ningun numero de golpe:
+
+| Situacion | Que pasa |
+|---|---|
+| Sin cliente vinculado (todos, hoy) | 19%, igual que siempre |
+| Con cliente, sin tasa configurada | 19%, igual que siempre |
+| Con cliente y tasa configurada | manda la tasa del cliente |
+
+Vincular un cliente **no cambia una factura por si solo**: la derivacion se
+enciende cliente por cliente, cuando alguien configura la tasa a proposito. Y el
+`responsable_iva` sigue decidiendo SI se cobra; la tasa solo dice CUANTO, porque
+si no, vincular empezaria a cobrarle IVA a quien no lo paga.
+
+`calcular_iva` cambio de firma: recibe un PORCENTAJE, no un si/no. Pasarle un
+booleano daria 1% en vez de 19%.
+
+**Sin verificar contra la base**: que valores usa `cliente_tasa_servicio.
+servicio`. Las facturas guardan "Representacion"/"CGM"/"Administracion" con
+mayuscula y tilde; para arriendo no hay precedente, asi que el servicio se
+compara normalizado (minusculas, sin tildes) en vez de exigir una grafia exacta.
+
 ### Lo que queda
 
 1. ~~Que `firmar()` escriba las dos partes.~~ **HECHO el 2026-09-18**, pero no

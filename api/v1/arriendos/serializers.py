@@ -3,6 +3,7 @@
 from rest_framework import serializers
 
 from apps.arriendos import models as ar_models
+from apps.clientes import models as cl_models
 
 
 class ArrProyectoSerializer(serializers.ModelSerializer):
@@ -22,21 +23,32 @@ class ArrProyectoEscrituraSerializer(serializers.ModelSerializer):
 
 class ArrendadorSerializer(serializers.ModelSerializer):
     contrato_id = serializers.IntegerField(read_only=True)
+    cliente_id = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = ar_models.ArrArrendador
         fields = [
-            "id", "contrato_id", "nombre", "valor_base", "responsable_iva",
-            "activo", "anticipo_pagado_desde", "anticipo_pagado_hasta",
-            "observaciones",
+            "id", "contrato_id", "cliente_id", "nombre", "valor_base",
+            "responsable_iva", "activo", "anticipo_pagado_desde",
+            "anticipo_pagado_hasta", "observaciones",
         ]
 
 
 class ArrendadorEscrituraSerializer(serializers.ModelSerializer):
+    # `PrimaryKeyRelatedField` con `source`, y no el campo que genera
+    # ModelSerializer: el FK se llama `cliente`, el frontend manda `cliente_id`,
+    # y DRF descarta en silencio la clave que no reconoce. Ese fue exactamente el
+    # bug de las otras partes --200 y el vínculo sin guardar--, y no vale la pena
+    # repetirlo acá. Ver api/v1/contratos_servicio/serializers.py.
+    cliente_id = serializers.PrimaryKeyRelatedField(
+        source="cliente", queryset=cl_models.Cliente.objects.all(),
+        allow_null=True, required=False,
+    )
+
     class Meta:
         model = ar_models.ArrArrendador
         fields = [
-            "nombre", "valor_base", "responsable_iva", "activo",
+            "nombre", "cliente_id", "valor_base", "responsable_iva", "activo",
             "anticipo_pagado_desde", "anticipo_pagado_hasta", "observaciones",
         ]
 
