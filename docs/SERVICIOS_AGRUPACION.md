@@ -643,6 +643,116 @@ correr apenas haya acceso: dice en cuántas plantas cambiaría el costo, cuánto
 desvía cada una y qué tarifa tiene cada inversionista. **Con esos números se
 decide el arreglo, y contabilidad valida el antes/después.**
 
+## 4-decies. Las partes de un contrato: la API descartaba el vínculo
+
+Decidido con Sara el 2026-09-18: **o se vincula un cliente existente, o se crea
+uno formal ahí mismo.** Nunca un nombre suelto.
+
+### Lo que se encontró
+
+Las cinco partes que nombra un contrato ya tenían clave foránea a `clientes`, y
+cuatro de ellas ya tenían autocompletado en la pantalla. Aun así la auditoría
+del 2026-08-27 encontró **0 de 162 contratos** con el vínculo puesto. La
+explicación que se daba —"el usuario no elige del autocompletado"— era solo la
+mitad. Había dos causas:
+
+1. **La API descartaba el id en silencio.** El FK se llama `contratante` en el
+   modelo (con `db_column="contratante_id"`), así que el campo que genera
+   `ModelSerializer` también se llama `contratante`. El frontend mandaba
+   `contratante_id`, DRF no reconocía esa clave y la ignoraba: respuesta 200,
+   vínculo sin guardar. **Es el mismo bug que ya se había corregido para
+   `proyecto_id`** ("respondía 200 sin guardar nada"), repetido en las tres
+   partes de `ContratoServicio`. En `PpaContrato` lo corrigió el commit
+   `752def3e` el mismo día, por separado.
+
+2. **El autocompletado perdía el vínculo al teclear.** Sugería *strings*, y
+   después buscaba el cliente comparando el nombre exacto
+   (`find(c => c.razon_social_nombre === texto)`). Un espacio de más y el id
+   quedaba en `null` sin aviso.
+
+Y el **inversionista** no tenía ni campo: era un `InputText` suelto en
+`RepresentacionView.vue`, y en el wizard no existía. Es justo el que decide qué
+tarifa de representación se le cobra a cada inversionista de una minigranja
+(§4-nonies).
+
+### Lo que se hizo
+
+**Un solo componente, `SelectorCliente.vue`**, para las cinco partes. El
+autocompletado sugiere el OBJETO cliente, no su nombre, así que lo que se elige
+es el cliente. Si lo escrito no corresponde a ninguno, el campo lo dice y ofrece
+crearlo; guardar queda bloqueado hasta resolverlo, también al editar un contrato
+viejo. Antes ese bloque —autocompletado, botón de crear, aviso de vinculado—
+estaba copiado en los dos wizards, y agregar el inversionista habría sido una
+tercera copia.
+
+**El aviso de duplicado dejó de ser un callejón sin salida.** El backend ya
+detectaba el nombre parecido y respondía un 409 con el candidato, y el cliente
+HTTP ya sabía mandar `forzar=true`; pero `NuevoClienteDialog` pintaba ese 409
+como un error rojo bajo el nombre. No se podía ni vincular al candidato ni crear
+de todos modos: la única salida era cerrar y escribir el nombre a mano, que es
+exactamente lo que duplica los clientes. Ahora el diálogo ofrece las dos.
+
+**Dos pruebas nuevas**, porque los dos fallos eran silenciosos:
+`tests/test_contratos_servicio_partes_vinculo.py` (el id se guarda de verdad) y
+`app/features/componentesImportados.test.ts` en el front — `nuxt.config.ts` no
+auto-importa `features/**/components`, así que una etiqueta sin su `import` no
+rompe el build: no renderiza y ya.
+
+### `sincronizar` no queda obsoleto, cambia de papel
+
+`apps/contratos/services/partes.py` hace dos cosas, y solo una sobra:
+
+- **Adivinar el cliente por nombre/NIT** cuando el id viene vacío. Desde la UI ya
+  no se ejecuta (solo actúa `if not contratante_id`). Sigue haciendo falta para
+  los contratos viejos, que se resuelven la próxima vez que alguien los guarde, y
+  para cualquier llamada directa a la API.
+- **Copiar nombre y NIT desde el cliente vinculado.** Esta se queda: es la que
+  evita dos grafías del mismo inversionista según quién escribió el contrato.
+
+`resolver_cliente_id` se retira cuando se cumplan las dos condiciones: el
+backfill hecho **y** la API exigiendo el FK. Adivinar por nombre ya produjo un
+falso positivo real ("BALI ENERGY S.A.S." contra "INENERGY S.A.S."), y por eso
+exige solapamiento de tokens además de similitud.
+
+### Lo que queda
+
+1. **Que `firmar()` escriba las DOS partes.** Hoy pone `vendedor_id` desde la
+   oferta y deja `comprador_id` vacío, así que exigir las dos partes en la API
+   dejaría al CRM sin poder firmar. Decidido con Sara el 2026-09-18: **Unergy es
+   un cliente más**, y se busca su fila en `clientes` por NIT, guardado en la
+   configuración.
+
+   El reparto sale del `tipo_contrato`, que `crear_ppa` ya exige como parámetro
+   obligatorio justo porque define quién va de cada lado:
+
+   | `tipo_contrato` | comprador | vendedor |
+   |---|---|---|
+   | `compra` (Unergy compra) | Unergy | el cliente de la oferta |
+   | `venta` (Unergy vende) | el cliente de la oferta | Unergy |
+
+   Pendiente de confirmar contra la base: que Unergy ya exista como cliente. Es
+   muy probable —el `prestador` de los contratos de representación es Unergy—
+   pero no se pudo verificar el 2026-09-18.
+
+   `apps/comercial/services/escritura.py` lo está editando Sara en otra rama, así
+   que este cambio espera a que ella cierre, para no pisarse.
+
+2. **Correr el backfill.** El comando ya está escrito:
+   `manage.py vincular_partes_contratos`. Por defecto solo informa; escribe con
+   `--aplicar`, y `--csv` deja el detalle parte por parte para revisar lo que no
+   empareje. Falta correrlo, y eso necesita la base.
+
+3. **Validar en la API**, no solo en la pantalla: rechazar un contrato cuya parte
+   no venga vinculada. Va DESPUÉS de los dos anteriores, o rechazaría lo que
+   todavía no se ha podido arreglar.
+
+4. **Sin medir**: cuántos contratos tienen el FK nulo. Necesita la base, que
+   estaba caída el 2026-09-18.
+
+Cumplidos 1, 2 y 3, se puede retirar `resolver_cliente_id` de
+`partes.sincronizar` —la parte que adivina— y dejar solo la que copia el nombre
+y el NIT desde el cliente vinculado.
+
 ## 5. Cómo estructurarlo — dos opciones
 
 ### Opción A — Derivar los subservicios al leer (sin cambio de esquema)

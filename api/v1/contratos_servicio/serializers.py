@@ -2,6 +2,7 @@
 
 from rest_framework import serializers
 
+from apps.clientes import models as cl_models
 from apps.contratos import models as ct_models
 from apps.contratos.services import comunidades as comunidades_service
 from apps.contratos.services import grupos as grupos_service
@@ -87,10 +88,30 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
         source="proyecto", queryset=py_models.Proyecto.objects.all(),
         allow_null=True, required=False,
     )
+    # Las tres partes tenían el MISMO problema que `proyecto_id`, y por la misma
+    # razón: el FK se llama `contratante` en el modelo, así que el campo que
+    # genera ModelSerializer también se llama así, y la clave `contratante_id`
+    # que manda el frontend se descartaba sin decir nada. El wizard vinculaba al
+    # cliente, la API respondía 200 y el vínculo no quedaba guardado -- de ahí
+    # que `contratante_id`/`prestador_id` "casi nunca se pueblen" pese a que la
+    # pantalla tiene autocompletado desde hace tiempo, y que el cálculo de
+    # costos por inversionista tenga que emparejar por nombre.
+    contratante_id = serializers.PrimaryKeyRelatedField(
+        source="contratante", queryset=cl_models.Cliente.objects.all(),
+        allow_null=True, required=False,
+    )
+    prestador_id = serializers.PrimaryKeyRelatedField(
+        source="prestador", queryset=cl_models.Cliente.objects.all(),
+        allow_null=True, required=False,
+    )
+    inversionista_id = serializers.PrimaryKeyRelatedField(
+        source="inversionista", queryset=cl_models.Cliente.objects.all(),
+        allow_null=True, required=False,
+    )
 
     class Meta:
         model = ct_models.ContratoServicio
-        exclude = ["proyecto"]
+        exclude = ["proyecto", "contratante", "prestador", "inversionista"]
         extra_kwargs = {"servicio_aplica": {"required": False}}
 
     def validate(self, datos):
