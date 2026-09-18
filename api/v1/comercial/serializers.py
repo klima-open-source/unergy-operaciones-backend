@@ -249,8 +249,9 @@ class FirmarOfertaSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 "fecha_fin no puede ser anterior a fecha_inicio"
             )
-        if not datos.get("tarifa_base") and not datos.get("precios_anuales"):
-            raise serializers.ValidationError("envía tarifa_base o precios_anuales")
+        # El precio ya NO se exige acá: puede venir de la propuesta aceptada, y
+        # este serializer no ve la oferta. La regla "el contrato necesita un
+        # precio" vive en `escritura.firmar`, despues de mezclar las dos fuentes.
         precios = datos.get("precios_anuales") or []
         anios = [p["anio"] for p in precios]
         if len(anios) != len(set(anios)):

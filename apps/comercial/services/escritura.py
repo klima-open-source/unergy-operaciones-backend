@@ -28,6 +28,7 @@ from apps.comercial.models import (
 )
 from apps.comercial.services.pipeline import col_now, estado_a_resultado
 from apps.comercial.services.salidas import _SEG_TIPO, norm_codigo, valor
+from apps.comercial.services import versiones
 from apps.comun.nombre_matching import parece_persona_juridica
 from apps.fronteras.models import OperadorRed
 from apps.ppa.services import escritura as ppa_escritura
@@ -366,6 +367,38 @@ def tarifas_mensuales(datos: dict) -> list[dict]:
     return filas
 
 
+def _con_la_propuesta_aceptada(oferta: OportunidadOferta, datos: dict) -> dict:
+    """Las condiciones de la versión aceptada, completadas con lo que venga.
+
+    **El contrato nace de lo que se negoció.** Si la oferta tiene una propuesta
+    aceptada, de ahí salen el precio, el indexador y el mes base; el cuerpo solo
+    aporta lo que la versión no sabe —las fechas reales del suministro— y puede
+    corregir cualquier campo, porque al firmar todavía se ajustan cosas.
+
+    **Si la oferta tiene propuestas pero ninguna aceptada, no se firma.** Firmar
+    es el paso siguiente a que el cliente acepte; sin saber CUÁL aceptó, el
+    contrato nacería con las condiciones de cualquiera. Ver
+    `docs/DOMINIO_COMERCIAL.md`, O-6 y C-1.
+
+    Una oferta sin ninguna versión se firma como siempre, con las condiciones del
+    cuerpo: son las 165 históricas, anteriores a que existiera el versionado.
+    """
+    aceptada = versiones.aceptada(oferta)
+    if aceptada is None:
+        if oferta.versiones.exists():
+            raise NoProcesable(
+                "La oferta tiene propuestas pero ninguna aceptada. Acepta la que "
+                "el cliente aprobó antes de firmar: de ella salen las condiciones "
+                "del contrato."
+            )
+        return datos
+
+    base = versiones.condiciones_para_contrato(aceptada)
+    # El cuerpo gana: al firmar todavía se ajustan condiciones, y las fechas
+    # reales del suministro solo las sabe quien firma.
+    return {**base, **{k: v for k, v in datos.items() if v is not None}}
+
+
 def firmar(oferta: OportunidadOferta, datos: dict, usuario):
     """Crea el PPA con las condiciones pactadas y lo enlaza a la oferta.
 
@@ -387,6 +420,13 @@ def firmar(oferta: OportunidadOferta, datos: dict, usuario):
             "Solo las ofertas de energía (compra o comunidad energética) derivan "
             "en un PPA; las de servicios usan el contrato de representación"
         )
+    datos = _con_la_propuesta_aceptada(oferta, datos)
+    if not datos.get("tarifa_base") and not datos.get("precios_anuales"):
+        raise NoProcesable(
+            "El contrato necesita un precio: mándalo en el cuerpo, o acepta una "
+            "propuesta que traiga su tabla de precios por año."
+        )
+
     op = get_oportunidad(oferta.oportunidad_id)
     cliente = Cliente.objects.filter(pk=op.cliente_id).first()
     plantas = plantas_de_la_oferta(oferta)

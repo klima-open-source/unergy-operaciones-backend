@@ -254,3 +254,125 @@ def test_avisa_que_el_contrato_queda_sin_compromisos(datos):
     assert resultado.compromisos == 0
     assert any("compromisos" in a.lower() for a in resultado.avisos)
     assert not any("plantas" in a.lower() for a in resultado.avisos)
+
+
+# ── El contrato nace de la propuesta aceptada ────────────────────────────────
+#
+# Antes el dialogo de firma preguntaba el precio, el indexador y el mes base
+# porque la oferta no los tenia: `precio_detalle` era texto libre. Ahora la
+# version aceptada los guarda, asi que salen de ahi y no se vuelven a teclear.
+
+def _version_aceptada(datos, **extra):
+    """Una propuesta enviada y aceptada, como la de una oferta real."""
+    import datetime as _dt
+
+    from apps.comercial.services import versiones
+
+    cuerpo = {
+        "fecha_envio": _dt.date(2026, 5, 20),
+        "documento_url": "https://drive/oferta-v2.pdf",
+        "indice_indexacion": "IPP serie Oferta Interna provisional",
+        "periodo_indexacion_base": "2026-05",
+        "precios": [{"anio": 2026, "precio": 330}, {"anio": 2027, "precio": 318}],
+    }
+    cuerpo.update(extra)
+    version = versiones.agregar(datos["oferta"], cuerpo, datos["usuario"])
+    versiones.aceptar(version, _dt.date(2026, 6, 1))
+    return version
+
+
+SOLO_FECHAS = {
+    "fecha_inicio": dt.date(2026, 10, 1),
+    "fecha_fin": dt.date(2027, 3, 31),
+}
+
+
+def test_el_precio_sale_de_la_propuesta_aceptada(datos):
+    """Firmar con SOLO las fechas: el precio, el indexador y el mes base los
+    pone la version. Es el punto del versionado."""
+    from apps.ppa.models import PpaTarifa
+
+    _version_aceptada(datos)
+
+    resultado = _firmar(datos, SOLO_FECHAS)
+
+    contrato = resultado.contrato
+    assert contrato.indice_indexacion == "IPP serie Oferta Interna provisional"
+    assert contrato.periodo_indexacion_base == "2026-05"
+    tarifas = {
+        (t.año, t.mes): float(t.tarifa)
+        for t in PpaTarifa.objects.filter(contrato_id=contrato.id)
+    }
+    assert tarifas[(2026, 10)] == 330.0
+    assert tarifas[(2027, 1)] == 318.0
+
+
+def test_el_documento_de_la_propuesta_queda_como_enlace_del_contrato(datos):
+    _version_aceptada(datos)
+
+    resultado = _firmar(datos, SOLO_FECHAS)
+
+    from apps.clientes.models import ClienteDocumentoComercial
+
+    doc = ClienteDocumentoComercial.objects.filter(
+        ppa_contrato_id=resultado.contrato.id, tipo="contrato"
+    ).first()
+    assert doc is not None
+    assert doc.archivo_url == "https://drive/oferta-v2.pdf"
+
+
+def test_el_cuerpo_puede_corregir_lo_que_trae_la_propuesta(datos):
+    """Al firmar todavia se ajustan condiciones: lo que venga en el cuerpo gana."""
+    _version_aceptada(datos)
+
+    resultado = _firmar(datos, {**SOLO_FECHAS, "indice_indexacion": "IPC"})
+
+    assert resultado.contrato.indice_indexacion == "IPC"
+
+
+def test_sin_versiones_se_firma_como_siempre(datos):
+    """Las 165 ofertas historicas no tienen propuestas: siguen firmandose con
+    las condiciones del cuerpo."""
+    resultado = _firmar(datos)
+
+    assert resultado.contrato.id is not None
+    assert resultado.tarifas == 6
+
+
+def test_con_propuestas_pero_ninguna_aceptada_no_se_firma(datos):
+    """Firmar es el paso siguiente a que el cliente acepte. Sin saber CUAL
+    acepto, el contrato naceria con las condiciones de cualquiera."""
+    from api.exceptions import NoProcesable
+    from apps.comercial.services import versiones
+    from apps.ppa.models import PpaContrato
+
+    versiones.agregar(datos["oferta"], {"fecha_envio": dt.date(2026, 5, 20)}, None)
+    antes = PpaContrato.objects.count()
+
+    with pytest.raises(NoProcesable, match="ninguna aceptada"):
+        _firmar(datos, SOLO_FECHAS)
+
+    assert PpaContrato.objects.count() == antes
+    datos["oferta"].refresh_from_db()
+    assert datos["oferta"].ppa_contrato_id is None
+
+
+def test_sin_precio_por_ningun_lado_no_se_firma(datos):
+    """La regla se mudo del serializer al servicio, porque ahora el precio
+    puede venir de dos fuentes y el serializer no ve la oferta."""
+    from api.exceptions import NoProcesable
+
+    _version_aceptada(datos, precios=[])
+
+    with pytest.raises(NoProcesable, match="precio"):
+        _firmar(datos, SOLO_FECHAS)
+
+
+def test_una_propuesta_sin_precios_deja_que_el_cuerpo_lo_ponga(datos):
+    """El indexador de la version sirve igual aunque no traiga tabla."""
+    _version_aceptada(datos, precios=[])
+
+    resultado = _firmar(datos, {**SOLO_FECHAS, "tarifa_base": 372})
+
+    assert float(resultado.contrato.tarifa_base) == 372.0
+    assert resultado.contrato.indice_indexacion == "IPP serie Oferta Interna provisional"
