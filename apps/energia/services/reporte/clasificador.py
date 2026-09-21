@@ -134,8 +134,42 @@ def _mejor_medidor(curva_a: pd.Series, curva_b: pd.Series) -> pd.Series:
     validar). Usada SOLO como referencia para calcular el error vs inversores
     (Casos 2/3/4) -- ahí sí importa la magnitud, porque decide si el día es
     Caso 3 o Caso 4. NO usar para decidir qué medidor reportar directamente
-    (ver _principal_o_respaldo)."""
+    (ver _principal_o_respaldo, y _mas_cercano_por_encima para el Caso 4)."""
     return curva_a if curva_a.fillna(0).sum() >= curva_b.fillna(0).sum() else curva_b
+
+
+def _mas_cercano_por_encima(curva_a: pd.Series, curva_b: pd.Series, e_inv: float) -> pd.Series | None:
+    """Entre los medidores que quedaron POR ENCIMA de los inversores, el de
+    MENOR energía -- o sea, el más cercano a la referencia. Es lo que reporta
+    el Caso 4 (2026-09-21, decisión de la usuaria).
+
+    Como e_inv es el mismo denominador para los dos medidores, minimizar
+    |error| es exactamente minimizar la suma del medidor entre los que superan
+    e_inv -- no hace falta recalcular el error para ordenarlos.
+
+    Antes el Caso 4 reportaba el de mayor valor (_mejor_medidor), bajo el
+    supuesto de que los dos medidores están juntos por encima de unos
+    inversores que subreportan. Ese supuesto se rompe cuando uno coincide casi
+    exacto con inversores y el otro se dispara: se reportaba el disparado (MGS
+    con inversores 4.346,9 kWh, principal 4.617,6 kWh a -6,2% -- apenas fuera
+    del +-6% del Caso 2 -- y respaldo 6.242,3 kWh a +43%: se reportaba el
+    respaldo). Con inversores completos como referencia -- y en esta rama
+    SIEMPRE lo están, porque el caller pone e_inv en 0 cuando SolarView vino
+    parcial -- el más cercano es la mejor lectura disponible.
+
+    Solo se eligen los que están por encima, no el más cercano en términos
+    absolutos: uno por debajo de inversores es la firma del Caso 3 (medidor
+    subreportando), y traerlo acá sería reportar un número que ya se sabe
+    bajo. Por eso este cambio NO mueve ningún día entre Caso 3 y Caso 4 -- esa
+    frontera la sigue decidiendo _mejor_medidor, y "el mayor está por encima"
+    equivale a "hay al menos uno por encima".
+
+    Devuelve None si ninguno está por encima (el llamador ya está en la rama
+    de Caso 4, así que en la práctica siempre hay al menos uno)."""
+    candidatos = [c for c in (curva_a, curva_b) if _tiene_dato(c) and float(c.fillna(0).sum()) > e_inv]
+    if not candidatos:
+        return None
+    return min(candidatos, key=lambda c: float(c.fillna(0).sum()))
 
 
 def _principal_o_respaldo(curva_ppal: pd.Series, curva_resp: pd.Series) -> pd.Series:
@@ -260,10 +294,17 @@ def _decidir_caso(
                 "revisar_manualmente": True,
             }
         else:
-            # Caso 4: medidores sobrereportan -> medidor de mayor valor
+            # Caso 4: medidores sobrereportan -> el más cercano a inversores
+            # entre los que están por encima (ver _mas_cercano_por_encima).
+            # Se deja SIN revisar_manualmente, como siempre: el día llegó acá
+            # por fallar el +-6% del Caso 2, muchas veces por décimas, y
+            # marcarlo llenaría la revisión de días casi correctos.
+            curva_c4 = _mas_cercano_por_encima(curva_ppal, curva_resp, e_inv)
+            if curva_c4 is None:
+                curva_c4 = curva_ref
             return {
-                "caso": 4, "energia_final_kwh": float(curva_ref.fillna(0).sum()), "curva_final": curva_ref,
-                "medidor_usado": "principal" if curva_ref is curva_ppal else "respaldo",
+                "caso": 4, "energia_final_kwh": float(curva_c4.fillna(0).sum()), "curva_final": curva_c4,
+                "medidor_usado": "principal" if curva_c4 is curva_ppal else "respaldo",
             }
 
     # --- Caso 5: tengo medidores pero no inversores ---
