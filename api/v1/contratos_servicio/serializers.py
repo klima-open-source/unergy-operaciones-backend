@@ -114,6 +114,44 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
         exclude = ["proyecto", "contratante", "prestador", "inversionista"]
         extra_kwargs = {"servicio_aplica": {"required": False}}
 
+    def _exigir_partes_vinculadas(self, datos):
+        """Un contrato NUEVO nombra a sus partes con un cliente, no con texto.
+
+        Solo al CREAR. Al editar no se exige todavía: hay 160 contratos sin
+        vínculo, y bloquear el guardado dejaría a cualquiera que corrija una
+        fecha atrapado resolviendo datos maestros que no son suyos. La pantalla
+        sí lo pide en los dos casos --decisión de Sara-- porque ahí hay una
+        persona que puede resolverlo; la API la usan también el CRM y las
+        cargas. Se cierra cuando corra `vincular_partes_contratos`
+        (`docs/SERVICIOS_AGRUPACION.md` §4-decies).
+
+        El inversionista solo en representación/CGM, que es donde la tarifa
+        varía por inversionista y donde el reparto de costos lo necesita.
+        """
+        if self.instance is not None:
+            return
+
+        faltan = [
+            etiqueta for campo, etiqueta in (
+                ("contratante", "contratante_id"), ("prestador", "prestador_id"),
+            ) if not datos.get(campo)
+        ]
+        servicio = datos.get("servicio_aplica")
+        if grupos_service.grupo_de(servicio) == grupos_service.REPRESENTACION_CGM \
+                and not datos.get("inversionista"):
+            faltan.append("inversionista_id")
+
+        if faltan:
+            raise serializers.ValidationError({
+                campo: (
+                    "Vincula esta parte a un cliente registrado. Si no existe, "
+                    "créalo: un contrato que nombra a alguien que el sistema no "
+                    "reconoce queda fuera del panel de ese cliente y de todo lo "
+                    "que se calcula por cliente."
+                )
+                for campo in faltan
+            })
+
     def validate(self, datos):
         """Una planta en comunidad energética no recibe representación ni CGM.
 
@@ -125,6 +163,8 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
         Se valida sobre los datos YA combinados con la instancia: en un PATCH
         que solo cambia la planta, `servicio_aplica` no viene en el cuerpo.
         """
+        self._exigir_partes_vinculadas(datos)
+
         proyecto = datos.get("proyecto", getattr(self.instance, "proyecto", None))
         servicio = datos.get(
             "servicio_aplica", getattr(self.instance, "servicio_aplica", None)

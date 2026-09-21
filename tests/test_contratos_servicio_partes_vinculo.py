@@ -162,6 +162,68 @@ def test_sincronizar_copia_el_nombre_del_inversionista_vinculado(datos):
     assert guardado.inversionista_nombre == "Fondo Solar Tres S.A.S."
 
 
+# ── La API exige las partes al CREAR ─────────────────────────────────────────
+# La pantalla ya las pedía, pero una llamada directa, el CRM o una carga masiva
+# seguían pudiendo crear partes sueltas. Solo al crear: al editar hay 160
+# contratos sin vínculo y bloquear el guardado dejaría a cualquiera que corrija
+# una fecha atrapado resolviendo datos maestros que no son suyos.
+
+def test_crear_sin_contratante_lo_rechaza(datos):
+    respuesta = _pedir(
+        "post", "/api/v1/contratos-servicio", datos,
+        cuerpo={"servicio_aplica": "mantenimiento",
+                "prestador_id": _cliente("Unergy S.A.S.").id},
+        acciones={"post": "create"},
+    )
+
+    assert respuesta.status_code == 400, respuesta.data
+    assert "contratante_id" in respuesta.data
+
+
+def test_crear_una_representacion_sin_inversionista_lo_rechaza(datos):
+    """Solo en representación/CGM: es donde la tarifa varía por inversionista."""
+    respuesta = _pedir(
+        "post", "/api/v1/contratos-servicio", datos,
+        cuerpo={
+            "servicio_aplica": "representacion",
+            "contratante_id": _cliente("Quantum").id,
+            "prestador_id": _cliente("Unergy S.A.S.").id,
+        },
+        acciones={"post": "create"},
+    )
+
+    assert respuesta.status_code == 400, respuesta.data
+    assert "inversionista_id" in respuesta.data
+
+
+def test_un_mantenimiento_no_necesita_inversionista(datos):
+    respuesta = _pedir(
+        "post", "/api/v1/contratos-servicio", datos,
+        cuerpo={
+            "servicio_aplica": "mantenimiento",
+            "contratante_id": _cliente("Quantum").id,
+            "prestador_id": _cliente("Unergy S.A.S.").id,
+        },
+        acciones={"post": "create"},
+    )
+
+    assert respuesta.status_code == 201, respuesta.data
+
+
+def test_editar_un_contrato_viejo_sin_partes_sigue_siendo_posible(datos):
+    """Los 160 contratos sin vínculo tienen que poder corregirse mientras el
+    backfill no corra: exigirlo acá dejaría a la gente atrapada."""
+    contrato = _contrato(servicio_aplica="mantenimiento")
+
+    respuesta = _pedir(
+        "patch", f"/api/v1/contratos-servicio/{contrato.id}", datos,
+        cuerpo={"numero_contrato": "UNERGY-OM-004"},
+        acciones={"patch": "partial_update"}, pk=contrato.id,
+    )
+
+    assert respuesta.status_code == 200, respuesta.data
+
+
 def test_desvincular_una_parte_sigue_siendo_posible(datos):
     """`null` tiene que poder borrar el vínculo: un contrato mal vinculado se
     corrige, no se queda atado al cliente equivocado."""

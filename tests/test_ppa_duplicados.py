@@ -219,3 +219,34 @@ def test_forzar_crea_de_todos_modos(datos):
     )
 
     assert respuesta.status_code == 201, respuesta.data
+
+
+# ── El camino del CRM ────────────────────────────────────────────────────────
+# `firmar()` crea el PPA con `crear_ppa` y firma desde una pantalla que no tiene
+# dónde confirmar "crear igual": un 409 dejaría la firma sin salida. Por eso ahí
+# el duplicado viaja como AVISO, que es el canal que el CRM ya usa para contar lo
+# que quedó cojo.
+
+def test_crear_ppa_avisa_del_duplicado_en_vez_de_bloquear(datos):
+    from apps.ppa.services.escritura import crear_ppa
+
+    _ppa(numero_codigo_contrato="UNERGY-PPA-014")
+
+    resultado = crear_ppa(
+        tipo_contrato="venta",
+        datos={"numero_codigo_contrato": "UNERGY-PPA-014", "nombre_interno": "PPA QA"},
+    )
+
+    assert resultado.contrato.id is not None, "la firma no se puede bloquear"
+    assert any("Ya existe un contrato PPA" in a for a in resultado.avisos), resultado.avisos
+
+
+def test_sin_duplicado_no_hay_aviso_de_repetido(datos):
+    from apps.ppa.services.escritura import crear_ppa
+
+    resultado = crear_ppa(
+        tipo_contrato="venta",
+        datos={"numero_codigo_contrato": "UNERGY-PPA-099", "nombre_interno": "PPA QA"},
+    )
+
+    assert not any("Ya existe un contrato PPA" in a for a in resultado.avisos)

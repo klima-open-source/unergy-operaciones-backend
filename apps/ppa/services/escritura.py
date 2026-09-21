@@ -106,6 +106,38 @@ def _completar_lado_unergy(tipo_contrato: str, datos: dict) -> str | None:
     return None
 
 
+def _aviso_si_ya_existe(datos: dict, tipo_contrato: str, proyecto_ids) -> str | None:
+    """Aviso --no bloqueo-- cuando ya hay un PPA vivo que cubre esto.
+
+    La API rechaza el duplicado con un 409 antes de llegar acá, y ofrece
+    `forzar`. El CRM no puede hacer eso: firma desde una pantalla que no tiene
+    dónde confirmar "crear igual", así que bloquearlo dejaría la firma sin
+    salida. Por eso acá es un aviso, que es el canal que el CRM ya usa para
+    contar lo que quedó cojo.
+
+    Un fallo buscando el duplicado no puede impedir crear el contrato: avisar es
+    accesorio, firmar no.
+    """
+    try:
+        from apps.plataforma.services.fechas import hoy_col
+        from apps.ppa.services import unicidad as unicidad_service
+
+        repetido = unicidad_service.buscar_duplicado(
+            datos={**datos, "tipo_contrato": tipo_contrato},
+            proyecto_ids=proyecto_ids,
+            hoy=hoy_col(),
+        )
+    except Exception:       # noqa: BLE001 — ver el docstring
+        return None
+    if repetido is None:
+        return None
+    return (
+        f"Ya existe un contrato PPA vigente que cubre esto: "
+        f"'{unicidad_service.descripcion(repetido)}' (ID {repetido.id}). "
+        "Revisa si este es un duplicado."
+    )
+
+
 def _avisos(plantas: int, tarifas: int, compromisos: int) -> list[str]:
     salida = []
     if not plantas:
@@ -162,6 +194,7 @@ def crear_ppa(
     # cuando había dos funciones creando contratos con reglas distintas.
     datos = dict(datos)
     aviso_unergy = _completar_lado_unergy(tipo_contrato, datos)
+    aviso_repetido = _aviso_si_ya_existe(datos, tipo_contrato, proyecto_ids)
 
     with transaction.atomic():
         contrato = ppa_models.PpaContrato.objects.create(
@@ -196,6 +229,6 @@ def crear_ppa(
         compromisos=len(compromisos),
         avisos=(
             _avisos(len(proyecto_ids), len(tarifas), len(compromisos))
-            + ([aviso_unergy] if aviso_unergy else [])
+            + [a for a in (aviso_unergy, aviso_repetido) if a]
         ),
     )

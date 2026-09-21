@@ -74,6 +74,24 @@ def datos():
     atomica.__exit__(None, None, None)
 
 
+def _con_partes(cuerpo):
+    """Completa las partes que la API exige a un contrato NUEVO.
+
+    Desde el 2026-09-20 un contrato no se crea nombrando a sus partes con texto:
+    van vinculadas a un cliente (`docs/SERVICIOS_AGRUPACION.md` §4-decies). Estas
+    pruebas son sobre duplicados, no sobre partes, así que las rellenan con lo
+    mínimo salvo que el propio caso diga otra cosa.
+    """
+    from apps.contratos.services import grupos
+
+    completo = dict(cuerpo)
+    completo.setdefault("contratante_id", _cliente("Contratante QA").id)
+    completo.setdefault("prestador_id", _cliente("Unergy QA").id)
+    if grupos.grupo_de(completo.get("servicio_aplica")) == grupos.REPRESENTACION_CGM:
+        completo.setdefault("inversionista_id", _cliente("Inversionista QA").id)
+    return completo
+
+
 def _crear(datos_usuario, cuerpo, forzar=False):
     from rest_framework.test import APIRequestFactory, force_authenticate
 
@@ -81,7 +99,7 @@ def _crear(datos_usuario, cuerpo, forzar=False):
     from api.v1.contratos_servicio.views import ContratoServicioViewSet
 
     url = "/api/v1/contratos-servicio" + ("?forzar=true" if forzar else "")
-    peticion = APIRequestFactory().post(url, cuerpo, format="json")
+    peticion = APIRequestFactory().post(url, _con_partes(cuerpo), format="json")
     force_authenticate(peticion, user=UsuarioAutenticado(datos_usuario["usuario"]))
     respuesta = ContratoServicioViewSet.as_view({"post": "create"})(peticion)
     respuesta.render()
