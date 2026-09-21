@@ -82,7 +82,7 @@ class ContratoServicioViewSet(
             cs_serializers.ContratoSerializer(contratos, many=True).data
         )
 
-    def _avisar_contrato_repetido(self, request, datos, excluir_id=None):
+    def _avisar_contrato_repetido(self, request, datos, instancia=None):
         """409 estructurado si ya hay un contrato vivo que cubre lo mismo.
 
         `forzar=true` lo salta, igual que en clientes, proyectos y fronteras. El
@@ -93,15 +93,24 @@ class ContratoServicioViewSet(
         if request.query_params.get("forzar", "").strip().lower() in ("1", "true", "yes", "on"):
             return
 
-        proyecto = datos.get("proyecto")
-        inversionista = datos.get("inversionista")
+        # Sobre los datos YA combinados con la instancia: en un PATCH que solo
+        # cambia la planta, `servicio_aplica` no viene en el cuerpo, y sin esto
+        # la revisión no tendría con qué comparar. Mismo patrón que la validación
+        # de comunidades en el serializer.
+        def _dato(clave, atributo=None):
+            if clave in datos:
+                return datos[clave]
+            return getattr(instancia, atributo or clave, None) if instancia else None
+
+        proyecto = _dato("proyecto")
+        inversionista = _dato("inversionista")
         repetido = unicidad_service.buscar_duplicado(
             proyecto_id=proyecto.id if proyecto else None,
-            servicio_aplica=datos.get("servicio_aplica"),
+            servicio_aplica=_dato("servicio_aplica"),
             hoy=hoy_col(),
             inversionista_id=inversionista.id if inversionista else None,
-            inversionista_nombre=datos.get("inversionista_nombre"),
-            excluir_id=excluir_id,
+            inversionista_nombre=_dato("inversionista_nombre"),
+            excluir_id=instancia.id if instancia else None,
         )
         if repetido:
             raise Conflict({
@@ -145,6 +154,11 @@ class ContratoServicioViewSet(
         frontera_ids = datos.pop("frontera_ids", None)
         toca_enlace = "enlace_drive" in datos
         enlace = datos.pop("enlace_drive", None)
+
+        # También al editar: reapuntar un contrato a otra planta o cambiarle el
+        # servicio crea el mismo duplicado que el alta ya impide, y sin esto
+        # entraba sin decir nada.
+        self._avisar_contrato_repetido(request, datos, instancia=contrato)
 
         with transaction.atomic():
             for campo, valor in datos.items():

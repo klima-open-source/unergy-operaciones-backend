@@ -1,9 +1,14 @@
-"""Crear un contrato avisa si ya hay uno vivo que cubre lo mismo.
+"""Crear o editar un contrato avisa si ya hay uno vivo que cubre lo mismo.
 
 Producción acumuló el mismo contrato escrito por tres fuentes que no se
 reconocían entre sí --MGS Naos 2 tiene tres filas siendo un solo contrato-- y lo
 único que existía era un informe de duplicados que se mira DESPUÉS. Nada impedía
 crear el cuarto.
+
+Se revisa en las dos puertas. Poner el aviso solo al crear lo dejaba saltable con
+dos clics --se crea en otra planta y se reapunta--, que es exactamente el agujero
+que tuvo el aviso de nombre parecido de clientes hasta que se revisó también al
+editar.
 
 Lo delicado de esto no es detectar el duplicado: es **no estorbar los casos
 legítimos**, que son varios y reales. La mitad de estas pruebas son eso.
@@ -249,3 +254,69 @@ def test_forzar_crea_de_todos_modos(datos):
     )
 
     assert respuesta.status_code == 201, respuesta.data
+
+
+# ── Al EDITAR ────────────────────────────────────────────────────────────────
+# Reapuntar un contrato a otra planta crea el mismo duplicado que el alta ya
+# impide. Sin esta revisión, la protección se saltaba con dos clics -- el mismo
+# agujero que tenía el aviso de nombre parecido de clientes antes de que se
+# revisara también al editar.
+
+def _editar(datos_usuario, contrato_id, cuerpo, forzar=False):
+    from rest_framework.test import APIRequestFactory, force_authenticate
+
+    from api.authentication import UsuarioAutenticado
+    from api.v1.contratos_servicio.views import ContratoServicioViewSet
+
+    url = f"/api/v1/contratos-servicio/{contrato_id}" + ("?forzar=true" if forzar else "")
+    peticion = APIRequestFactory().patch(url, cuerpo, format="json")
+    force_authenticate(peticion, user=UsuarioAutenticado(datos_usuario["usuario"]))
+    respuesta = ContratoServicioViewSet.as_view({"patch": "partial_update"})(
+        peticion, pk=contrato_id,
+    )
+    respuesta.render()
+    return respuesta
+
+
+def test_mover_un_contrato_a_una_planta_que_ya_lo_tiene_avisa(datos):
+    destino = _planta("Destino")
+    _contrato(proyecto=destino, numero_contrato="UNERGY-RC-009")
+    mudo = _contrato(proyecto=_planta("Origen"))
+
+    respuesta = _editar(datos, mudo.id, {"proyecto_id": destino.id})
+
+    assert respuesta.status_code == 409, respuesta.data
+    assert respuesta.data["detail"]["duplicado_contrato"] is True
+
+
+def test_editar_otro_campo_del_mismo_contrato_no_avisa(datos):
+    """El contrato no puede ser su propio duplicado: sin excluirse, cambiarle el
+    número de contrato chocaría consigo mismo."""
+    planta = _planta()
+    contrato = _contrato(proyecto=planta)
+
+    respuesta = _editar(datos, contrato.id, {"numero_contrato": "UNERGY-RC-010"})
+
+    assert respuesta.status_code == 200, respuesta.data
+
+
+def test_al_editar_se_usa_el_servicio_guardado_si_no_viene_en_el_cuerpo(datos):
+    """Un PATCH que solo cambia la planta no manda `servicio_aplica`: hay que
+    tomarlo de la instancia o no habría con qué comparar."""
+    destino = _planta("Destino")
+    _contrato(proyecto=destino, servicio_aplica="arriendo")
+    mudo = _contrato(proyecto=_planta("Origen"), servicio_aplica="arriendo")
+
+    respuesta = _editar(datos, mudo.id, {"proyecto_id": destino.id})
+
+    assert respuesta.status_code == 409, respuesta.data
+
+
+def test_forzar_tambien_vale_al_editar(datos):
+    destino = _planta("Destino")
+    _contrato(proyecto=destino)
+    mudo = _contrato(proyecto=_planta("Origen"))
+
+    respuesta = _editar(datos, mudo.id, {"proyecto_id": destino.id}, forzar=True)
+
+    assert respuesta.status_code == 200, respuesta.data
