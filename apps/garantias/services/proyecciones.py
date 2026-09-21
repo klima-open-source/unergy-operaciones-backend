@@ -183,10 +183,12 @@ def en_vivo(hoy: date | None = None, *, plantas_nuevas: int = 0,
             continue
 
         # Se recalcula con el neto real, conservando plantas nuevas y
-        # regulatorio.
+        # regulatorio. La planta nueva se prorratea por la misma fracción de mes
+        # que la ventana (igual que en `proyecciones`), no a mes completo.
+        fraccion = dias / dias_del_mes if dias_del_mes else 1.0
         ventana.update(calcular_garantia(
             neto, precio or 0.0, ventana.get("costo_regulatorio") or 0.0,
-            plantas_nuevas, kwh_planta_nueva,
+            plantas_nuevas, kwh_planta_nueva, fraccion,
         ))
         ventana["neto_mwh"] = neto
         ventana["fuente_neto"] = "balcttos"
