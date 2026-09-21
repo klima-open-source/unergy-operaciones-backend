@@ -6,6 +6,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 
+from api.exceptions import Conflict
 from api.logging import class_logger_wrapper, log_endpoint
 from api.permissions import RolePermission
 from apps.clientes.services import documentos as documentos_service
@@ -14,7 +15,9 @@ from apps.contratos.services import dedup as dedup_service
 from apps.contratos.services import fronteras as fronteras_service
 from apps.contratos.services import indexacion as indexacion_service
 from apps.contratos.services import partes as partes_service
+from apps.contratos.services import unicidad as unicidad_service
 from apps.facturacion import models as fa_models
+from apps.plataforma.services.fechas import hoy_col
 
 from . import queryset as cs_queryset
 from . import serializers as cs_serializers
@@ -79,12 +82,46 @@ class ContratoServicioViewSet(
             cs_serializers.ContratoSerializer(contratos, many=True).data
         )
 
+    def _avisar_contrato_repetido(self, request, datos, excluir_id=None):
+        """409 estructurado si ya hay un contrato vivo que cubre lo mismo.
+
+        `forzar=true` lo salta, igual que en clientes, proyectos y fronteras. El
+        aviso NO bloquea --hay razones reales para dos contratos parecidos-- pero
+        tiene que aparecer: sin él nacieron las tres filas de MGS Naos 2, y lo
+        único que existía era el informe de duplicados, que se mira después.
+        """
+        if request.query_params.get("forzar", "").strip().lower() in ("1", "true", "yes", "on"):
+            return
+
+        proyecto = datos.get("proyecto")
+        inversionista = datos.get("inversionista")
+        repetido = unicidad_service.buscar_duplicado(
+            proyecto_id=proyecto.id if proyecto else None,
+            servicio_aplica=datos.get("servicio_aplica"),
+            hoy=hoy_col(),
+            inversionista_id=inversionista.id if inversionista else None,
+            inversionista_nombre=datos.get("inversionista_nombre"),
+            excluir_id=excluir_id,
+        )
+        if repetido:
+            raise Conflict({
+                "mensaje": (
+                    f"Esta planta ya tiene un contrato vigente de este servicio: "
+                    f"'{unicidad_service.descripcion(repetido)}' (ID {repetido.id})."
+                ),
+                "duplicado_contrato": True,
+                "candidato_id": repetido.id,
+                "candidato_nombre": unicidad_service.descripcion(repetido),
+            })
+
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         datos = dict(serializer.validated_data)
         frontera_ids = datos.pop("frontera_ids", None) or []
         enlace = datos.pop("enlace_drive", None)
+
+        self._avisar_contrato_repetido(request, datos)
 
         with transaction.atomic():
             contrato = ct_models.ContratoServicio.objects.create(**datos)
