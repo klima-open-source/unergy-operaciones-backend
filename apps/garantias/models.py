@@ -169,7 +169,9 @@ class GarantiaContrato(models.Model):
     mes = models.IntegerField()
     codigo = models.CharField(max_length=40)
     contrato = models.CharField(max_length=200, null=True, blank=True)
-    comprador = models.CharField(max_length=10, null=True, blank=True)
+    # Nombre del comprador (razón social completa del resumen de Cumplimiento),
+    # no el código SIC: puede ser largo ("... S.A.S. E.S.P.").
+    comprador = models.CharField(max_length=120, null=True, blank=True)
     proyecto = models.ForeignKey(
         "proyectos.Proyecto", on_delete=models.DO_NOTHING, db_column="proyecto_id",
         null=True, blank=True, related_name="garantia_contrato_por_proyecto_id",

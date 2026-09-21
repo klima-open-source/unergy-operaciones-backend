@@ -55,7 +55,11 @@ def _modulos_queryset():
 
 def _funciones_sin_argumentos(modulo):
     """Las que se pueden invocar sin datos: son las que arman el listado base."""
-    for nombre, fn in vars(modulo).items():
+    # `list(...)`: el llamador invoca cada `fn()` mientras este generador está
+    # suspendido; si esa llamada dispara un import diferido que agrega un nombre
+    # al módulo, `vars(modulo)` cambia de tamaño y la iteración cruda revienta
+    # ("dictionary changed size during iteration"). Copiar el dict lo evita.
+    for nombre, fn in list(vars(modulo).items()):
         if nombre.startswith("_") or not inspect.isfunction(fn):
             continue
         if fn.__module__ != modulo.__name__:
