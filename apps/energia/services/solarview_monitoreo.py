@@ -447,12 +447,19 @@ def monitoreo_flota() -> dict:
     "sin_datos": sus medidores no dependen del proveedor y la tarjeta tiene que
     poder mostrarlos. Antes se lo saltaba y el proyecto desaparecía de la vista.
     """
+    # TEMPORAL -- prints de diagnostico, quitar cuando se sepa donde se va el
+    # tiempo. Se ven con `docker compose logs -f operaciones`.
+    _t0 = time.perf_counter()
     cliente = _get_cliente()
+    print(f"[monitoring] _get_cliente: {(time.perf_counter()-_t0)*1000:.0f} ms", flush=True)
 
+    _t1 = time.perf_counter()
     proyectos = list(Proyecto.objects.filter(
         estado="en_operacion", tipo_proyecto="minigranja", srv_operacion=True,
         deleted_at__isnull=True,
     ))
+    print(f"[monitoring] query proyectos ({len(proyectos)}): {(time.perf_counter()-_t1)*1000:.0f} ms", flush=True)
+
     if not proyectos:
         return {
             "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -462,13 +469,19 @@ def monitoreo_flota() -> dict:
         }
 
     clave = f"fleet:{hoy_col().isoformat()}"
-    if (cacheado := _cache_get(clave)) is not None:
+    _t2 = time.perf_counter()
+    cacheado = _cache_get(clave)
+    print(f"[monitoring] _cache_get: {(time.perf_counter()-_t2)*1000:.0f} ms (hit={cacheado is not None})", flush=True)
+    if cacheado is not None:
         return cacheado
 
     # Una sola llamada para toda la flota: /kpis/availability/ devuelve el mismo
     # shape que el de Solenium a propósito, así que el mapeo de estado no cambia.
+    _t3 = time.perf_counter()
     disponibilidad = cliente.get_availability() or {}
+    print(f"[monitoring] get_availability (SolarView): {(time.perf_counter()-_t3)*1000:.0f} ms", flush=True)
 
+    _t4 = time.perf_counter()
     filas = []
     capacidad_total = 0.0
     cuenta = {"online": 0, "caido": 0, "degradado": 0, "sin_comunicacion": 0,
@@ -503,6 +516,8 @@ def monitoreo_flota() -> dict:
             "p90_diario_kwh": _p90_del_dia(p),
         })
 
+    print(f"[monitoring] bucle P90 + armar filas ({len(proyectos)}): {(time.perf_counter()-_t4)*1000:.0f} ms", flush=True)
+
     filas.sort(key=lambda x: (ORDEN_ESTADO.get(x["status"], 5), x["nombre"] or ""))
 
     datos = {
@@ -518,7 +533,10 @@ def monitoreo_flota() -> dict:
         },
         "projects": filas,
     }
+    _t5 = time.perf_counter()
     _cache_set(clave, CACHE_TTL_FLOTA, datos)
+    print(f"[monitoring] _cache_set: {(time.perf_counter()-_t5)*1000:.0f} ms", flush=True)
+    print(f"[monitoring] TOTAL: {(time.perf_counter()-_t0)*1000:.0f} ms", flush=True)
     return datos
 
 
