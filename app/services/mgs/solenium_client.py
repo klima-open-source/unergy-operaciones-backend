@@ -13,6 +13,7 @@ logger = logging.getLogger("mgs.solenium")
 RETRY_MAX = 2
 TIMEOUT = 30.0
 TOKEN_MARGIN_SECONDS = 60
+AUTH_BACKOFF_SECONDS = 300  # no reintentar auth durante 5 min tras un fallo
 
 
 class SoleniumClient:
@@ -30,6 +31,7 @@ class SoleniumClient:
         self._access_token: str | None = None
         self._refresh_token: str | None = None
         self._token_time: float = 0
+        self._token_fail_until: float = 0.0
         self._http = httpx.Client(timeout=TIMEOUT, follow_redirects=True)
 
     @property
@@ -48,10 +50,12 @@ class SoleniumClient:
             self._access_token = data["access"]
             self._refresh_token = data["refresh"]
             self._token_time = time.time()
+            self._token_fail_until = 0.0
         except (httpx.HTTPError, KeyError) as exc:
             logger.error("solenium auth failed: %s", exc)
             self._access_token = None
             self._refresh_token = None
+            self._token_fail_until = time.time() + AUTH_BACKOFF_SECONDS
 
     def _try_refresh(self) -> bool:
         if not self._refresh_token:
@@ -67,6 +71,8 @@ class SoleniumClient:
             return False
 
     def _ensure_token(self):
+        if time.time() < self._token_fail_until:
+            return  # en backoff tras un fallo de auth, no reintentar todavía
         if not self._access_token:
             self._authenticate()
             return
