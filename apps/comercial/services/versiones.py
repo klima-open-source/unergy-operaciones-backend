@@ -110,3 +110,28 @@ def aceptar(version: OportunidadOfertaVersion, fecha) -> OportunidadOfertaVersio
     version.fecha_aceptacion = fecha
     version.save(update_fields=["fecha_aceptacion"])
     return version
+
+
+def condiciones_para_contrato(version: OportunidadOfertaVersion) -> dict:
+    """Lo que la propuesta aceptada le aporta al contrato.
+
+    **El contrato nace de lo que se negoció, no de lo que alguien vuelva a
+    teclear.** Antes el diálogo de firma preguntaba el precio, el indexador y el
+    mes base porque la oferta no los tenía en ninguna parte: `precio_detalle` era
+    texto libre. Ahora la versión los guarda, así que salen de ahí.
+
+    **Las fechas NO están acá**, y es a propósito. El período de suministro vive
+    en la oferta (`fecha_tentativa_inicio` / `fecha_fin_tentativa`) y es
+    tentativo: la fecha real del contrato se confirma al firmar. Meterla en la
+    versión sería modelar un dato que todavía no se negocia por propuesta.
+    """
+    precios = [
+        {"anio": p.anio, "precio": float(p.precio)}
+        for p in sorted(version.precios.all(), key=lambda x: x.anio)
+    ]
+    return {
+        "precios_anuales": precios or None,
+        "indice_indexacion": version.indice_indexacion,
+        "periodo_indexacion_base": version.periodo_indexacion_base,
+        "carpeta_link": version.documento_url,
+    }

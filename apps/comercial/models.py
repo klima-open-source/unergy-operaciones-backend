@@ -54,6 +54,25 @@ class OportunidadGestion(models.Model):
     tipo = models.CharField(max_length=8, choices=[("llamada", "llamada"), ("correo", "correo"), ("reunion", "reunion"), ("whatsapp", "whatsapp"), ("nota", "nota")])
     descripcion = models.TextField()
     fecha = models.DateTimeField(default=timezone.now)
+    # Quien habló: nosotros (saliente) o el cliente (entrante).
+    #
+    # **Es el campo del que depende que la alerta no mienta.** Sin él,
+    # `calcular_alerta` toma la gestión MÁS RECIENTE de cualquier tipo, así que
+    # insistirle al cliente el jueves reinicia el contador aunque siga sin decir
+    # una palabra: la alerta contesta «hace cuánto que no pasa nada» cuando
+    # debería contestar «hace cuánto que no nos responden».
+    #
+    # NULL es el legado: las gestiones anteriores a este campo no dicen quién
+    # habló, y se siguen contando como antes para no provocar una avalancha de
+    # alertas el día que esto se despliegue. Las nuevas sí lo declaran.
+    #
+    # Ver `docs/DOMINIO_COMERCIAL.md`, P-9. El mismo concepto ya existe en
+    # `apps/comun/correos_hilo.py`, que distingue nuestros mensajes de los suyos
+    # por el dominio `@unergy.io`.
+    direccion = models.CharField(
+        max_length=9, null=True, blank=True,
+        choices=[("saliente", "saliente"), ("entrante", "entrante")],
+    )
     usuario = models.ForeignKey("plataforma.Usuario", on_delete=models.DO_NOTHING, db_column="usuario_id", null=True, blank=True, related_name="oportunidad_gestiones_por_usuario_id")
     created_at = models.DateTimeField(default=timezone.now)
 

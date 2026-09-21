@@ -15,15 +15,16 @@ filas entren. La vista principal carga todas las ofertas de una.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, time
 
 from django.db.models import Count, Max, Q
 
-from apps.clientes.models import Cliente
 from apps.comercial.models import (
     Oportunidad, OportunidadGestion, OportunidadOferta, OportunidadOfertaProyecto,
+    OportunidadOfertaVersion,
 )
 from apps.comercial.services.pipeline import (
+    COLOMBIA,
     calcular_alerta, col_now, contexto_ficha, ficha_operativa,
 )
 from apps.comercial.services.salidas import (
@@ -112,8 +113,22 @@ class UltimaGestion:
 
 
 def ultima_gestion() -> UltimaGestion:
+    """La última vez que el CLIENTE nos contestó. No cualquier gestión.
+
+    Solo cuentan las ENTRANTES: si contara cualquiera, insistirle al cliente el
+    jueves reiniciaría el contador aunque siguiera sin decir una palabra, y la
+    alerta pasaría de «hace cuánto que no nos responden» a «hace cuánto que no
+    pasa nada». Ver `docs/DOMINIO_COMERCIAL.md`, P-9.
+
+    **Las gestiones sin dirección también cuentan**, y es a propósito: son las
+    anteriores a que existiera el campo y no dicen quién habló. Descartarlas
+    dispararía una avalancha de alertas el día del despliegue sobre ofertas que
+    nadie tocó. Las nuevas sí declaran dirección, así que el legado se va
+    apagando solo.
+    """
     filas = (
         OportunidadGestion.objects
+        .filter(Q(direccion="entrante") | Q(direccion__isnull=True))
         .values("oportunidad_id", "oferta_id")
         .annotate(fecha=Max("fecha"))
     )
@@ -129,6 +144,29 @@ def ultima_gestion() -> UltimaGestion:
         else:
             de_la_oferta[f["oferta_id"]] = f["fecha"]
     return UltimaGestion(del_cliente, de_la_oferta)
+
+
+def ultimo_envio_por_oferta(oferta_ids) -> dict:
+    """Cuándo se envió la última propuesta de cada oferta.
+
+    Mandar una versión nueva reinicia el contador de la alerta: es una pregunta
+    nueva, no una insistencia sobre la misma. Un borrador no cuenta — sin fecha
+    de envío la propuesta no salió (O-11).
+    """
+    if not oferta_ids:
+        return {}
+    filas = (
+        OportunidadOfertaVersion.objects
+        .filter(oferta_id__in=oferta_ids, fecha_envio__isnull=False)
+        .values("oferta_id")
+        .annotate(fecha=Max("fecha_envio"))
+    )
+    # `fecha_envio` es un DateField y la alerta compara datetimes: se ancla al
+    # inicio del día, que es la lectura conservadora (cuenta el día entero).
+    return {
+        f["oferta_id"]: datetime.combine(f["fecha"], time.min, tzinfo=COLOMBIA)
+        for f in filas
+    }
 
 
 def listar_oportunidades(estado=None, tipo_servicio=None, cliente_id=None,
@@ -291,6 +329,7 @@ def listar_ofertas(tipo=None, estado=None, resultado=None, q=None,
     todas_las_fichas = fichas(ofertas)
     todas_las_plantas = plantas_de_ofertas(ofertas)
     gestiones = ultima_gestion()
+    envios = ultimo_envio_por_oferta([o.id for o in ofertas])
 
     salida = []
     for of in ofertas:
@@ -301,6 +340,7 @@ def listar_ofertas(tipo=None, estado=None, resultado=None, q=None,
         dias, alerta = calcular_alerta(
             valor(of.estado), of.estado_desde or op.estado_desde,
             gestiones.para(op.id, of.id), ALERTA_DIAS, ahora,
+            ultimo_envio=envios.get(of.id),
         )
         if solo_alerta and not alerta:
             continue

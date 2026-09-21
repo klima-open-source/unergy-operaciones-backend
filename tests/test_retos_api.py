@@ -2,6 +2,18 @@
 
 Las fechas de los retos de prueba se construyen alrededor de HOY para que los
 tests no dependan de la fecha del sistema.
+
+**Y tampoco del día de la semana**, que es la mitad que faltaba: las semanas de
+un reto van de lunes a domingo, y `semanas_transcurridas` cuenta como cerrada la
+semana cuyo último día ya llegó (`fin_efectivo <= hoy`). Los domingos, entonces,
+la semana en curso ya cuenta, y `meta_esperada` sube un séptimo antes de lo que
+estos tests esperan: fallaban con "300.0 == 200.0" **solo los domingos**, y con
+ellos el despliegue de ese día (encontrado el 2026-09-20).
+
+Por eso el reloj se fija en el MIÉRCOLES de la semana en curso: sigue siendo
+"alrededor de hoy", pero cae siempre a mitad de semana, que es el caso que los
+tests describen ("2 semanas cerradas, la 3 corriendo"). Se parchea `date` en los
+dos módulos por los que entra la fecha; no se toca el cálculo, que es de Retos.
 """
 from datetime import date, timedelta
 
@@ -45,9 +57,37 @@ def db():
     s.close()
 
 
-def _lunes_hoy() -> date:
+def _miercoles_de_esta_semana() -> date:
+    """El reloj de estas pruebas: a mitad de la semana en curso.
+
+    Miércoles y no `date.today()` para que el resultado no cambie según el día
+    en que se corran. Ver el docstring del módulo.
+    """
     hoy = date.today()
-    return hoy - timedelta(days=hoy.weekday())
+    return hoy - timedelta(days=hoy.weekday()) + timedelta(days=2)
+
+
+HOY = _miercoles_de_esta_semana()
+
+
+@pytest.fixture(autouse=True)
+def _reloj_a_mitad_de_semana(monkeypatch):
+    """Todo el código de Retos ve `HOY` en vez del día real.
+
+    La fecha entra solo por estos dos módulos, y siempre como
+    `hoy = hoy or date.today()`.
+    """
+    class _Fecha(date):
+        @classmethod
+        def today(cls):
+            return HOY
+
+    monkeypatch.setattr("app.services.retos.date", _Fecha)
+    monkeypatch.setattr("app.api.v1.retos.date", _Fecha)
+
+
+def _lunes_hoy() -> date:
+    return HOY - timedelta(days=HOY.weekday())
 
 
 def _reto_alrededor_de_hoy(db, anio=2050, trimestre=1) -> RetoTrimestre:

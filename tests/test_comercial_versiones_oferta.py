@@ -266,3 +266,155 @@ def test_borrar_la_oferta_borra_sus_versiones(datos):
     assert not OportunidadOfertaVersionPrecio.objects.filter(
         version_id=version.id
     ).exists()
+
+
+# ── Los endpoints ────────────────────────────────────────────────────────────
+
+def _peticion(datos, metodo, ruta, cuerpo, accion, **kwargs):
+    from rest_framework.test import APIRequestFactory, force_authenticate
+
+    from api.authentication import UsuarioAutenticado
+    from api.v1.comercial.views import ComercialViewSet
+
+    peticion = getattr(APIRequestFactory(), metodo)(ruta, cuerpo, format="json")
+    force_authenticate(peticion, user=UsuarioAutenticado(datos["usuario"]))
+    respuesta = ComercialViewSet.as_view({metodo: accion})(peticion, **kwargs)
+    respuesta.render()
+    return respuesta
+
+
+def _post_version(datos, cuerpo):
+    oid = datos["oferta"].id
+    return _peticion(
+        datos, "post", f"/api/v1/comercial/ofertas/{oid}/versiones", cuerpo,
+        "oferta_versiones", oferta_id=str(oid),
+    )
+
+
+def _get_versiones(datos):
+    oid = datos["oferta"].id
+    return _peticion(
+        datos, "get", f"/api/v1/comercial/ofertas/{oid}/versiones", None,
+        "oferta_versiones", oferta_id=str(oid),
+    )
+
+
+def _post_aceptar(datos, numero, cuerpo):
+    oid = datos["oferta"].id
+    return _peticion(
+        datos, "post", f"/api/v1/comercial/ofertas/{oid}/versiones/{numero}/aceptar",
+        cuerpo, "aceptar_version", oferta_id=str(oid), numero=str(numero),
+    )
+
+
+CUERPO_V1 = {
+    "fecha_envio": "2026-05-20",
+    "documento_url": "https://drive/oferta-v1.pdf",
+    "indice_indexacion": "IPP serie Oferta Interna provisional",
+    "periodo_indexacion_base": "2026-05",
+    "precios": [{"anio": 2026, "precio": 330}, {"anio": 2027, "precio": 318}],
+}
+
+
+def test_post_crea_la_version_con_su_tabla(datos):
+    respuesta = _post_version(datos, CUERPO_V1)
+
+    assert respuesta.status_code == 201, respuesta.data
+    assert respuesta.data["numero"] == 1
+    assert respuesta.data["precios"] == [
+        {"anio": 2026, "precio": 330.0}, {"anio": 2027, "precio": 318.0},
+    ]
+    assert respuesta.data["periodo_indexacion_base"] == "2026-05"
+
+
+def test_el_numero_no_lo_manda_el_cliente(datos):
+    """Es el orden de la propuesta dentro de su oferta, no un dato que alguien
+    elija. Mandarlo no cambia nada."""
+    respuesta = _post_version(datos, {**CUERPO_V1, "numero": 77})
+
+    assert respuesta.data["numero"] == 1
+
+
+def test_el_listado_devuelve_la_mas_nueva_primero(datos):
+    _post_version(datos, CUERPO_V1)
+    _post_version(datos, {**CUERPO_V1, "que_cambio": "Bajamos el precio"})
+
+    respuesta = _get_versiones(datos)
+
+    assert respuesta.status_code == 200
+    assert [v["numero"] for v in respuesta.data] == [2, 1]
+
+
+def test_una_version_sin_fecha_de_envio_es_borrador(datos):
+    respuesta = _post_version(datos, {**CUERPO_V1, "fecha_envio": None})
+
+    assert respuesta.status_code == 201, respuesta.data
+    assert respuesta.data["fecha_envio"] is None
+
+
+def test_una_version_puede_no_traer_precios(datos):
+    respuesta = _post_version(datos, {"fecha_envio": "2026-05-20"})
+
+    assert respuesta.status_code == 201, respuesta.data
+    assert respuesta.data["precios"] == []
+
+
+def test_un_mes_base_mal_escrito_no_entra(datos):
+    respuesta = _post_version(datos, {**CUERPO_V1, "periodo_indexacion_base": "mayo 2026"})
+
+    assert respuesta.status_code == 400
+    assert "periodo_indexacion_base" in respuesta.data
+
+
+def test_un_anio_repetido_es_422(datos):
+    respuesta = _post_version(datos, {
+        **CUERPO_V1,
+        "precios": [{"anio": 2026, "precio": 330}, {"anio": 2026, "precio": 318}],
+    })
+
+    assert respuesta.status_code == 422
+
+
+def test_aceptar_una_version_por_su_numero(datos):
+    _post_version(datos, CUERPO_V1)
+
+    respuesta = _post_aceptar(datos, 1, {"fecha_aceptacion": "2026-06-01"})
+
+    assert respuesta.status_code == 200, respuesta.data
+    assert respuesta.data["fecha_aceptacion"] == "2026-06-01"
+
+
+def test_aceptar_una_version_que_no_existe_es_404(datos):
+    _post_version(datos, CUERPO_V1)
+
+    respuesta = _post_aceptar(datos, 9, {"fecha_aceptacion": "2026-06-01"})
+
+    assert respuesta.status_code == 404
+
+
+def test_aceptar_una_segunda_version_es_409(datos):
+    _post_version(datos, CUERPO_V1)
+    _post_version(datos, CUERPO_V1)
+    _post_aceptar(datos, 1, {"fecha_aceptacion": "2026-06-01"})
+
+    respuesta = _post_aceptar(datos, 2, {"fecha_aceptacion": "2026-06-15"})
+
+    assert respuesta.status_code == 409
+
+
+def test_aceptar_un_borrador_es_422(datos):
+    _post_version(datos, {**CUERPO_V1, "fecha_envio": None})
+
+    respuesta = _post_aceptar(datos, 1, {"fecha_aceptacion": "2026-06-01"})
+
+    assert respuesta.status_code == 422
+
+
+def test_no_hay_como_editar_ni_borrar_una_version(datos):
+    """Append-only: la ruta solo acepta GET y POST. Si alguien agrega un PATCH,
+    esta prueba lo obliga a justificarlo."""
+    from api.v1.comercial.views import ComercialViewSet
+
+    metodos = ComercialViewSet.oferta_versiones.mapping.keys()
+
+    assert set(metodos) == {"get", "post"}

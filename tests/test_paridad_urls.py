@@ -137,6 +137,12 @@ RUTAS_NUEVAS = {
     ("/api/v1/facturacion/cumplimiento/export", "GET"),
     ("/api/v1/garantias/proyecciones/atribucion", "GET"),
     ("/api/v1/garantias/proyecciones/atribucion", "POST"),
+    # Versiones de una oferta (2026-09-18). Reofertar deja de sobrescribir la
+    # propuesta anterior; FastAPI nunca tuvo esto porque la oferta era una sola
+    # fila que se mutaba con PATCH. Ver DOMINIO_COMERCIAL.md, O-8 y O-9.
+    ("/api/v1/comercial/ofertas/{}/versiones", "GET"),
+    ("/api/v1/comercial/ofertas/{}/versiones", "POST"),
+    ("/api/v1/comercial/ofertas/{}/versiones/{}/aceptar", "POST"),
 }
 
 

@@ -132,9 +132,18 @@ class EstadoCambioSerializer(serializers.Serializer):
     estado = serializers.ChoiceField(choices=ESTADOS)
 
 
+DIRECCIONES_GESTION = ["saliente", "entrante"]
+
+
 class GestionCrearSerializer(serializers.Serializer):
     tipo = serializers.ChoiceField(choices=TIPOS_GESTION)
     descripcion = serializers.CharField(min_length=1)
+    # Quién habló. OBLIGATORIO en las nuevas: de este campo depende que la alerta
+    # cuente «hace cuánto que no nos responden» y no «hace cuánto que no pasa
+    # nada». Las gestiones viejas lo tienen en NULL y se siguen contando como
+    # antes, pero una entrada nueva sin dirección volvería a romper el cálculo.
+    # Ver `docs/DOMINIO_COMERCIAL.md`, P-9.
+    direccion = serializers.ChoiceField(choices=DIRECCIONES_GESTION)
     fecha = serializers.DateTimeField(required=False, allow_null=True, default=None)
     # A cuál oferta se refiere. NULL = gestión DEL CLIENTE: cuenta para todas sus
     # ofertas, que es como se comportaban todas antes de 2026-08-19.
@@ -157,6 +166,68 @@ class PrecioAnualSerializer(serializers.Serializer):
 
     anio = serializers.IntegerField(min_value=2000, max_value=2100)
     precio = serializers.FloatField(min_value=0.000001)
+
+
+class VersionOfertaSerializer(serializers.Serializer):
+    """Lectura de una versión. La tabla de precios viaja adentro.
+
+    No hay serializer de edición: las versiones son append-only. Corregir una
+    propuesta es agregar la siguiente, igual que la bitácora de Prospección.
+    """
+
+    id = serializers.IntegerField(read_only=True)
+    numero = serializers.IntegerField(read_only=True)
+    fecha_envio = serializers.DateField(allow_null=True)
+    fecha_aceptacion = serializers.DateField(allow_null=True)
+    documento_url = serializers.CharField(allow_null=True)
+    indice_indexacion = serializers.CharField(allow_null=True)
+    periodo_indexacion_base = serializers.CharField(allow_null=True)
+    que_cambio = serializers.CharField(allow_null=True)
+    creado_por_usuario_id = serializers.IntegerField(allow_null=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    precios = serializers.SerializerMethodField()
+
+    def get_precios(self, obj) -> list:
+        return [
+            {"anio": p.anio, "precio": float(p.precio)}
+            for p in sorted(obj.precios.all(), key=lambda x: x.anio)
+        ]
+
+
+class VersionOfertaCrearSerializer(serializers.Serializer):
+    """`POST /comercial/ofertas/{id}/versiones`.
+
+    `numero` NO se recibe: es el orden de la propuesta dentro de su oferta, no
+    un dato que alguien elija. Lo asigna el servicio.
+
+    Sin `fecha_envio` la versión es un BORRADOR: se está preparando y todavía no
+    salió. Por eso un borrador no se puede aceptar.
+    """
+
+    fecha_envio = serializers.DateField(required=False, allow_null=True, default=None)
+    documento_url = serializers.CharField(
+        required=False, allow_null=True, allow_blank=True, default=None
+    )
+    indice_indexacion = serializers.CharField(
+        required=False, allow_null=True, allow_blank=True, default=None
+    )
+    # Mes base en YYYY-MM, como lo guarda `ppa_contratos`. En el PDF de la oferta
+    # es la fila "Precio Base": los precios son pesos constantes de ese mes.
+    periodo_indexacion_base = serializers.RegexField(
+        r"^\d{4}-(0[1-9]|1[0-2])$", required=False, allow_null=True, default=None,
+    )
+    que_cambio = serializers.CharField(
+        required=False, allow_null=True, allow_blank=True, default=None
+    )
+    # La tabla 2 del PDF. Misma forma que en la firma: al crear el contrato se
+    # expande a filas mensuales de `ppa_tarifas`.
+    precios = PrecioAnualSerializer(many=True, required=False, default=list)
+
+
+class AceptarVersionSerializer(serializers.Serializer):
+    """Cuándo el cliente aceptó esa propuesta. Es la que se firmará."""
+
+    fecha_aceptacion = serializers.DateField()
 
 
 class FirmarOfertaSerializer(serializers.Serializer):
@@ -187,8 +258,9 @@ class FirmarOfertaSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 "fecha_fin no puede ser anterior a fecha_inicio"
             )
-        if not datos.get("tarifa_base") and not datos.get("precios_anuales"):
-            raise serializers.ValidationError("envía tarifa_base o precios_anuales")
+        # El precio ya NO se exige acá: puede venir de la propuesta aceptada, y
+        # este serializer no ve la oferta. La regla "el contrato necesita un
+        # precio" vive en `escritura.firmar`, despues de mezclar las dos fuentes.
         precios = datos.get("precios_anuales") or []
         anios = [p["anio"] for p in precios]
         if len(anios) != len(set(anios)):

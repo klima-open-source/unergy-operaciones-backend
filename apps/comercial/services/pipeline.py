@@ -18,7 +18,7 @@ como `sin_contrato`.
 from __future__ import annotations
 
 import enum
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.db import transaction
@@ -147,15 +147,28 @@ def ahora_colombia() -> datetime:
 def calcular_alerta(
     estado: str,
     estado_desde: datetime,
-    ultima_gestion: datetime | None,
+    ultima_respuesta: datetime | None,
     umbral_dias: int,
     ahora: datetime,
+    ultimo_envio: datetime | None = None,
 ) -> tuple[int, bool]:
     """Devuelve (dias_sin_respuesta, alerta).
 
-    La referencia es lo MÁS RECIENTE entre la entrada al estado actual y la
-    última gestión de bitácora. Alerta solo con MÁS de `umbral_dias` días
-    (5 días exactos NO alertan) y solo en ESTADOS_CON_ALERTA.
+    La referencia es lo MÁS RECIENTE entre tres hechos: la entrada al estado
+    actual, la última vez que el cliente nos contestó, y la última propuesta que
+    le enviamos. Alerta solo con MÁS de `umbral_dias` días (5 días exactos NO
+    alertan) y solo en ESTADOS_CON_ALERTA.
+
+    **`ultima_respuesta` son las gestiones ENTRANTES, no todas.** Antes era la
+    gestión más reciente de cualquier tipo, y eso hacía que insistirle al cliente
+    el jueves reiniciara el contador aunque siguiera sin decir una palabra: la
+    alerta contestaba «hace cuánto que no pasa nada» en vez de «hace cuánto que
+    no nos responden». Ver `docs/DOMINIO_COMERCIAL.md`, P-9.
+
+    **`ultimo_envio` sí reinicia, y no es la misma trampa.** Mandar una propuesta
+    nueva es una pregunta nueva: si le enviaste la v2 anteayer, la oferta no
+    lleva dos meses en silencio. Un seguimiento que insiste sobre lo mismo no
+    cuenta; una versión enviada sí (O-11).
     """
     # Defensivo: si algún datetime viene naive (p.ej. roundtrip por un backend
     # sin timezone), se alinea al tz de `ahora` para no romper la resta.
@@ -165,10 +178,10 @@ def calcular_alerta(
         return dt
 
     estado_desde = _com(estado_desde)
-    ultima_gestion = _com(ultima_gestion)
     referencia = estado_desde
-    if ultima_gestion is not None and ultima_gestion > referencia:
-        referencia = ultima_gestion
+    for hecho in (_com(ultima_respuesta), _com(ultimo_envio)):
+        if hecho is not None and hecho > referencia:
+            referencia = hecho
     dias = (ahora - referencia).days
     if dias < 0:
         dias = 0
