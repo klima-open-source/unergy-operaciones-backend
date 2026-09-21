@@ -282,7 +282,7 @@ MOTIVO_PARCIAL = "corrida_parcial"
 MOTIVO_SIN_CGM = "clasificacion_fallida"
 
 
-def serie_automatico(desde: date, hasta: date) -> dict:
+def serie_automatico(desde: date, hasta: date, frontera_id: int | None = None) -> dict:
     """Tasa diaria de reporte automático (CGM), y el total del rango.
 
     **Qué mide.** Cada día: de las fronteras que el clasificador procesó,
@@ -334,6 +334,19 @@ def serie_automatico(desde: date, hasta: date) -> dict:
     saber cuál. Siguen apareciendo en `dias` con `excluido=True` y su `motivo`,
     para que el gráfico los pinte y diga por qué: esconderlos taparía días en
     que 145 fronteras debían reportar y no se reportó ninguna.
+
+    **`frontera_id` filtra los CONTEOS, nunca las exclusiones** (2026-09-21).
+    Las tres reglas de arriba se siguen evaluando sobre el día completo, con
+    todas las fronteras, porque las tres describen la corrida y no una
+    frontera: si el clasificador no corrió el 5 de septiembre, eso es igual de
+    cierto mires la frontera que mires. Evaluarlas sobre el subconjunto
+    filtrado rompería la tercera de la peor manera posible: `sin_cgm` existe
+    porque un cero absoluto entre 145 fronteras no pasa nunca, pero en UNA
+    frontera un día sin CGM es lo más normal del mundo. Se leería como "el
+    programa falló" y ese día saldría de la tasa -- o sea, se borrarían justo
+    los días en que la frontera NO se automatizó, y la tasa daría casi 100%
+    siempre. Decidido así el 2026-09-21: el día lo juzga el día; el filtro
+    solo decide qué se cuenta una vez que el día ya se dio por bueno.
     """
     if hasta < desde:
         raise NoProcesable("'hasta' no puede ser anterior a 'desde'")
@@ -378,9 +391,12 @@ def serie_automatico(desde: date, hasta: date) -> dict:
     total_clasificadas = 0
     excluidos = 0
     for dia in dias_del_rango:
-        cgm = len(con_cgm.get(dia, ()))
-        universo = len(clasificadas.get(dia, ()))
+        cgm_dia = con_cgm.get(dia, set())
+        clasificadas_dia = clasificadas.get(dia, set())
+        registradas_dia = registradas[dia]
 
+        # El motivo se decide con el día COMPLETO, antes de aplicar
+        # `frontera_id` -- ver el docstring.
         motivo = None
         if not corrio[dia]:
             motivo = MOTIVO_SIN_CORRIDA
@@ -388,8 +404,17 @@ def serie_automatico(desde: date, hasta: date) -> dict:
             por_mitad["gen"][dia], por_mitad["con"][dia]
         ) < EQUILIBRIO_MINIMO_ENTRE_MITADES:
             motivo = MOTIVO_PARCIAL
-        elif cgm == 0:
+        elif not cgm_dia:
             motivo = MOTIVO_SIN_CGM
+
+        if frontera_id is not None:
+            una = {frontera_id}
+            cgm_dia = cgm_dia & una
+            clasificadas_dia = clasificadas_dia & una
+            registradas_dia = registradas_dia & una
+
+        cgm = len(cgm_dia)
+        universo = len(clasificadas_dia)
 
         if motivo is None:
             total_cgm += cgm
@@ -401,10 +426,10 @@ def serie_automatico(desde: date, hasta: date) -> dict:
             "fecha": dia,
             "automaticas": cgm,
             "fronteras": universo,
-            "registradas": len(registradas[dia]),
+            "registradas": len(registradas_dia),
             # Diferencia de CONJUNTOS, no de totales: ver el docstring de
             # `_fronteras_registradas_por_dia`.
-            "sin_reportar": len(registradas[dia] - clasificadas.get(dia, set())),
+            "sin_reportar": len(registradas_dia - clasificadas_dia),
             "excluido": motivo is not None,
             "motivo": motivo,
             "tasa": round(cgm / universo * 100, 1) if universo else 0.0,
@@ -418,7 +443,13 @@ def serie_automatico(desde: date, hasta: date) -> dict:
         "fronteras": total_clasificadas,
         "tasa": (round(total_cgm / total_clasificadas * 100, 1)
                  if total_clasificadas else 0.0),
-        "por_frontera": _automatico_por_frontera(dias, con_cgm, clasificadas, nombres),
+        # Se calcula con los conjuntos completos y se recorta después: así las
+        # tasas de la tabla salen de los mismos días contados que el titular,
+        # con filtro o sin él.
+        "por_frontera": [
+            f for f in _automatico_por_frontera(dias, con_cgm, clasificadas, nombres)
+            if frontera_id is None or f["frontera_id"] == frontera_id
+        ],
     }
 
 
@@ -572,7 +603,7 @@ def resumen(fecha: date) -> dict:
     }
 
 
-def resumen_historico(desde: date, hasta: date) -> dict:
+def resumen_historico(desde: date, hasta: date, frontera_id: int | None = None) -> dict:
     """Patrones a lo largo de VARIOS días, por frontera — distinto de `resumen`,
     que es de un solo día.
 
@@ -601,6 +632,12 @@ def resumen_historico(desde: date, hasta: date) -> dict:
     if hasta < desde:
         raise NoProcesable("'hasta' no puede ser anterior a 'desde'")
 
+    # `frontera_id` recorta las dos distribuciones de fuente directo en la
+    # consulta -- son conteos puros, no tienen reglas que dependan del resto
+    # del día. La tasa de automático es otra historia: ahí el filtro NO puede
+    # tocar la decisión de qué días cuentan, ver `serie_automatico`.
+    solo_una = {"frontera_id": frontera_id} if frontera_id is not None else {}
+
     # 1) Distribución de fuente -- agrupada en Medidor/Inversor/Estimación/
     # Sin fuente (decidido con el usuario 2026-08-21: el vocabulario crudo
     # de medidor_usado/caso tiene demasiadas variantes técnicas para leerse
@@ -609,14 +646,14 @@ def resumen_historico(desde: date, hasta: date) -> dict:
     gen_filas = [
         (f["frontera_id"], f["frontera__nombre_frontera"], f["medidor_usado"], f["n"])
         for f in ReporteEnergiaGeneracion.objects
-        .filter(fecha__range=(desde, hasta))
+        .filter(fecha__range=(desde, hasta), **solo_una)
         .values("frontera_id", "frontera__nombre_frontera", "medidor_usado")
         .annotate(n=Count("id"))
     ]
     con_filas = [
         (f["frontera_id"], f["frontera__nombre_frontera"], f["caso"], f["n"])
         for f in ReporteEnergiaConsumo.objects
-        .filter(fecha__range=(desde, hasta))
+        .filter(fecha__range=(desde, hasta), **solo_una)
         .values("frontera_id", "frontera__nombre_frontera", "caso")
         .annotate(n=Count("id"))
     ]
@@ -637,7 +674,8 @@ def resumen_historico(desde: date, hasta: date) -> dict:
         # La tasa dia a dia, con las fronteras VIVAS de denominador. Es la que
         # deja ver los dias en que el clasificador no corrio (aparecen en 0%
         # en vez de desaparecer) y la que no hay que limpiar a mano.
-        "serie_automatico": serie_automatico(desde, hasta),
+        "serie_automatico": serie_automatico(desde, hasta, frontera_id),
+        "frontera_id": frontera_id,
     }
 
 
