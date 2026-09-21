@@ -187,21 +187,49 @@ class FacturaSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = fa_models.ContratoFactura
+        # `inversionista_nombre` FALTABA. `inversionista_id` ya estaba aquí
+        # cuando el modelo todavía guardaba el inversionista como texto llamado
+        # `inversionista`: ese id no existía, salía siempre `None`, y el nombre
+        # no se mandaba. La pantalla de facturas lee `inversionista` y por eso su
+        # columna mostraba "—" aunque el dato estuviera guardado.
         fields = [
-            "id", "contrato_id", "tipo", "fecha", "inversionista_id",
+            "id", "contrato_id", "tipo", "fecha",
+            "inversionista_id", "inversionista_nombre",
             "numero_factura", "monto", "enlace_soporte",
             "created_at", "updated_at",
         ]
 
 
 class FacturaEscrituraSerializer(serializers.ModelSerializer):
+    # Como en el contrato: el FK se llama `inversionista`, así que la clave
+    # `inversionista_id` que manda el frontend no la reconocería nadie y DRF la
+    # descartaría en silencio. Ver el comentario de `ContratoEscrituraSerializer`.
+    inversionista_id = serializers.PrimaryKeyRelatedField(
+        source="inversionista", queryset=cl_models.Cliente.objects.all(),
+        allow_null=True, required=False,
+    )
+
     class Meta:
         model = fa_models.ContratoFactura
         fields = [
-            "tipo", "fecha", "inversionista", "numero_factura", "monto",
-            "enlace_soporte",
+            "tipo", "fecha", "inversionista_id", "inversionista_nombre",
+            "numero_factura", "monto", "enlace_soporte",
         ]
-        extra_kwargs = {c: {"required": False} for c in fields}
+        extra_kwargs = {
+            c: {"required": False} for c in fields if c != "inversionista_id"
+        }
+
+    def validate(self, datos):
+        """El nombre se copia del cliente vinculado; el vínculo manda.
+
+        Así deja de haber dos grafías del mismo inversionista según quién
+        registró la factura, que es la mitad del problema que esto viene a
+        resolver. Igual que `partes.sincronizar` en los contratos.
+        """
+        cliente = datos.get("inversionista")
+        if cliente is not None:
+            datos["inversionista_nombre"] = cliente.razon_social_nombre
+        return datos
 
 
 

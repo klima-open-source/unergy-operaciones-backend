@@ -44,6 +44,7 @@ from django.core.management.base import BaseCommand
 from apps.arriendos.models import ArrArrendador
 from apps.contratos.models import ContratoServicio
 from apps.contratos.services import partes as partes_service
+from apps.facturacion.models import ContratoFactura
 from apps.ppa.models import PpaContrato
 
 #: Modelo → los roles cuyo `*_id` hay que poblar, y si el rol tiene columna NIT.
@@ -58,6 +59,10 @@ OBJETIVOS = (
     # 2026-09-18: TODAS sus filas estan sin vincular. Su campo de texto se llama
     # `nombre` a secas, no `<rol>_nombre`, y no tiene NIT.
     (ArrArrendador, "arr_arrendador", (("cliente", False),)),
+    # Las facturas de un contrato tambien nombraban a su inversionista con
+    # texto; su vinculo nacio el 2026-09-20, asi que tampoco hay ninguna
+    # vinculada.
+    (ContratoFactura, "contrato_factura", (("inversionista", False),)),
 )
 
 #: Rol → el campo de texto del que sale el nombre, cuando no es `<rol>_nombre`.
