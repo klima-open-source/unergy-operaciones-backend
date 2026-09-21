@@ -5,13 +5,16 @@
 Lo que las cablea contra los servicios reales está en `proyecciones.py`.
 """
 
+import calendar
 from datetime import date, datetime, timedelta, timezone
 
 # Colombia es UTC−5 sin horario de verano; el contenedor corre en UTC.
 _COL_TZ = timezone(timedelta(hours=-5))
 
 MWH_A_KWH = 1000.0
-KWH_PLANTA_NUEVA_DEFAULT = 180.0
+# Generación MENSUAL estimada de una planta nueva (kWh). Entra a la garantía como
+# kWh × precio, prorrateada por la fracción de mes que cubre la ventana.
+KWH_PLANTA_NUEVA_DEFAULT = 180_000.0
 
 
 def hoy_col() -> date:
@@ -21,12 +24,17 @@ def hoy_col() -> date:
 
 def calcular_garantia(neto_mwh: float, precio_cop_kwh: float, costo_regulatorio: float,
                       plantas_nuevas: int = 0,
-                      kwh_planta_nueva: float = KWH_PLANTA_NUEVA_DEFAULT) -> dict:
+                      kwh_planta_nueva: float = KWH_PLANTA_NUEVA_DEFAULT,
+                      fraccion_periodo: float = 1.0) -> dict:
     """(ventas−compras)×precio + regulatorio, con override aditivo de plantas nuevas.
+
+    `kwh_planta_nueva` es la generación MENSUAL de una planta nueva; `fraccion_periodo`
+    es la fracción de mes que cubre la ventana (1.0 = mes completo). Así una planta
+    nueva aporta su generación mensual × precio, prorrateada por los días de la ventana.
     Devuelve el total y sus componentes (para el snapshot/desglose)."""
     energia_neta_kwh = neto_mwh * MWH_A_KWH
     valor_energia = energia_neta_kwh * precio_cop_kwh
-    valor_plantas_nuevas = plantas_nuevas * kwh_planta_nueva * precio_cop_kwh
+    valor_plantas_nuevas = plantas_nuevas * kwh_planta_nueva * fraccion_periodo * precio_cop_kwh
     return {
         "energia_neta_kwh": energia_neta_kwh,
         "valor_energia": valor_energia,
@@ -69,10 +77,15 @@ def proyecciones(hoy: date, *, calcular_balance_fn, precio_fn, regulatorio_fn,
     reg_actual = regulatorio_fn(a_prev, m_prev)
     reg_siguiente = regulatorio_fn(anio_act, mes_act)
 
-    def ventana(clave, anio, mes, balance, campo, reg):
+    # Fracción de mes de cada ventana: el mes siguiente entra completo; el resto del
+    # mes en curso, solo los días que faltan (una planta nueva aporta a prorrata).
+    dias_mes_act = calendar.monthrange(anio_act, mes_act)[1]
+    frac_resto = max(0, dias_mes_act - hoy.day) / dias_mes_act
+
+    def ventana(clave, anio, mes, balance, campo, reg, fraccion):
         neto = neto_de_balance(balance, campo)
         calc = calcular_garantia(neto, precio, (reg or {}).get("valor") or 0.0,
-                                 plantas_nuevas, kwh_planta_nueva)
+                                 plantas_nuevas, kwh_planta_nueva, fraccion)
         return {"clave": clave, "anio": anio, "mes": mes, "neto_mwh": neto,
                 "regulatorio_periodo": {"anio": (reg or {}).get("anio"),
                                         "mes": (reg or {}).get("mes"),
@@ -85,8 +98,8 @@ def proyecciones(hoy: date, *, calcular_balance_fn, precio_fn, regulatorio_fn,
         "plantas_nuevas": plantas_nuevas,
         "kwh_planta_nueva": kwh_planta_nueva,
         "ventanas": [
-            ventana("resto_mes_actual", anio_act, mes_act, bal_actual, "proyectado", reg_actual),
-            ventana("mes_siguiente", a_sig, m_sig, bal_sig, "total", reg_siguiente),
+            ventana("resto_mes_actual", anio_act, mes_act, bal_actual, "proyectado", reg_actual, frac_resto),
+            ventana("mes_siguiente", a_sig, m_sig, bal_sig, "total", reg_siguiente, 1.0),
         ],
     }
 
