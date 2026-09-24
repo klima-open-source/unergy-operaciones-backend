@@ -95,6 +95,7 @@ REMAP_SRV = [
     ("om_seleccion_mensual", "contrato_id"),
     ("om_pagina_sin_match", "contrato_id_asignado"),
     ("om_documento_proyecto", "contrato_id"),
+    ("contrato_alertas_aniversario", "contrato_id"),
 ]
 
 
