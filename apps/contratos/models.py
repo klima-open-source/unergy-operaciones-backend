@@ -289,13 +289,28 @@ class TarifaOrigen(models.TextChoices):
     MIGRACION = "migracion", "Migración"      # viene del escalar viejo; fecha inicial incierta
 
 
-class Contrato(Timer):
-    """Acuerdo entre partes sobre una o varias plantas.
+class Compraventa(models.TextChoices):
+    """Sentido de un contrato de compraventa de energía (PPA)."""
 
-    Los TIPOS de servicio del contrato NO viven acá: un contrato puede tener varios
-    (representación + CGM, u operación + mantenimiento), así que van en la tabla puente
-    `contrato_tipos` (modelo `ContratoTipo`). Se llega a ellos por `contrato.tipos`.
-    (D-10, ajustado 2026-09-24: tipos múltiples en vez de un enum combinado.)"""
+    VENTA = "venta", "Venta"
+    COMPRA = "compra", "Compra"
+
+
+class Contrato(Timer):
+    """Acuerdo entre partes sobre una o varias plantas — la ÚNICA tabla de contratos.
+
+    Reemplaza a `ppa_contratos` y `contratos_servicio`: un contrato de cualquier tipo
+    (PPA, representación, O&M, arriendo) es una fila acá. Los TIPOS van en la tabla
+    puente `contrato_tipos` (un contrato puede tener varios: representación + CGM, u
+    operación + mantenimiento); se llega a ellos por `contrato.tipos`.
+
+    Es una tabla ANCHA a propósito (decisión del usuario 2026-09-24): los atributos
+    escalares específicos de cada tipo son columnas nullable acá. Lo que NO son columnas:
+    - precios/indexación versionados -> `contrato_tarifas` (por concepto, con vigencia);
+    - partes (comprador/vendedor/contratante/prestador) -> `contrato_partes` (los
+      `*_nombre`/`*_nit` se conservan como copia denormalizada mientras se migran los
+      lectores);
+    - plantas cubiertas -> `contrato_proyectos`."""
 
     id = models.BigAutoField(primary_key=True)
     estado = models.CharField(
@@ -312,6 +327,65 @@ class Contrato(Timer):
     )
     indice_indexacion = models.CharField(max_length=60, null=True, blank=True)
     renovacion_automatica = models.BooleanField(default=False)
+
+    # --- Copia denormalizada de las partes (se llenan además de contrato_partes) ---
+    comprador_nombre = models.CharField(max_length=255, null=True, blank=True)
+    comprador_nit = models.CharField(max_length=20, null=True, blank=True)
+    vendedor_nombre = models.CharField(max_length=255, null=True, blank=True)
+    vendedor_nit = models.CharField(max_length=20, null=True, blank=True)
+    contratante_nombre = models.CharField(max_length=255, null=True, blank=True)
+    contratante_nit = models.CharField(max_length=20, null=True, blank=True)
+    prestador_nombre = models.CharField(max_length=255, null=True, blank=True)
+    prestador_nit = models.CharField(max_length=20, null=True, blank=True)
+    inversionista_nombre = models.CharField(max_length=255, null=True, blank=True)
+
+    # --- Específicas de compraventa de energía (PPA), antes en ppa_contratos ---
+    responsable = models.ForeignKey(
+        "ppa.PpaResponsable", on_delete=models.SET_NULL, db_column="responsable_id",
+        null=True, blank=True, related_name="contratos_unificados",
+    )
+    compraventa = models.CharField(
+        max_length=10, choices=Compraventa.choices, null=True, blank=True,
+    )
+    periodo_indexacion_base = models.CharField(max_length=7, null=True, blank=True)
+    valor_indexacion_base = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    cantidad_minima_kwh_mes = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    cantidad_maxima_kwh_mes = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    periodicidad_facturacion = models.CharField(max_length=50, null=True, blank=True)
+    tiempo_pago = models.IntegerField(null=True, blank=True)
+    condiciones_pago = models.CharField(max_length=500, null=True, blank=True)
+    gescon_codigo = models.CharField(max_length=100, null=True, blank=True)
+    gescon_fecha_inicio = models.DateField(null=True, blank=True)
+    gescon_fecha_fin = models.DateField(null=True, blank=True)
+    gescon_precio = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    gescon_cantidades_kwh = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    codigo_sic = models.CharField(max_length=50, null=True, blank=True)
+    es_comunidad_energetica = models.BooleanField(null=True, blank=True)
+    fecha_entrada_comunidad = models.DateField(null=True, blank=True)
+    nombre_comunidad = models.CharField(max_length=255, null=True, blank=True)
+
+    # --- Específicas de contratos de servicio, antes en contratos_servicio ---
+    cgm_codigo_sic = models.CharField(max_length=20, null=True, blank=True)
+    fecha_inicio_om = models.DateField(null=True, blank=True)
+    fecha_indexacion = models.DateField(null=True, blank=True)
+    responsable_iva = models.BooleanField(default=False)
+    estado_pago = models.CharField(max_length=20, null=True, blank=True)
+    portafolio = models.CharField(max_length=255, null=True, blank=True)
+    codigo_sun_factory = models.CharField(max_length=50, null=True, blank=True)
+    nombre_proyecto_ref = models.CharField(max_length=255, null=True, blank=True)
+    ubicacion_lat = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
+    ubicacion_lng = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
+    # Conectividad (internet/Starlink)
+    plan_datos_gb = models.CharField(max_length=50, null=True, blank=True)
+    velocidad_mbps = models.IntegerField(null=True, blank=True)
+    tipo_conexion = models.CharField(max_length=50, null=True, blank=True)
+    linea_servicio = models.CharField(max_length=100, null=True, blank=True)
+    id_router = models.CharField(max_length=100, null=True, blank=True)
+    numero_kit = models.CharField(max_length=100, null=True, blank=True)
+    latencia_ms = models.IntegerField(null=True, blank=True)
+    wifi_seguridad = models.CharField(max_length=50, null=True, blank=True)
+    wifi_password = models.CharField(max_length=100, null=True, blank=True)
+
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
