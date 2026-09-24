@@ -31,7 +31,7 @@ from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 
 from django.core.management.base import BaseCommand
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.backends.postgresql.psycopg_any import DateRange
 
 from apps.clientes.models import Cliente
@@ -71,6 +71,31 @@ ESTADO_SERVICIO = {
     "en_renovacion": EstadoContrato.EN_RENOVACION,
     "terminado": EstadoContrato.TERMINADO,
 }
+
+# Columnas (tabla, columna) que hoy son FK a ppa_contratos.id y hay que re-apuntar a
+# contratos.id con el mapa viejo->nuevo. `ppa_contrato_proyectos` NO va acá: lo
+# reemplaza contrato_proyectos, y se elimina.
+REMAP_PPA = [
+    ("ppa_tarifas", "contrato_id"),
+    ("ppa_compromisos_energia", "contrato_id"),
+    ("oportunidad_ofertas", "ppa_contrato_id"),
+    ("cliente_documentos_comerciales", "ppa_contrato_id"),
+    ("alertas", "ppa_id"),
+    ("asic_solicitudes", "contrato_ppa_id"),
+    ("cumplimiento_mensual", "contrato_ppa_id"),
+    ("clasificacion_energia_mensual", "contrato_ppa_id"),
+]
+# Columnas que hoy son FK a contratos_servicio.id.
+REMAP_SRV = [
+    ("oportunidad_ofertas", "contrato_servicio_id"),
+    ("contrato_factura", "contrato_id"),
+    ("arr_arrendador", "contrato_id"),
+    ("contrato_frontera", "contrato_servicio_id"),
+    ("cliente_documentos_comerciales", "contrato_servicio_id"),
+    ("om_seleccion_mensual", "contrato_id"),
+    ("om_pagina_sin_match", "contrato_id_asignado"),
+    ("om_documento_proyecto", "contrato_id"),
+]
 
 
 def _dec(valor) -> Decimal | None:
@@ -120,12 +145,28 @@ class Command(BaseCommand):
             help="Borra las 4 tablas nuevas antes de recargar (idempotencia).",
         )
         parser.add_argument("--limit", type=int, default=None, help="Máx. contratos por fuente.")
+        parser.add_argument(
+            "--remapear-fks", action="store_true", dest="remapear_fks",
+            help=(
+                "CORTE: re-apunta a contratos.id las 17 columnas FK que hoy miran a "
+                "ppa_contratos/contratos_servicio. Destructivo sobre esas tablas; "
+                "corre en la ventana de mantenimiento, junto con la migración 0009. "
+                "Incompatible con --limit (el remapeo necesita TODOS los contratos)."
+            ),
+        )
 
     # ------------------------------------------------------------------ run
     def handle(self, *args, **opts):
         self.dry = opts["dry_run"]
         self.limit = opts["limit"]
+        self.remapear = opts["remapear_fks"]
+        if self.remapear and self.limit:
+            self.stderr.write("--remapear-fks no admite --limit: aborta.")
+            return
         self.rep = defaultdict(int)
+        # Mapas viejo->nuevo id para re-apuntar las FKs de las tablas dependientes.
+        self.map_ppa: dict[int, int] = {}
+        self.map_srv: dict[int, int] = {}
         self.omitidas_por_cero: list[tuple] = []
         self.partes_no_resueltas: list[tuple] = []
         self.solapes: list[tuple] = []
@@ -151,6 +192,8 @@ class Command(BaseCommand):
                     return
                 self._migrar_ppa()
                 self._migrar_servicio()
+                if self.remapear:
+                    self._remapear_fks()
                 if self.dry:
                     raise _Rollback
         except _Rollback:
@@ -212,6 +255,7 @@ class Command(BaseCommand):
                 nombre_comunidad=p.nombre_comunidad,
                 deleted_at=p.deleted_at,
             )
+            self.map_ppa[p.id] = contrato.id
             ContratoTipo.objects.create(
                 contrato=contrato, tipo=TipoContrato.COMPRAVENTA_ENERGIA
             )
@@ -328,6 +372,7 @@ class Command(BaseCommand):
                 wifi_seguridad=c.wifi_seguridad,
                 wifi_password=c.wifi_password,
             )
+            self.map_srv[c.id] = contrato.id
             for t in sorted(tipos):
                 ContratoTipo.objects.create(contrato=contrato, tipo=t)
                 self.rep[f"tipo:{t}"] += 1
@@ -472,6 +517,47 @@ class Command(BaseCommand):
         if izq is None or der is None:
             return True  # algún extremo abierto en ambos lados -> se tocan
         return izq < der
+
+    # ------------------------------------------------------------- remapeo
+    def _remapear_fks(self):
+        """Re-apunta a contratos.id las columnas FK que hoy miran a las tablas viejas.
+
+        Las FK todavía referencian ppa_contratos/contratos_servicio, así que se
+        desactivan los triggers de FK con `SET LOCAL session_replication_role =
+        'replica'` (scope de transacción) para poder poner ids de `contratos`. La
+        migración 0009 cambia después el destino de la constraint y valida contra
+        estos valores ya remapeados, y elimina las tablas viejas.
+
+        Requiere un rol con permiso para `session_replication_role` (superuser en la
+        base gestionada). Si falla por permiso, hay que hacer el remapeo dentro de la
+        0009 con las constraints ya soltadas."""
+        with connection.cursor() as cur:
+            cur.execute("SET LOCAL session_replication_role = 'replica'")
+            self._cargar_map(cur, "_map_ppa", self.map_ppa)
+            self._cargar_map(cur, "_map_srv", self.map_srv)
+            for tabla, col in REMAP_PPA:
+                self.rep[f"remap:{tabla}.{col}"] = self._remap(cur, tabla, col, "_map_ppa")
+            for tabla, col in REMAP_SRV:
+                self.rep[f"remap:{tabla}.{col}"] = self._remap(cur, tabla, col, "_map_srv")
+            cur.execute("SET LOCAL session_replication_role = 'origin'")
+
+    @staticmethod
+    def _cargar_map(cur, nombre, mapa):
+        cur.execute(f'DROP TABLE IF EXISTS "{nombre}"')
+        cur.execute(f'CREATE TEMP TABLE "{nombre}" (old_id bigint PRIMARY KEY, new_id bigint)')
+        if mapa:
+            cur.executemany(
+                f'INSERT INTO "{nombre}" (old_id, new_id) VALUES (%s, %s)',
+                list(mapa.items()),
+            )
+
+    @staticmethod
+    def _remap(cur, tabla, col, mapa_tmp) -> int:
+        cur.execute(
+            f'UPDATE "{tabla}" AS t SET "{col}" = m.new_id '
+            f'FROM "{mapa_tmp}" AS m WHERE t."{col}" = m.old_id'
+        )
+        return cur.rowcount
 
     # ------------------------------------------------------------- partes
     def _parte(self, contrato, cliente_id, nombre, nit, rol, origen):
