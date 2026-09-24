@@ -582,11 +582,19 @@ class Command(BaseCommand):
 
     @staticmethod
     def _remap(cur, tabla, col, mapa_tmp) -> int:
+        # DOS PASOS por un espacio de ids DISJUNTO (negativo). Los ids nuevos de
+        # `contratos` solapan el rango de los viejos, así que un UPDATE directo
+        # (que permuta ids dentro del mismo espacio) rompe las UNIQUE que incluyen
+        # la FK (p. ej. ppa_tarifas(contrato_id, año, mes)) con una colisión
+        # transitoria. Mapear primero a -new_id (negativos, disjuntos de los
+        # positivos viejos) y luego voltear a +new_id evita el choque.
         cur.execute(
-            f'UPDATE "{tabla}" AS t SET "{col}" = m.new_id '
+            f'UPDATE "{tabla}" AS t SET "{col}" = -m.new_id '
             f'FROM "{mapa_tmp}" AS m WHERE t."{col}" = m.old_id'
         )
-        return cur.rowcount
+        n = cur.rowcount
+        cur.execute(f'UPDATE "{tabla}" SET "{col}" = -"{col}" WHERE "{col}" < 0')
+        return n
 
     # ------------------------------------------------------------- partes
     def _parte(self, contrato, cliente_id, nombre, nit, rol, origen):
