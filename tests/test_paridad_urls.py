@@ -130,7 +130,12 @@ RUTAS_RETIRADAS = {
 #               entre los contratos que la generan, cruzando el deficit horario
 #               del BalCttos por contrato (para cobrarle a cada cliente su parte).
 #               No existia en FastAPI.
+#   2026-09-24  POST /ciclo/reliquidar. El paso §4.9 de la guia
+#               (`xm_invoice_duplication_to_settlement`) no existia, y sin el
+#               reliquidar era imposible: FTP y Liquidar aceptaban la version
+#               nueva pero Repartir daba 400 por falta de facturas en ella.
 RUTAS_NUEVAS = {
+    ("/api/v1/liquidaciones-api/ciclo/reliquidar", "POST"),
     ("/api/v1/liquidaciones-api/contratos-energia/{}", "PATCH"),
     ("/api/v1/liquidaciones-api/ipp/sincronizar", "POST"),
     ("/api/v1/facturacion/vs-despachos", "GET"),

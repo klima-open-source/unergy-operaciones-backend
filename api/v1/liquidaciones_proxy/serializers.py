@@ -60,6 +60,34 @@ class RepartoSerializer(PeriodoSerializer):
     )
 
 
+class ReliquidacionSerializer(serializers.Serializer):
+    """Duplicar las facturas de XM a otra version para reliquidar (§4.9).
+
+    No hereda de `PeriodoSerializer` porque aca no hay UNA version: hay la de
+    origen y la de destino. El orden entre las dos lo valida
+    `apps.liquidaciones.services.reliquidacion`, que es la misma regla que
+    aplica el cliente antes de salir a la API.
+    """
+
+    month = serializers.IntegerField(min_value=1, max_value=12)
+    year = serializers.IntegerField(min_value=2020, max_value=2100)
+    last_version = serializers.ChoiceField(
+        choices=VERSIONES, required=False, allow_null=True, allow_blank=True
+    )
+    new_version = serializers.ChoiceField(choices=VERSIONES)
+
+    def validate(self, datos):
+        from apps.liquidaciones.services import reliquidacion
+
+        try:
+            reliquidacion.validar_versiones(
+                datos.get("last_version"), datos["new_version"]
+            )
+        except ValueError as exc:
+            raise serializers.ValidationError({"new_version": str(exc)})
+        return datos
+
+
 class DiagnosticoSerializer(PeriodoSerializer):
     project = serializers.CharField()
 

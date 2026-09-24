@@ -305,6 +305,23 @@ class LiquidacionesApiViewSet(viewsets.GenericViewSet):
         """Verifica que lo repartido cuadre con la factura de XM."""
         return self._tarea(request, api.generar_cruce_facturas)
 
+    @action(detail=False, methods=["post"], url_path="ciclo/reliquidar")
+    @log_endpoint(name="Operaciones | Liquidaciones | Reliquidar")
+    def ciclo_reliquidar(self, request):
+        """Copia las facturas de XM a la version nueva para poder reliquidar.
+
+        Es el paso §4.9, el que faltaba: FTP y Liquidar ya aceptaban la version
+        nueva, pero Repartir respondia 400 porque las facturas seguian solo en
+        la vieja. Sincrono: devuelve las facturas creadas, no una tarea. Despues
+        hay que repetir el ciclo desde Liquidar con la version nueva.
+        """
+        datos = self._periodo(request, liq_serializers.ReliquidacionSerializer)
+        return self._respuesta(self._llamar(
+            api.duplicar_facturas_a_version,
+            datos["month"], datos["year"],
+            datos.get("last_version"), datos["new_version"],
+        ))
+
     @action(detail=False, methods=["post"], url_path="ciclo/diagnostico")
     def ciclo_diagnostico(self, request):
         """Por qué un proyecto no sale en el estado de resultados."""

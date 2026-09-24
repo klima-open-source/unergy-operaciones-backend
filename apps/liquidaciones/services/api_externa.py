@@ -90,6 +90,9 @@ PATH_IPP = "/api/liquidaciones/fetch_monthly_ipp"
 PATH_FTP = "/api/liquidaciones/fetch_data_from_xm"
 PATH_REPARTIR = "/api/liquidaciones/set_xm_variables_from_processed_invoices"
 PATH_LIQUIDAR = "/api/liquidaciones/calculate_project_market_settlement/"
+# Sin slash final a proposito: la guia lo marca entre los cuatro que dan 404
+# si se les agrega.
+PATH_RELIQUIDAR = "/api/liquidaciones/xm_invoice_duplication_to_settlement"
 PATH_ESTADO_RESULTADOS_JSON = "/api/liquidaciones/income_statement_data/"
 PATH_ESTADO_RESULTADOS_XLSX = "/api/liquidaciones/get_income_statement/"
 PATH_CRUCE_FACTURAS = "/api/liquidaciones/cross_invoice_report/"
@@ -727,6 +730,30 @@ def _lanzar(metodo: str, path: str, **kwargs: Any) -> str:
 def descargar_archivos_xm(month: int, year: int, version: str) -> str:
     """Descarga los ocho archivos del FTP de XM (§4.2). Requiere SIC/FRT y contratos."""
     return _lanzar("POST", PATH_FTP, json={"month": month, "year": year, "version": version})
+
+
+def duplicar_facturas_a_version(
+    month: int, year: int, last_version: str | None, new_version: str,
+) -> dict[str, Any]:
+    """Copia las facturas de XM de una version a otra para reliquidar (§4.9).
+
+    Es el paso que faltaba para poder reliquidar: FTP y Liquidar aceptan la
+    version nueva, pero Repartir responde 400 --«no hay facturas del periodo»--
+    mientras las facturas sigan existiendo solo en la version vieja.
+
+    **Sincrono**: devuelve las facturas creadas, no un `task_id`. Despues se
+    repite el ciclo desde §4.5 con la version nueva.
+    """
+    from apps.liquidaciones.services import reliquidacion
+
+    reliquidacion.validar_versiones(last_version, new_version)
+    cuerpo: dict[str, Any] = {
+        "month": month, "year": year, "new_version": new_version,
+    }
+    if last_version:
+        cuerpo["last_version"] = last_version
+    data = _request("POST", PATH_RELIQUIDAR, json=cuerpo)
+    return data if isinstance(data, dict) else {"resultado": data}
 
 
 def liquidar_contratos(month: int, year: int, version: str) -> str:
