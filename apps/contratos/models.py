@@ -317,8 +317,11 @@ class Contrato(Timer):
         max_length=13, choices=EstadoContrato.choices, default=EstadoContrato.VIGENTE
     )
     numero_contrato = models.CharField(max_length=120, null=True, blank=True)
+    # Identificador propio del PPA (contratos_servicio usa `numero_contrato`; los dos
+    # coexisten porque una fila es de un tipo o del otro).
+    numero_codigo_contrato = models.CharField(max_length=100, null=True, blank=True)
     nombre_interno = models.CharField(max_length=255, null=True, blank=True)
-    fecha_firma = models.DateField(null=True, blank=True)
+    fecha_firma_contrato = models.DateField(null=True, blank=True)
     fecha_inicio = models.DateField(null=True, blank=True)
     fecha_fin = models.DateField(null=True, blank=True)
     tarifa_base = models.DecimalField(max_digits=18, decimal_places=4, null=True, blank=True)
@@ -344,9 +347,19 @@ class Contrato(Timer):
         "ppa.PpaResponsable", on_delete=models.SET_NULL, db_column="responsable_id",
         null=True, blank=True, related_name="contratos_unificados",
     )
-    compraventa = models.CharField(
-        max_length=10, choices=Compraventa.choices, null=True, blank=True,
+    # venta | compra (antes ppa_contratos.tipo_contrato).
+    tipo_contrato = models.CharField(
+        max_length=20, choices=Compraventa.choices, null=True, blank=True,
     )
+    comprador = models.ForeignKey(
+        "clientes.Cliente", on_delete=models.SET_NULL, db_column="comprador_id",
+        null=True, blank=True, related_name="contratos_unif_por_comprador",
+    )
+    vendedor = models.ForeignKey(
+        "clientes.Cliente", on_delete=models.SET_NULL, db_column="vendedor_id",
+        null=True, blank=True, related_name="contratos_unif_por_vendedor",
+    )
+    periodicidad_indexacion = models.CharField(max_length=50, null=True, blank=True)
     periodo_indexacion_base = models.CharField(max_length=7, null=True, blank=True)
     valor_indexacion_base = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
     cantidad_minima_kwh_mes = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
@@ -365,6 +378,42 @@ class Contrato(Timer):
     nombre_comunidad = models.CharField(max_length=255, null=True, blank=True)
 
     # --- Específicas de contratos de servicio, antes en contratos_servicio ---
+    # Qué servicio presta esta fila (representacion/cgm/mantenimiento/arriendo/internet).
+    # Se conserva como columna además de `contrato_tipos` para que los lectores actuales
+    # sigan filtrando por ella sin reescribirse (fachadas proxy).
+    servicio_aplica = models.CharField(
+        max_length=14,
+        choices=[("representacion", "representacion"), ("cgm", "cgm"),
+                 ("mantenimiento", "mantenimiento"), ("arriendo", "arriendo"),
+                 ("internet", "internet")],
+        null=True, blank=True,
+    )
+    contratante = models.ForeignKey(
+        "clientes.Cliente", on_delete=models.SET_NULL, db_column="contratante_id",
+        null=True, blank=True, related_name="contratos_unif_por_contratante",
+    )
+    prestador = models.ForeignKey(
+        "clientes.Cliente", on_delete=models.SET_NULL, db_column="prestador_id",
+        null=True, blank=True, related_name="contratos_unif_por_prestador",
+    )
+    inversionista = models.ForeignKey(
+        "clientes.Cliente", on_delete=models.SET_NULL, db_column="inversionista_id",
+        null=True, blank=True, related_name="contratos_unif_por_inversionista",
+    )
+    proyecto = models.ForeignKey(
+        "proyectos.Proyecto", on_delete=models.DO_NOTHING, db_column="proyecto_id",
+        null=True, blank=True, related_name="contratos_unif_por_proyecto",
+    )
+    # Tarifas escalares e indexación JSON (redundantes con contrato_tarifas; autoritativas
+    # para los lectores actuales durante la transición — decisión del usuario 2026-09-24).
+    tarifa_admin = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)
+    tarifa_cgm = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
+    tarifa_representacion = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
+    tarifa_mensual = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    indexacion_anual = models.JSONField(null=True, blank=True)
+    indexacion_mensual = models.JSONField(null=True, blank=True)
+    indexacion_cgm = models.JSONField(null=True, blank=True)
+    indexacion_representacion = models.JSONField(null=True, blank=True)
     cgm_codigo_sic = models.CharField(max_length=20, null=True, blank=True)
     fecha_inicio_om = models.DateField(null=True, blank=True)
     fecha_indexacion = models.DateField(null=True, blank=True)
