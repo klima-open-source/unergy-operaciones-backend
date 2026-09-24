@@ -16,6 +16,8 @@ from api.pagination import recortar
 from api.permissions import RolePermission
 from apps.liquidaciones.services import agregados
 from apps.liquidaciones.services import api_externa as api
+from apps.liquidaciones.services import prevuelo
+from apps.liquidaciones.services.reliquidacion import VERSION_INICIAL
 from apps.liquidaciones.services import proxy as proxy_service
 from apps.proyectos import models as py_models
 
@@ -279,14 +281,50 @@ class LiquidacionesApiViewSet(viewsets.GenericViewSet):
     @action(detail=False, methods=["post"], url_path="ciclo/liquidar")
     @log_endpoint(name="Operaciones | Liquidaciones | Liquidar")
     def ciclo_liquidar(self, request):
-        """Liquida los contratos del período. Exige el FTP ya descargado."""
-        return self._tarea(request, api.liquidar_contratos)
+        """Liquida los contratos del período. Exige el FTP ya descargado.
+
+        Antes de lanzar la tarea revisa que la versión pedida tenga archivos del
+        FTP: sin ellos la tarea termina en FAILURE sin decir qué faltó.
+        """
+        datos = self._periodo(request)
+        faltas = self._revisar(
+            request,
+            lambda: prevuelo.problemas_para_liquidar(
+                filas_ftp=len(api.listar_contratos_despachados(
+                    year=datos["year"], month=datos["month"],
+                    version=datos["version"])),
+                version=datos["version"],
+                filas_ftp_inicial=(
+                    len(api.listar_contratos_despachados(
+                        year=datos["year"], month=datos["month"],
+                        version=VERSION_INICIAL))
+                    if datos["version"] != VERSION_INICIAL else None
+                ),
+            ),
+        )
+        if faltas is not None:
+            return faltas
+        return self._respuesta(self._llamar(
+            api.liquidar_contratos,
+            datos["month"], datos["year"], datos["version"],
+        ), envolver_tarea=True)
 
     @action(detail=False, methods=["post"], url_path="ciclo/repartir")
     @log_endpoint(name="Operaciones | Liquidaciones | Repartir")
     def ciclo_repartir(self, request):
         """Reparte las facturas de XM entre proyectos, a prorrata del AC Power."""
         datos = self._periodo(request, liq_serializers.RepartoSerializer)
+        faltas = self._revisar(
+            request,
+            lambda: prevuelo.problemas_para_repartir(
+                readiness=(api.listar_facturas_xm(
+                    year=datos["year"], month=datos["month"],
+                    version=datos["version"]) or {}).get("readiness"),
+                version=datos["version"],
+            ),
+        )
+        if faltas is not None:
+            return faltas
         return self._respuesta(self._llamar(
             api.repartir_facturas_xm,
             datos["month"], datos["year"], datos["total_ac_power"],
@@ -338,6 +376,31 @@ class LiquidacionesApiViewSet(viewsets.GenericViewSet):
                 funcion, datos["month"], datos["year"], datos["version"]
             ),
             envolver_tarea=True,
+        )
+
+    def _revisar(self, request, revision):
+        """Corre una revisión previa; devuelve una respuesta 422 si algo falta.
+
+        `None` significa «sigue adelante». Se puede saltar mandando
+        `forzar: true`: la revisión existe para no fallar por descuido, no para
+        bloquear a quien sabe lo que hace.
+
+        Si la consulta de insumos falla, NO se bloquea el paso: no poder revisar
+        no es lo mismo que faltar algo, y dejar a alguien sin poder liquidar
+        porque la revisión se cayó sería peor que el problema que resuelve.
+        """
+        if request.data.get("forzar"):
+            return None
+        try:
+            problemas = revision()
+        except api.LiquidacionesAPIError:
+            logger.warning("No se pudo revisar los insumos; se sigue de largo")
+            return None
+        if not problemas:
+            return None
+        return Response(
+            {"detail": problemas[0], "problemas": problemas, "forzable": True},
+            status=422,
         )
 
     @staticmethod
