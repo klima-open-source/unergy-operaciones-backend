@@ -85,7 +85,7 @@ class ContratoSerializer(serializers.ModelSerializer):
                     v.proyecto.nombre_comercial if v.proyecto else None
                 ),
             }
-            for v in obj.proyectos_vinculados.all()
+            for v in obj.proyectos.all()
         ]
 
     def get_carpeta_link(self, obj) -> str | None:

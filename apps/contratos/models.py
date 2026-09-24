@@ -17,62 +17,9 @@ from django.db.models import Q, F
 
 from apps.plataforma.models import Timer
 
-class ContratoServicio(Timer):
-    id = models.BigAutoField(primary_key=True)
-    proyecto = models.ForeignKey("proyectos.Proyecto", on_delete=models.DO_NOTHING, db_column="proyecto_id", null=True, blank=True, related_name="contratos_servicio_por_proyecto_id")
-    numero_contrato = models.CharField(max_length=100, null=True, blank=True)
-    servicio_aplica = models.CharField(max_length=14, choices=[("representacion", "representacion"), ("cgm", "cgm"), ("mantenimiento", "mantenimiento"), ("arriendo", "arriendo"), ("internet", "internet")])
-    contratante_nombre = models.CharField(max_length=255, null=True, blank=True)
-    contratante_nit = models.CharField(max_length=20, null=True, blank=True)
-    prestador_nombre = models.CharField(max_length=255, null=True, blank=True)
-    prestador_nit = models.CharField(max_length=20, null=True, blank=True)
-    contratante = models.ForeignKey("clientes.Cliente", on_delete=models.SET_NULL, db_column="contratante_id", null=True, blank=True, related_name="contratos_servicio_por_contratante_id")
-    prestador = models.ForeignKey("clientes.Cliente", on_delete=models.SET_NULL, db_column="prestador_id", null=True, blank=True, related_name="contratos_servicio_por_prestador_id")
-    inversionista = models.ForeignKey("clientes.Cliente", on_delete=models.SET_NULL, db_column="inversionista_id", null=True, blank=True, related_name="contratos_servicio_por_inversionista_id")
-    cgm_codigo_sic = models.CharField(max_length=20, null=True, blank=True)
-    fecha_inicio = models.DateField(null=True, blank=True)
-    fecha_fin = models.DateField(null=True, blank=True)
-    tarifa_base = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
-    periodicidad_pago = models.CharField(max_length=10, choices=[("mensual", "mensual"), ("bimestral", "bimestral"), ("trimestral", "trimestral"), ("semestral", "semestral"), ("anual", "anual")], null=True, blank=True)
-    indice_indexacion = models.CharField(max_length=50, null=True, blank=True)
-    # Solo lo que una persona decide. `vigente` y `vencido` salieron de acá: eran
-    # consecuencia de `fecha_fin` y nadie los actualizaba -- 8 contratos decían
-    # `vigente` con la fecha pasada. Esa mitad la calcula
-    # `apps.contratos.services.vigencia`, que no se puede desactualizar porque
-    # no se guarda. Ver la migración 0006.
-    estado = models.CharField(max_length=13, choices=[("firmado", "firmado"), ("en_renovacion", "en_renovacion"), ("terminado", "terminado")], default="firmado")
-    fecha_firma_contrato = models.DateField(null=True, blank=True)
-    fecha_inicio_om = models.DateField(null=True, blank=True)
-    renovacion_automatica = models.BooleanField(null=True, blank=True)
-    fecha_indexacion = models.DateField(null=True, blank=True)
-    responsable_iva = models.BooleanField(default=False)
-    estado_pago = models.CharField(max_length=20, null=True, blank=True)
-    plan_datos_gb = models.CharField(max_length=50, null=True, blank=True)
-    velocidad_mbps = models.IntegerField(null=True, blank=True)
-    tipo_conexion = models.CharField(max_length=50, null=True, blank=True)
-    linea_servicio = models.CharField(max_length=100, null=True, blank=True)
-    id_router = models.CharField(max_length=100, null=True, blank=True)
-    numero_kit = models.CharField(max_length=100, null=True, blank=True)
-    latencia_ms = models.IntegerField(null=True, blank=True)
-    wifi_seguridad = models.CharField(max_length=50, null=True, blank=True)
-    wifi_password = models.CharField(max_length=100, null=True, blank=True)
-    ubicacion_lat = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
-    ubicacion_lng = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
-    tarifa_mensual = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
-    indexacion_anual = models.JSONField(null=True, blank=True)
-    indexacion_mensual = models.JSONField(null=True, blank=True)
-    inversionista_nombre = models.CharField(max_length=255, null=True, blank=True)
-    portafolio = models.CharField(max_length=255, null=True, blank=True)
-    codigo_sun_factory = models.CharField(max_length=50, null=True, blank=True)
-    nombre_proyecto_ref = models.CharField(max_length=255, null=True, blank=True)
-    tarifa_admin = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)
-    tarifa_cgm = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
-    tarifa_representacion = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
-    indexacion_cgm = models.JSONField(null=True, blank=True)
-    indexacion_representacion = models.JSONField(null=True, blank=True)
-
-    class Meta:
-        db_table = "contratos_servicio"
+# ContratoServicio dejó de tener tabla propia (`contratos_servicio`): es una fachada
+# proxy sobre la única tabla `contratos`. Se define al final del archivo, después de
+# `Contrato`, porque un modelo proxy necesita su clase base ya definida.
 
 
 class Poliza(Timer):
@@ -124,7 +71,7 @@ class AlertaAniversario(Timer):
 
     id = models.BigAutoField(primary_key=True)
     contrato = models.ForeignKey(
-        "contratos.ContratoServicio", on_delete=models.CASCADE,
+        "contratos.Contrato", on_delete=models.CASCADE,
         db_column="contrato_id", related_name="alertas_aniversario",
     )
     # La fecha concreta del aniversario avisado, no el año: es la que distingue
@@ -240,10 +187,14 @@ class TipoContrato(models.TextChoices):
 
 
 class EstadoContrato(models.TextChoices):
-    VIGENTE = "vigente", "Vigente"
-    VENCIDO = "vencido", "Vencido"
-    TERMINADO = "terminado", "Terminado"
+    """Estado que decide una persona (no derivado de fechas). Es el vocabulario de
+    `contratos_servicio` — `vigente`/`vencido` NO están: se calculan en
+    `apps.contratos.services.vigencia` (ver migración 0006). Los PPA no tenían columna
+    de estado; se les pone `firmado` por defecto, que no altera ninguna lógica PPA."""
+
+    FIRMADO = "firmado", "Firmado"
     EN_RENOVACION = "en_renovacion", "En renovación"
+    TERMINADO = "terminado", "Terminado"
 
 
 class ContratoRol(models.TextChoices):
@@ -314,7 +265,7 @@ class Contrato(Timer):
 
     id = models.BigAutoField(primary_key=True)
     estado = models.CharField(
-        max_length=13, choices=EstadoContrato.choices, default=EstadoContrato.VIGENTE
+        max_length=13, choices=EstadoContrato.choices, default=EstadoContrato.FIRMADO
     )
     numero_contrato = models.CharField(max_length=120, null=True, blank=True)
     # Identificador propio del PPA (contratos_servicio usa `numero_contrato`; los dos
@@ -510,7 +461,7 @@ class ContratoProyecto(models.Model):
     )
     proyecto = models.ForeignKey(
         "proyectos.Proyecto", on_delete=models.CASCADE, db_column="proyecto_id",
-        related_name="contratos_unificados",
+        related_name="contratos_ppa",
     )
     pk = models.CompositePrimaryKey("contrato_id", "proyecto_id")
 
@@ -610,3 +561,29 @@ class ContratoTarifa(models.Model):
                 index_type="gist",
             ),
         ]
+
+
+class ContratoServicioManager(models.Manager):
+    """Solo las filas de servicio: las que SÍ tienen `servicio_aplica`.
+
+    Es el discriminador espejo del de PPA (que lo deja nulo)."""
+
+    def get_queryset(self):
+        return super().get_queryset().filter(servicio_aplica__isnull=False)
+
+
+class ContratoServicio(Contrato):
+    """Fachada de solo-servicio sobre la única tabla `contratos` (modelo PROXY).
+
+    `contratos_servicio` dejó de existir: un contrato de servicio (representación, CGM,
+    mantenimiento, arriendo, internet) es una fila de `contratos` con `servicio_aplica`
+    no nulo. Conserva el nombre y la API de los lectores — servicio_aplica, tarifa_admin/
+    cgm/representacion, indexacion_*, proyecto, contratante/prestador, estado, etc. son
+    columnas de `contratos`. El `estado` guarda el valor de servicio
+    (firmado/en_renovacion/terminado) tal cual, no el de PPA."""
+
+    objects = ContratoServicioManager()
+
+    class Meta:
+        proxy = True
+        verbose_name = "Contrato de servicio"

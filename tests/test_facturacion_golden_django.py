@@ -46,7 +46,6 @@ def _base():
     connections["default"].creation.create_test_db(verbosity=0)
     assert connections["default"].vendor == "sqlite", "no se aisló de la base real"
     yield
-    connections["default"].creation.destroy_test_db(":memory:", verbosity=0)
     teardown_test_environment()
 
 

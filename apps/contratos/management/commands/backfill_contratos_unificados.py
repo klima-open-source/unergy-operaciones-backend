@@ -29,6 +29,7 @@ from __future__ import annotations
 import datetime as dt
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
+from types import SimpleNamespace
 
 from django.core.management.base import BaseCommand
 from django.db import connection, transaction
@@ -40,7 +41,6 @@ from apps.contratos.models import (
     ContratoParte,
     ContratoProyecto,
     ContratoRol,
-    ContratoServicio,
     ContratoTarifa,
     ContratoTipo,
     EstadoContrato,
@@ -49,7 +49,10 @@ from apps.contratos.models import (
     TarifaUnidad,
     TipoContrato,
 )
-from apps.ppa.models import PpaContrato, PpaContratoProyecto, PpaTarifa
+
+# Las tablas viejas (ppa_contratos, contratos_servicio, …) ya NO tienen modelo propio:
+# PpaContrato/ContratoServicio son fachadas proxy sobre `contratos`. Por eso el copiado
+# lee las tablas fuente por SQL crudo (ver `_leer`), no por ORM.
 
 
 class _Rollback(Exception):
@@ -64,12 +67,6 @@ TIPOS_POR_SERVICIO = {
     "mantenimiento": {TipoContrato.OPERACION, TipoContrato.MANTENIMIENTO},
     "arriendo": {TipoContrato.ARRIENDO},
     "internet": {TipoContrato.INTERNET},
-}
-
-ESTADO_SERVICIO = {
-    "firmado": EstadoContrato.VIGENTE,
-    "en_renovacion": EstadoContrato.EN_RENOVACION,
-    "terminado": EstadoContrato.TERMINADO,
 }
 
 # Columnas (tabla, columna) que hoy son FK a ppa_contratos.id y hay que re-apuntar a
@@ -211,18 +208,31 @@ class Command(BaseCommand):
         m = Contrato.objects.all().delete()[0]
         self.stdout.write(f"reset: {m} contratos y {n} tarifas borrados.")
 
+    @staticmethod
+    def _leer(tabla, extra=""):
+        """Lee una tabla VIEJA por SQL crudo -> lista de SimpleNamespace (acceso por
+        atributo, igual que un objeto ORM). jsonb vuelve ya parseado."""
+        with connection.cursor() as cur:
+            cur.execute(f'SELECT * FROM "{tabla}" {extra}')
+            cols = [c[0] for c in cur.description]
+            return [SimpleNamespace(**dict(zip(cols, fila))) for fila in cur.fetchall()]
+
     # ------------------------------------------------------------------ PPA
     def _migrar_ppa(self):
-        qs = PpaContrato.objects.all().order_by("id")
+        filas = self._leer("ppa_contratos", "ORDER BY id")
         if self.limit:
-            qs = qs[: self.limit]
+            filas = filas[: self.limit]
         proyectos_por_contrato = defaultdict(list)
-        for cp in PpaContratoProyecto.objects.all():
+        for cp in self._leer("ppa_contrato_proyectos"):
             proyectos_por_contrato[cp.contrato_id].append(cp.proyecto_id)
+        # Tarifas mensuales de la tabla vieja, agrupadas por contrato viejo.
+        self._tarifas_ppa = defaultdict(list)
+        for t in self._leer("ppa_tarifas", 'ORDER BY "año", mes'):
+            self._tarifas_ppa[t.contrato_id].append(t)
 
-        for p in qs:
+        for p in filas:
             contrato = Contrato.objects.create(
-                estado=EstadoContrato.VIGENTE,
+                estado=EstadoContrato.FIRMADO,
                 numero_codigo_contrato=p.numero_codigo_contrato,
                 nombre_interno=p.nombre_interno,
                 fecha_inicio=p.fecha_inicio,
@@ -277,12 +287,10 @@ class Command(BaseCommand):
 
             self._tarifas_energia(contrato, p)
 
-    def _tarifas_energia(self, contrato: Contrato, p: PpaContrato):
+    def _tarifas_energia(self, contrato, p):
         """ppa_tarifas -> concepto energia (cop_kwh), colapsando corridas contiguas de
         igual valor en una fila con vigencia por rango."""
-        filas = list(
-            PpaTarifa.objects.filter(contrato_id=p.id).order_by("año", "mes")
-        )
+        filas = self._tarifas_ppa.get(p.id, [])  # ya ordenadas por (año, mes)
         # Colapsa por valor igual y contiguo (mes a mes).
         runs = []  # (valor, primer(año,mes), siguiente(año,mes) tras el último)
         for t in filas:
@@ -330,17 +338,20 @@ class Command(BaseCommand):
         return set(TIPOS_POR_SERVICIO.get(sa, set()))
 
     def _migrar_servicio(self):
-        qs = ContratoServicio.objects.all().order_by("id")
+        filas = self._leer("contratos_servicio", "ORDER BY id")
         if self.limit:
-            qs = qs[: self.limit]
-        for c in qs:
+            filas = filas[: self.limit]
+        for c in filas:
             tipos = self._tipos_servicio(c)
             if not tipos:
                 self.rep["servicio_tipo_desconocido"] += 1
                 continue
 
             contrato = Contrato.objects.create(
-                estado=ESTADO_SERVICIO.get(c.estado, EstadoContrato.VIGENTE),
+                # `estado` se guarda TAL CUAL (firmado/en_renovacion/terminado): la
+                # fachada ContratoServicio lo lee sin traducir, así que los lectores que
+                # comparan `== "firmado"` siguen funcionando.
+                estado=c.estado or EstadoContrato.FIRMADO,
                 numero_contrato=c.numero_contrato,
                 nombre_interno=c.nombre_proyecto_ref,
                 fecha_firma_contrato=c.fecha_firma_contrato,
