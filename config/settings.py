@@ -69,6 +69,9 @@ if not SECRET_KEY and ENTORNO != "development":
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.staticfiles",
+    # Requerido por DateRangeField, ExclusionConstraint, RangeOperators, el lookup
+    # `isempty` y la operación de migración BtreeGistExtension (contrato_tarifas, D-24).
+    "django.contrib.postgres",
     "rest_framework",
     "corsheaders",
     "django_celery_beat",

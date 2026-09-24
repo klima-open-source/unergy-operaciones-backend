@@ -10,7 +10,10 @@ Django posee el esquema de estas tablas desde el 2026-09-04. Los modelos son
 Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 """
 
+from django.contrib.postgres.constraints import ExclusionConstraint
+from django.contrib.postgres.fields import DateRangeField, RangeOperators
 from django.db import models
+from django.db.models import Q, F
 
 from apps.plataforma.models import Timer
 
@@ -134,3 +137,353 @@ class AlertaAniversario(Timer):
     class Meta:
         db_table = "contrato_alertas_aniversario"
         unique_together = [("contrato", "aniversario", "dias_aviso")]
+
+
+# =====================================================================================
+# Contratos unificados (D-10) + tarifas versionadas (D-24)
+#
+# Aterrizaje en Django del diseño de `docs/refactor/` (03-esquema.sql BLOQUE 8). Una
+# sola tabla de contratos con el `tipo` como columna, roles en tabla puente, plantas en
+# N:M, y las tarifas por concepto CON VIGENCIA — porque las tarifas se renegocian e
+# indexan cada año y hoy ese histórico se pierde al pisar el escalar (bug de liquidación
+# confirmado con negocio, D-24).
+#
+# FASE ADITIVA: estas tablas conviven con `ppa_contratos`, `contratos_servicio` y
+# `ppa_tarifas`, que SIGUEN siendo la fuente de verdad de los lectores actuales
+# (facturación, contabilidad, O&M, comercial). Se llenan por backfill; todavía no se
+# cablean a esos consumidores.
+#
+# Divergencias deliberadas frente a 03-esquema.sql, documentadas donde aplican:
+# - Los enums nativos del DDL se modelan como CharField(choices), que es la convención
+#   del repo (Usuario.rol, ContratoServicio.servicio_aplica): el tipo físico es varchar,
+#   los valores y la validación son idénticos, y btree_gist soporta `concepto` varchar en
+#   el EXCLUDE sin necesidad de un tipo enum.
+# - No hay columna `es_base`: la fila base se expresa con `origen='pactada'` (el DDL no
+#   tiene es_base; la prosa de mapeo §F que lo menciona está desactualizada).
+# =====================================================================================
+
+
+class PgCheckConstraint(models.CheckConstraint):
+    """`CheckConstraint` que se salta cuando el backend NO es PostgreSQL.
+
+    Para el CHECK `NOT isempty(vigencia)`: `isempty` es una función de rangos de
+    Postgres, y SQLite (el backend de las pruebas, ver `PgExclusionConstraint`) falla
+    al crear la tabla con «no such function: isempty». En Postgres se crea igual."""
+
+    def _solo_postgres(self, schema_editor):
+        return schema_editor.connection.vendor == "postgresql"
+
+    def constraint_sql(self, model, schema_editor):
+        if not self._solo_postgres(schema_editor):
+            return None
+        return super().constraint_sql(model, schema_editor)
+
+    def create_sql(self, model, schema_editor):
+        if not self._solo_postgres(schema_editor):
+            return None
+        return super().create_sql(model, schema_editor)
+
+    def remove_sql(self, model, schema_editor):
+        if not self._solo_postgres(schema_editor):
+            return None
+        return super().remove_sql(model, schema_editor)
+
+
+class PgExclusionConstraint(ExclusionConstraint):
+    """`ExclusionConstraint` que se salta cuando el backend NO es PostgreSQL.
+
+    El `EXCLUDE USING gist` es válido solo en Postgres (producción). La suite de
+    pruebas construye el esquema en SQLite en memoria a partir del ESTADO de los
+    modelos (con las migraciones deshabilitadas, `MIGRATION_MODULES = {…: None}`),
+    y el editor de esquema de SQLite emitiría el `EXCLUDE` en el `CREATE TABLE` y
+    fallaría con «near "EXCLUDE": syntax error». Devolver None en un backend que no
+    es Postgres deja la constraint fuera del DDL de SQLite sin sacarla del modelo:
+    sigue siendo la fuente de verdad, `makemigrations` la ve, y en Postgres se crea
+    igual. (Django no trae este guard: `create_sql`/`constraint_sql` emiten el
+    EXCLUDE sin mirar el vendor.)"""
+
+    def _solo_postgres(self, schema_editor):
+        return schema_editor.connection.vendor == "postgresql"
+
+    def constraint_sql(self, model, schema_editor):
+        if not self._solo_postgres(schema_editor):
+            return None
+        return super().constraint_sql(model, schema_editor)
+
+    def create_sql(self, model, schema_editor):
+        if not self._solo_postgres(schema_editor):
+            return None
+        return super().create_sql(model, schema_editor)
+
+    def remove_sql(self, model, schema_editor):
+        if not self._solo_postgres(schema_editor):
+            return None
+        return super().remove_sql(model, schema_editor)
+
+
+class TipoContrato(models.TextChoices):
+    """Tipos ATÓMICOS de servicio que puede tener un contrato.
+
+    Un contrato puede tener VARIOS (ver el modelo `ContratoTipo`, tabla puente
+    `contrato_tipos`): así O&M es un contrato con {operacion, mantenimiento} y
+    representación uno con {representacion, cgm}, sin inventar valores combinados.
+    La administración NO es un tipo: es un concepto de tarifa (TarifaConcepto) del
+    contrato de representación."""
+
+    REPRESENTACION = "representacion", "Representación"
+    CGM = "cgm", "CGM"
+    COMPRAVENTA_ENERGIA = "compraventa_energia", "Compraventa de energía"
+    ARRIENDO = "arriendo", "Arriendo"
+    OPERACION = "operacion", "Operación"
+    MANTENIMIENTO = "mantenimiento", "Mantenimiento"
+    INTERNET = "internet", "Internet"
+
+
+class EstadoContrato(models.TextChoices):
+    VIGENTE = "vigente", "Vigente"
+    VENCIDO = "vencido", "Vencido"
+    TERMINADO = "terminado", "Terminado"
+    EN_RENOVACION = "en_renovacion", "En renovación"
+
+
+class ContratoRol(models.TextChoices):
+    PROPIETARIO = "propietario", "Propietario"
+    ARRENDADOR = "arrendador", "Arrendador"
+    ARRENDATARIO = "arrendatario", "Arrendatario"
+    COMPRADOR = "comprador", "Comprador"
+    VENDEDOR = "vendedor", "Vendedor"
+    OPERADOR = "operador", "Operador"
+    MANTENEDOR = "mantenedor", "Mantenedor"
+    REPRESENTANTE = "representante", "Representante"
+
+
+class PeriodicidadPago(models.TextChoices):
+    MENSUAL = "mensual", "Mensual"
+    BIMESTRAL = "bimestral", "Bimestral"
+    TRIMESTRAL = "trimestral", "Trimestral"
+    SEMESTRAL = "semestral", "Semestral"
+    ANUAL = "anual", "Anual"
+
+
+class TarifaConcepto(models.TextChoices):
+    ADMINISTRACION = "administracion", "Administración"
+    CGM = "cgm", "CGM"
+    REPRESENTACION = "representacion", "Representación"
+    CANON = "canon", "Canon"
+    ENERGIA = "energia", "Energía"
+
+
+class TarifaUnidad(models.TextChoices):
+    # `porcentaje` se guarda como fracción (0.038 = 3,8 %), con CHECK valor <= 1.
+    PORCENTAJE = "porcentaje", "Porcentaje"
+    COP_KWH = "cop_kwh", "COP/kWh"
+    COP_MES = "cop_mes", "COP/mes"
+    COP_TOTAL = "cop_total", "COP total"
+
+
+class TarifaOrigen(models.TextChoices):
+    PACTADA = "pactada", "Pactada"            # valor inicial del contrato (la base)
+    INDEXACION = "indexacion", "Indexación"   # ajuste por IPC/IPP sobre el valor anterior
+    RENEGOCIACION = "renegociacion", "Renegociación"  # acuerdo entre partes, sin índice
+    CORRECCION = "correccion", "Corrección"   # se corrigió un valor mal cargado
+    MIGRACION = "migracion", "Migración"      # viene del escalar viejo; fecha inicial incierta
+
+
+class Contrato(Timer):
+    """Acuerdo entre partes sobre una o varias plantas.
+
+    Los TIPOS de servicio del contrato NO viven acá: un contrato puede tener varios
+    (representación + CGM, u operación + mantenimiento), así que van en la tabla puente
+    `contrato_tipos` (modelo `ContratoTipo`). Se llega a ellos por `contrato.tipos`.
+    (D-10, ajustado 2026-09-24: tipos múltiples en vez de un enum combinado.)"""
+
+    id = models.BigAutoField(primary_key=True)
+    estado = models.CharField(
+        max_length=13, choices=EstadoContrato.choices, default=EstadoContrato.VIGENTE
+    )
+    numero_contrato = models.CharField(max_length=120, null=True, blank=True)
+    nombre_interno = models.CharField(max_length=255, null=True, blank=True)
+    fecha_firma = models.DateField(null=True, blank=True)
+    fecha_inicio = models.DateField(null=True, blank=True)
+    fecha_fin = models.DateField(null=True, blank=True)
+    tarifa_base = models.DecimalField(max_digits=18, decimal_places=4, null=True, blank=True)
+    periodicidad_pago = models.CharField(
+        max_length=10, choices=PeriodicidadPago.choices, null=True, blank=True
+    )
+    indice_indexacion = models.CharField(max_length=60, null=True, blank=True)
+    renovacion_automatica = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "contratos"
+        constraints = [
+            models.CheckConstraint(
+                name="ck_contratos_fechas",
+                condition=(
+                    Q(fecha_fin__isnull=True)
+                    | Q(fecha_inicio__isnull=True)
+                    | Q(fecha_fin__gte=F("fecha_inicio"))
+                ),
+            ),
+            models.CheckConstraint(
+                name="ck_contratos_tarifa",
+                condition=Q(tarifa_base__isnull=True) | Q(tarifa_base__gte=0),
+            ),
+        ]
+
+
+class ContratoTipo(models.Model):
+    """Un tipo de servicio de un contrato (tabla puente `contrato_tipos`).
+
+    Un contrato puede tener varias filas acá: representación + CGM en el mismo
+    contrato, u operación + mantenimiento en el mismo (O&M). Evita tener que inventar
+    valores de enum combinados. Se accede por `contrato.tipos`."""
+
+    contrato = models.ForeignKey(
+        "contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_id",
+        related_name="tipos",
+    )
+    tipo = models.CharField(max_length=19, choices=TipoContrato.choices)
+    pk = models.CompositePrimaryKey("contrato_id", "tipo")
+
+    class Meta:
+        db_table = "contrato_tipos"
+
+
+class ContratoParte(models.Model):
+    """Qué papel juega cada cliente en un contrato; reemplaza las columnas
+    contratante/prestador/comprador/vendedor. El DDL solo tiene `created_at`, así
+    que NO hereda Timer."""
+
+    id = models.BigAutoField(primary_key=True)
+    contrato = models.ForeignKey(
+        "contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_id",
+        related_name="partes",
+    )
+    # ON DELETE RESTRICT del DDL: no se borra un cliente que es parte de un contrato.
+    cliente = models.ForeignKey(
+        "clientes.Cliente", on_delete=models.PROTECT, db_column="cliente_id",
+        related_name="contrato_partes",
+    )
+    rol = models.CharField(max_length=13, choices=ContratoRol.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "contrato_partes"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["contrato", "cliente", "rol"], name="uq_contrato_partes"
+            ),
+        ]
+
+
+class ContratoProyecto(models.Model):
+    """Qué plantas cubre un contrato (N:M); unifica el escalar de contratos_servicio
+    y la N:M de los PPA. Espejo de PpaContratoProyecto."""
+
+    contrato = models.ForeignKey(
+        "contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_id",
+        related_name="proyectos",
+    )
+    proyecto = models.ForeignKey(
+        "proyectos.Proyecto", on_delete=models.CASCADE, db_column="proyecto_id",
+        related_name="contratos_unificados",
+    )
+    pk = models.CompositePrimaryKey("contrato_id", "proyecto_id")
+
+    class Meta:
+        db_table = "contrato_proyectos"
+
+
+class ContratoTarifa(models.Model):
+    """Qué se cobra en un contrato, por concepto y CON VIGENCIA (D-24).
+
+    Las tarifas se renegocian e indexan cada año: la misma CGM de Ayura 1 vale 5,0 en
+    2024, 5,26 en 2025 y 5,52826 en 2026. La `vigencia` (rango [desde, hasta)) permite
+    que la liquidación de un periodo use la tarifa vigente EN ese periodo, no la actual.
+
+    La base es la fila con `origen='pactada'` (no hay columna `es_base`). Una tarifa
+    cargada por error se ANULA (anulada_en/motivo), no se borra: el histórico completo es
+    el requisito. Las anuladas salen del EXCLUDE de no-solape. El DDL solo tiene
+    `created_at`, así que NO hereda Timer."""
+
+    id = models.BigAutoField(primary_key=True)
+    contrato = models.ForeignKey(
+        "contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_id",
+        related_name="tarifas",
+    )
+    concepto = models.CharField(max_length=14, choices=TarifaConcepto.choices)
+    valor = models.DecimalField(max_digits=14, decimal_places=6)
+    # Obligatoria: administración es un porcentaje y CGM es COP/kWh, y en las columnas
+    # de hoy son indistinguibles.
+    unidad = models.CharField(max_length=10, choices=TarifaUnidad.choices)
+    vigencia = DateRangeField()
+    origen = models.CharField(max_length=13, choices=TarifaOrigen.choices)
+    # Solo una indexación dice sobre qué índice y cuánto; el resto, NULL (CHECK).
+    indice = models.CharField(max_length=20, null=True, blank=True)
+    indice_pct = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)
+    nota = models.TextField(null=True, blank=True)
+    anulada_en = models.DateTimeField(null=True, blank=True)
+    anulada_motivo = models.TextField(null=True, blank=True)
+    anulada_por = models.ForeignKey(
+        "plataforma.Usuario", on_delete=models.SET_NULL, db_column="anulada_por_id",
+        null=True, blank=True, related_name="tarifas_anuladas",
+    )
+    registrado_por = models.ForeignKey(
+        "plataforma.Usuario", on_delete=models.SET_NULL, db_column="registrado_por_id",
+        null=True, blank=True, related_name="tarifas_registradas",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "contrato_tarifas"
+        constraints = [
+            models.CheckConstraint(
+                name="ck_contrato_tarifas_valor", condition=Q(valor__gte=0)
+            ),
+            PgCheckConstraint(
+                name="ck_contrato_tarifas_vigencia", condition=Q(vigencia__isempty=False)
+            ),
+            # Un porcentaje se guarda como fracción (<= 1).
+            models.CheckConstraint(
+                name="ck_contrato_tarifas_pct",
+                condition=~Q(unidad=TarifaUnidad.PORCENTAJE) | Q(valor__lte=1),
+            ),
+            # Solo `indexacion` lleva índice/porcentaje; el resto los deja en NULL.
+            models.CheckConstraint(
+                name="ck_contrato_tarifas_indice",
+                condition=(
+                    (Q(origen=TarifaOrigen.INDEXACION) & Q(indice__isnull=False))
+                    | (
+                        ~Q(origen=TarifaOrigen.INDEXACION)
+                        & Q(indice__isnull=True)
+                        & Q(indice_pct__isnull=True)
+                    )
+                ),
+            ),
+            # Lo migrado debe decir por qué su fecha es incierta.
+            models.CheckConstraint(
+                name="ck_contrato_tarifas_migracion",
+                condition=~Q(origen=TarifaOrigen.MIGRACION) | Q(nota__isnull=False),
+            ),
+            models.CheckConstraint(
+                name="ck_contrato_tarifas_anulada",
+                condition=(
+                    (Q(anulada_en__isnull=True) & Q(anulada_motivo__isnull=True))
+                    | (Q(anulada_en__isnull=False) & Q(anulada_motivo__isnull=False))
+                ),
+            ),
+            # Un concepto no puede tener dos valores vigentes a la vez en el mismo
+            # contrato. Las anuladas quedan fuera. Mismo mecanismo que protegerá la
+            # composición accionaria (D-08).
+            PgExclusionConstraint(
+                name="ex_contrato_tarifas_sin_solape",
+                expressions=[
+                    ("contrato", RangeOperators.EQUAL),
+                    ("concepto", RangeOperators.EQUAL),
+                    ("vigencia", RangeOperators.OVERLAPS),
+                ],
+                condition=Q(anulada_en__isnull=True),
+                index_type="gist",
+            ),
+        ]
