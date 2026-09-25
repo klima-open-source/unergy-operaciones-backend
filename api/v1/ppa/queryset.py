@@ -25,7 +25,7 @@ def con_relaciones():
         .select_related("responsable", "comprador", "vendedor")
         .prefetch_related(
             "proyectos__proyecto",
-            "tarifas",
+            "tarifas_ppa",
             "compromisos",
             "documentos_comerciales",
         )

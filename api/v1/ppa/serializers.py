@@ -47,7 +47,10 @@ class ContratoSerializer(serializers.ModelSerializer):
     comprador_id = serializers.IntegerField(allow_null=True)
     vendedor_id = serializers.IntegerField(allow_null=True)
     proyectos = serializers.SerializerMethodField()
-    tarifas = TarifaSerializer(many=True, read_only=True)
+    # `tarifas_ppa` es la relación de PpaTarifa (tabla ppa_tarifas). En el proxy sobre
+    # `contratos`, `.tarifas` es ContratoTarifa (el modelo nuevo versionado), así que se
+    # apunta explícito a la serie mensual del PPA.
+    tarifas = TarifaSerializer(source="tarifas_ppa", many=True, read_only=True)
     compromisos_energia = CompromisoSerializer(
         source="compromisos", many=True, read_only=True
     )
