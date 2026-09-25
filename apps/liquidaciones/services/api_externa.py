@@ -790,12 +790,34 @@ def repartir_facturas_xm(
     return task_id
 
 
-def generar_estado_resultados(month: int, year: int, version: str) -> str:
-    """Genera el ``.xlsx`` del estado de resultados. Queda en Drive."""
-    return _lanzar(
-        "GET", PATH_ESTADO_RESULTADOS_XLSX,
-        params={"month": month, "year": year, "version": version},
-    )
+def generar_estado_resultados(
+    month: int,
+    year: int,
+    last_version: str | None = None,
+    new_version: str | None = None,
+    project: str | None = None,
+) -> str:
+    """Genera el ``.xlsx`` del estado de resultados. Queda en Drive.
+
+    **Este endpoint NO acepta ``version``.** Su Swagger declara ``last_version``
+    ("de qué versión de las facturas saca los datos") y ``new_version`` ("hacia
+    cuál"), más un ``project`` opcional. Le mandábamos ``version``, que no
+    conoce: lo ignoraba y generaba con sus valores por defecto, así que elegir
+    ``tx3`` en la plataforma no cambiaba el archivo.
+
+    Ojo con el parecido: el ER en JSON (``income_statement_data``) sí usa
+    ``version``. Son dos endpoints con dos contratos distintos.
+    """
+    params: dict[str, Any] = {"month": month, "year": year}
+    # Una versión vacía no es lo mismo que no mandarla: la API la tomaría como
+    # inválida. Se omiten y que aplique sus defaults.
+    if last_version:
+        params["last_version"] = last_version
+    if new_version:
+        params["new_version"] = new_version
+    if project:
+        params["project"] = project
+    return _lanzar("GET", PATH_ESTADO_RESULTADOS_XLSX, params=params)
 
 
 def generar_cruce_facturas(month: int, year: int, version: str) -> str:

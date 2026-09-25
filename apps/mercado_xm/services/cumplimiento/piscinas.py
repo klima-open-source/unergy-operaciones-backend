@@ -32,7 +32,8 @@ from apps.proyectos.models import Proyecto
 
 from .consultas import (
     GESCON_PUBLICADA, _asc_nulls_first, _clasificar_remanente_bolsa,
-    _contratos_vigentes, _fin_efectivo_asic, _query_contratos_venta, _resolve_gescon,
+    _contratos_venta_ocultos, _contratos_vigentes, _fin_efectivo_asic, _query_contratos_venta,
+    _resolve_gescon,
 )
 from .periodos import (
     UNGC_COMERCIALIZADOR, _con_segmento, _estado_segmento, _fecha_corte,
@@ -211,6 +212,19 @@ def plantas_contratos(year: int, month: int, incluir_todos: bool = False) -> dic
             "fecha_fin": c.fecha_fin.isoformat() if c.fecha_fin else None,
             "plantas": plantas_list,
         })
+
+    # Contratos escondidos por responsable: no se muestran, pero sus plantas
+    # siguen asignadas. Sus días cuentan como asignados para que la planta no
+    # reaparezca como bolsa (ver `_contratos_venta_ocultos`).
+    if not incluir_todos:
+        for c in _contratos_venta_ocultos(year, month):
+            if not c.numero_codigo_contrato:
+                continue
+            for asic in _resolve_gescon(c.numero_codigo_contrato, year, month):
+                if asic.proyecto_id and asic.proyecto_id in plantas_map:
+                    seg = _recortar(asic.fecha_inicio, asic.fecha_fin, first_day, last_day)
+                    if seg:
+                        assigned_windows[asic.proyecto_id].append(seg)
 
     # ── (b) COMPRA UNGC ─────────────────────────────────────────────────────
     compra_out = _piscina_compra_ungc(first_day, last_day, corte)

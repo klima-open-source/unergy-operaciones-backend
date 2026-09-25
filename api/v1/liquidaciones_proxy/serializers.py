@@ -88,6 +88,25 @@ class ReliquidacionSerializer(serializers.Serializer):
         return datos
 
 
+class EstadoResultadosSerializer(serializers.Serializer):
+    """El Excel del ER se pide con DOS versiones, no con una.
+
+    `get_income_statement` declara `last_version` (de qué versión de las
+    facturas saca los datos) y `new_version` (hacia cuál), más un `project`
+    opcional. No conoce `version` — se lo mandábamos y lo ignoraba.
+    """
+
+    month = serializers.IntegerField(min_value=1, max_value=12)
+    year = serializers.IntegerField(min_value=2020, max_value=2100)
+    last_version = serializers.ChoiceField(
+        choices=VERSIONES, required=False, allow_null=True, allow_blank=True
+    )
+    new_version = serializers.ChoiceField(
+        choices=VERSIONES, required=False, allow_null=True, allow_blank=True
+    )
+    project = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+
+
 class DiagnosticoSerializer(PeriodoSerializer):
     project = serializers.CharField()
 

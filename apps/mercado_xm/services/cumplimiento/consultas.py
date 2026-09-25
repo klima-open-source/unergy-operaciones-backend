@@ -279,3 +279,21 @@ def _query_contratos_venta(year: int | None = None, month: int | None = None,
         c for c in _contratos_vigentes(year, month, solo_relevantes=solo_relevantes)
         if (c.tipo_contrato or "venta") != "compra"
     ]
+
+
+def _contratos_venta_ocultos(year: int, month: int) -> list:
+    """Contratos de venta vigentes que el filtro de responsables esconde.
+
+    Esconder un contrato NO libera a sus plantas: siguen en ese contrato, solo
+    que no se muestra. Quien arme la asignación planta→contrato con los
+    contratos visibles tiene que descontar también estos, o sus plantas
+    reaparecen como "sin contrato" o como bolsa. Vacío si no hay responsables
+    ocultos.
+    """
+    if not _ids_responsables_ocultos():
+        return []
+    visibles = {c.id for c in _query_contratos_venta(year, month, solo_relevantes=True)}
+    return [
+        c for c in _query_contratos_venta(year, month, solo_relevantes=False)
+        if c.id not in visibles
+    ]

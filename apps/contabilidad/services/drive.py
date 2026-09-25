@@ -74,9 +74,15 @@ def get_drive_service():
 # todo filtro por período.
 _COPIA = r"^(?P<copia>Copia\s+de\s+)?"
 
+# La version al final es OPCIONAL: hoy la API no la pone en el nombre del ER
+# --verificado el 2026-09-25 sobre los 2.309 archivos de la carpeta y pidiendo
+# por id los que se generaron ese dia: ninguno la trae, y tampoco esta dentro
+# del xlsx-- pero si la pone en el del cruce. Se acepta desde ya para que el dia
+# que la agreguen la vista la muestre sin tocar nada.
 _RE_ER = re.compile(
     _COPIA + r"Estado\s+resultados\s+(?P<desc>.+?)"
-    r"\s+(?P<mes>\d{1,2})\s+(?P<anio>\d{4})\.xlsx?$",
+    r"\s+(?P<mes>\d{1,2})\s+(?P<anio>\d{4})"
+    r"(?:\s+(?P<version>txf|txr|tx[2-8]))?\.xlsx?$",
     re.IGNORECASE,
 )
 _RE_CRUCE = re.compile(
@@ -111,7 +117,8 @@ def parse_nombre_er(nombre: str) -> dict:
                 "mes": mes,
                 "anio": int(m.group("anio")),
                 "descripcion": m.group("desc"),
-                "version": None,
+                # Hoy viene vacía: la API no la escribe en el nombre del ER.
+                "version": (m.group("version") or "").lower() or None,
                 "es_copia": bool(m.group("copia")),
             }
         return desconocido
