@@ -40,8 +40,8 @@ def autenticar(email: str, contrasena: str):
     """
     usuario = pl_models.Usuario.objects.filter(email=email).first()
     if (
-        usuario is None or not usuario.password_hash
-        or not seguridad.verificar_contrasena(contrasena, usuario.password_hash)
+        usuario is None or not usuario.password
+        or not seguridad.verificar_contrasena(contrasena, usuario.password)
     ):
         raise CredencialesIncorrectas("Credenciales incorrectas")
     if not usuario.activo:
@@ -105,10 +105,10 @@ def restablecer(token: str, contrasena_nueva: str) -> None:
             f"{seguridad.LARGO_MINIMO_CONTRASENA} caracteres"
         )
 
-    usuario.password_hash = seguridad.hash_contrasena(contrasena_nueva)
+    usuario.password = seguridad.hash_contrasena(contrasena_nueva)
     # El token se quema al usarlo: un enlace de reset sirve una sola vez.
     usuario.password_reset_token = None
     usuario.password_reset_expires = None
     usuario.save(update_fields=[
-        "password_hash", "password_reset_token", "password_reset_expires",
+        "password", "password_reset_token", "password_reset_expires",
     ])

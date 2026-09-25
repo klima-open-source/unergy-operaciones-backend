@@ -32,7 +32,5 @@ scripts/_tmp_*
 tests/golden/
 .DS_Store
 
-
-# Static files de Django (collectstatic) y archivos de cache de Celery. Se generan
-# en el contenedor y no deben subirse al repo.
+# Salida de collectstatic (la genera el servicio migrate en cada deploy)
 staticfiles/

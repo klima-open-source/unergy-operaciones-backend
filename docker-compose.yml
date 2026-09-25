@@ -76,7 +76,8 @@ services:
     command: >
       sh -c "python manage.py migrate --fake-initial --no-input &&
       python manage.py showmigrations --plan | tail -5 &&
-      python scripts/verificar_esquema_django.py"
+      python scripts/verificar_esquema_django.py &&
+      python manage.py collectstatic --no-input"
 
   operaciones:
     <<: *app-base

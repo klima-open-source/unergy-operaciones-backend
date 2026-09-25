@@ -276,7 +276,9 @@ def _rutas_del_resolver():
                 rutas.append((texto, patron.name))
 
     recorrer(get_resolver())
-    return rutas
+    # El admin de Django no es API: sus rutas llevan `/` final y no siguen el
+    # contrato de `APPEND_SLASH = False`.
+    return [(p, n) for p, n in rutas if not p.startswith("admin/")]
 
 
 def _es_literal(patron: str) -> bool:

@@ -70,8 +70,8 @@ INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
-    "django.contrib.messages",
     "django.contrib.sessions",
+    "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
     "corsheaders",
@@ -98,6 +98,9 @@ INSTALLED_APPS = [
     "apps.retos",
 ]
 
+# El usuario es el de la tabla `usuarios`, no `auth.User` (ver su docstring).
+AUTH_USER_MODEL = "plataforma.Usuario"
+
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     # Sin esto el API manda JSON crudo: `/api/v1/fallas?size=500` son varios MB
@@ -113,20 +116,21 @@ MIDDLEWARE = [
     # Va antes de CommonMiddleware porque gzip debe ir arriba de cualquier
     # middleware que lea o modifique el cuerpo.
     "django.middleware.gzip.GZipMiddleware",
-    "django.middleware.common.CommonMiddleware",
-    "django.middleware.csrf.CsrfViewMiddleware",
+    # gunicorn no sirve estaticos y no hay proxy delante: WhiteNoise sirve los
+    # del admin desde STATIC_ROOT. Va justo debajo de gzip (lo pide su doc).
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    # Sesion + CSRF son solo para /admin/; el API sigue con `Bearer`.
+    "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
-
-ROOT_URLCONF = "config.urls"
-WSGI_APPLICATION = "config.wsgi.application"
 
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -137,6 +141,9 @@ TEMPLATES = [
         },
     },
 ]
+
+ROOT_URLCONF = "config.urls"
+WSGI_APPLICATION = "config.wsgi.application"
 
 # Las piezas POSTGRES_*/PG_* son la forma preferida (se leen mejor en el .env y
 # rotar la clave no obliga a rearmar una URL). Pero si DATABASE_URL esta
@@ -205,7 +212,13 @@ APPEND_SLASH = False                       # ver docstring del modulo
 
 CORS_ALLOW_ALL_ORIGINS = True
 STATIC_URL = "static/"
+# Lo llena `collectstatic` en el servicio `migrate` del compose (el repo esta
+# montado en /app, asi que un collectstatic en el build quedaria tapado).
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+}
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")

@@ -12,6 +12,7 @@ el generador los borraria. Por eso no lleva la marca "GENERADO por" — es lo qu
 hace que `scripts/generar_modelos_django.py` se niegue a pisarlo.
 """
 
+from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.db import models
 from django.utils import timezone
 
@@ -43,7 +44,30 @@ class Rol(models.TextChoices):
     COMERCIAL = "comercial", "Comercial"
 
 
-class Usuario(models.Model):
+class UsuarioManager(BaseUserManager):
+    def create_user(self, email, nombre, rol=Rol.SOLO_LECTURA, password=None, **extra):
+        usuario = self.model(email=self.normalize_email(email), nombre=nombre, rol=rol, **extra)
+        usuario.set_password(password)
+        usuario.save(using=self._db)
+        return usuario
+
+    def create_superuser(self, email, nombre, rol=Rol.ADMIN, password=None, **extra):
+        return self.create_user(email, nombre, Rol.ADMIN, password, **extra)
+
+
+class Usuario(AbstractBaseUser):
+    """El `AUTH_USER_MODEL`. Se monta sobre la tabla `usuarios` TAL CUAL existe.
+
+    El campo `password` es la columna `password_hash` (se llama asi porque
+    `createsuperuser` y `changepassword` lo buscan por nombre), con el bcrypt
+    crudo de `seguridad` -- el mismo del login del API, no el formato de los
+    hashers de Django. `last_login` se anula: esa columna no existe (el API usa
+    `ultimo_acceso`). Tampoco hay `PermissionsMixin`: los permisos salen de
+    `rol`, y un `admin` activo lo puede todo en /admin/.
+    """
+
+    last_login = None
+
     id = models.BigAutoField(primary_key=True)
     email = models.CharField(max_length=255, unique=True, verbose_name="Correo")
     nombre = models.CharField(max_length=255, verbose_name="Nombre")
@@ -51,12 +75,18 @@ class Usuario(models.Model):
     # las opciones se validan aca y el tipo sigue existiendo en la base.
     rol = models.CharField(max_length=20, choices=Rol.choices, verbose_name="Rol")
     activo = models.BooleanField(default=True, verbose_name="Activo")
-    password_hash = models.CharField(max_length=255, null=True, blank=True)
+    password = models.CharField(max_length=255, null=True, blank=True, db_column="password_hash")
     ultimo_acceso = models.DateTimeField(null=True, blank=True, verbose_name="Último acceso")
     password_reset_token = models.CharField(max_length=255, null=True, blank=True)
     password_reset_expires = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = UsuarioManager()
+
+    USERNAME_FIELD = "email"
+    EMAIL_FIELD = "email"
+    REQUIRED_FIELDS = ["nombre"]
 
     class Meta:
         db_table = "usuarios"
@@ -65,6 +95,44 @@ class Usuario(models.Model):
 
     def __str__(self) -> str:
         return self.email
+
+    @property
+    def is_active(self) -> bool:
+        return self.activo
+
+    @property
+    def is_staff(self) -> bool:
+        return self.activo and self.rol == Rol.ADMIN
+
+    is_superuser = is_staff
+
+    def has_perm(self, perm, obj=None) -> bool:
+        return self.is_staff
+
+    def has_module_perms(self, app_label) -> bool:
+        return self.is_staff
+
+    def set_password(self, raw_password):
+        from apps.plataforma.services import seguridad
+
+        self.password = seguridad.hash_contrasena(raw_password) if raw_password else None
+
+    def check_password(self, raw_password) -> bool:
+        from apps.plataforma.services import seguridad
+
+        return bool(self.password) and seguridad.verificar_contrasena(raw_password, self.password)
+
+    def set_unusable_password(self):
+        self.password = None
+
+    def has_usable_password(self) -> bool:
+        return bool(self.password)
+
+    def get_session_auth_hash(self):
+        # La sesion del admin muere si cambia la contrasena, igual que en Django.
+        from django.utils.crypto import salted_hmac
+
+        return salted_hmac("apps.plataforma.Usuario", self.password or "", algorithm="sha256").hexdigest()
 
 
 class Notificacion(models.Model):
