@@ -27,6 +27,7 @@ Reglas heredadas del diseño (docs/refactor):
 from __future__ import annotations
 
 import datetime as dt
+import unicodedata
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 from types import SimpleNamespace
@@ -94,6 +95,37 @@ REMAP_SRV = [
     ("om_documento_proyecto", "contrato_id"),
     ("contrato_alertas_aniversario", "contrato_id"),
 ]
+
+# Clientes que existen en `clientes` con OTRO formato de nombre (tilde/punto/&/nombre
+# largo). Mapea nombre-normalizado-del-contrato -> nombre-normalizado-del-cliente-real,
+# para los casos que la normalización sola no alcanza. Verificado contra la base 2026-09.
+ALIAS_CLIENTE = {
+    "sonetel s.a.s": "soluciones de energia y telecomunicaciones sonetel s.a.s",
+    "sol y cielo s.a.s": "sol y cielo energia s.a.s e.s.p",
+}
+
+# Clientes que NO existen en `clientes` y hay que crear (nombre, nit). El backfill los
+# crea (get_or_create) antes de resolver las partes. Verificado contra la base 2026-09.
+CLIENTES_A_CREAR = [
+    ("NEU I S.A.S. E.S.P.", None),
+    ("NEU II S.A.S. E.S.P.", None),
+    ("BEAM ENERGY INNOVATION S.A.S. E.S.P.", None),
+    ("LUMINA ENERGY S.A.S. E.S.P.", None),
+    ("ENERMAS S.A.S. E.S.P.", None),
+    ("Bia Energy S.A.S.", "901588412"),
+    ("NITRO ENERGY COLOMBIA S A S E S P", "900691280"),
+]
+
+
+def _norm(nombre) -> str:
+    """Normaliza una razón social para comparar: minúsculas, sin tildes, sin puntos ni
+    espacios sobrantes, y `&` -> `y`. Así 'UNERGY S.A.S.' == 'UNERGY S.A.S', y
+    'NAOS GENERACION…' == 'NAOS GENERACIÓN…'."""
+    if not nombre:
+        return ""
+    s = unicodedata.normalize("NFKD", str(nombre)).encode("ascii", "ignore").decode()
+    s = s.lower().replace("&", " y ")
+    return " ".join(s.split()).rstrip(". ").strip()
 
 
 def _dec(valor) -> Decimal | None:
@@ -176,7 +208,7 @@ class Command(BaseCommand):
             if c.nit_cedula:
                 self._por_nit[c.nit_cedula.strip()] = c
             if c.razon_social_nombre:
-                self._por_nombre.setdefault(c.razon_social_nombre.strip().lower(), c)
+                self._por_nombre.setdefault(_norm(c.razon_social_nombre), c)
 
         try:
             with transaction.atomic():
@@ -188,6 +220,7 @@ class Command(BaseCommand):
                         "--dry-run para simular."
                     )
                     return
+                self._crear_clientes_faltantes()
                 self._migrar_ppa()
                 self._migrar_servicio()
                 if self.remapear:
@@ -611,12 +644,26 @@ class Command(BaseCommand):
 
     def _resolver_cliente(self, cliente_id, nombre, nit):
         if cliente_id:
-            return Cliente.objects.filter(id=cliente_id).first()
+            c = Cliente.objects.filter(id=cliente_id).first()
+            if c is not None:
+                return c
         if nit and nit.strip() in self._por_nit:
             return self._por_nit[nit.strip()]
-        if nombre and nombre.strip().lower() in self._por_nombre:
-            return self._por_nombre[nombre.strip().lower()]
-        return None
+        clave = _norm(nombre)
+        # Alias para clientes que existen con otro formato de nombre.
+        clave = ALIAS_CLIENTE.get(clave, clave)
+        return self._por_nombre.get(clave)
+
+    def _crear_clientes_faltantes(self):
+        """Crea los clientes que existen en los contratos pero no en `clientes`
+        (get_or_create por razón social), y los agrega al índice de nombres."""
+        for nombre, nit in CLIENTES_A_CREAR:
+            cliente, creado = Cliente.objects.get_or_create(
+                razon_social_nombre=nombre, defaults={"nit_cedula": nit}
+            )
+            self._por_nombre.setdefault(_norm(nombre), cliente)
+            if creado:
+                self.rep["clientes_creados"] += 1
 
     # ------------------------------------------------------------- reporte
     def _reporte(self):
