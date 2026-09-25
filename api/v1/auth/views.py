@@ -168,7 +168,7 @@ class UsuarioViewSet(viewsets.GenericViewSet):
         usuario = pl_models.Usuario.objects.create(
             email=datos["email"], nombre=datos["nombre"], rol=datos["rol"],
             activo=datos["activo"],
-            password_hash=seguridad.hash_contrasena(datos["password"]),
+            password=seguridad.hash_contrasena(datos["password"]),
         )
         return Response(
             auth_serializers.UsuarioSerializer(usuario).data, status=201
@@ -189,10 +189,10 @@ class UsuarioViewSet(viewsets.GenericViewSet):
                 setattr(usuario, campo, cambios[campo])
                 campos.append(campo)
         if "password" in cambios:
-            usuario.password_hash = seguridad.hash_contrasena(
+            usuario.password = seguridad.hash_contrasena(
                 cambios["password"]
             )
-            campos.append("password_hash")
+            campos.append("password")
 
         if campos:
             usuario.save(update_fields=campos)

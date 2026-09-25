@@ -11,7 +11,7 @@ class TokenSerializer(serializers.Serializer):
 
 
 class UsuarioSerializer(serializers.ModelSerializer):
-    """NUNCA expone `password_hash` ni los campos del token de reset."""
+    """NUNCA expone `password` ni los campos del token de reset."""
 
     class Meta:
         model = pl_models.Usuario

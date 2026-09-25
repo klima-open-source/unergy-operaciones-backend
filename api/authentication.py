@@ -28,9 +28,9 @@ from apps.plataforma.services import seguridad
 class UsuarioAutenticado:
     """El usuario tal como lo ven las vistas.
 
-    No es `django.contrib.auth`: este backend tiene su propia tabla `usuarios`
-    y no usa el modelo de Django (`django.contrib.auth` ni siquiera está en
-    INSTALLED_APPS). DRF solo exige `.is_authenticated`.
+    `Usuario` es el `AUTH_USER_MODEL`, pero eso es para /admin/: el API lo
+    envuelve acá para exponer `.roles` como lista. DRF solo exige
+    `.is_authenticated`.
     """
 
     is_authenticated = True
