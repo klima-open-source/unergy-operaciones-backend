@@ -334,8 +334,19 @@ class LiquidacionesApiViewSet(viewsets.GenericViewSet):
     @action(detail=False, methods=["post"], url_path="ciclo/estado-resultados")
     @log_endpoint(name="Operaciones | Liquidaciones | Estado de resultados")
     def ciclo_estado_resultados(self, request):
-        """Genera el .xlsx del estado de resultados en la carpeta de Drive."""
-        return self._tarea(request, api.generar_estado_resultados)
+        """Genera el .xlsx del estado de resultados en la carpeta de Drive.
+
+        Se pide con DOS versiones (`last_version` y `new_version`), no con una:
+        es lo que declara ese endpoint de la API. `project` es opcional y
+        restringe el archivo a un solo proyecto.
+        """
+        datos = self._periodo(request, liq_serializers.EstadoResultadosSerializer)
+        return self._respuesta(self._llamar(
+            api.generar_estado_resultados,
+            datos["month"], datos["year"],
+            datos.get("last_version"), datos.get("new_version"),
+            datos.get("project"),
+        ), envolver_tarea=True)
 
     @action(detail=False, methods=["post"], url_path="ciclo/cruce-facturas")
     @log_endpoint(name="Operaciones | Liquidaciones | Cruce de facturas")
