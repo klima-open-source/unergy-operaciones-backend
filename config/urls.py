@@ -9,6 +9,8 @@ La cadena es la misma que describe migration.md, con `v1` en vez de `v2`:
 
 from django.http import JsonResponse
 from django.urls import include, path
+from django.contrib import admin
+
 
 # Nombre de la app en `/health`. Es el mismo literal que el default de
 # `APP_NAME` en `app/core/config.py`: el healthcheck del compose compara el
@@ -26,4 +28,5 @@ health.metodos_http = ["GET"]   # lo lee tests/test_paridad_urls.py
 urlpatterns = [
     path("api/", include("api.urls")),
     path("health", health),
+    path("admin/", admin.site.urls),
 ]

@@ -67,7 +67,11 @@ if not SECRET_KEY and ENTORNO != "development":
     )
 
 INSTALLED_APPS = [
+    "django.contrib.admin",
+    "django.contrib.auth",
     "django.contrib.contenttypes",
+    "django.contrib.messages",
+    "django.contrib.sessions",
     "django.contrib.staticfiles",
     "rest_framework",
     "corsheaders",
@@ -110,10 +114,29 @@ MIDDLEWARE = [
     # middleware que lea o modifique el cuerpo.
     "django.middleware.gzip.GZipMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ],
+        },
+    },
+]
 
 # Las piezas POSTGRES_*/PG_* son la forma preferida (se leen mejor en el .env y
 # rotar la clave no obliga a rearmar una URL). Pero si DATABASE_URL esta
@@ -182,6 +205,7 @@ APPEND_SLASH = False                       # ver docstring del modulo
 
 CORS_ALLOW_ALL_ORIGINS = True
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")

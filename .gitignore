@@ -31,3 +31,8 @@ scripts/_tmp_*
 # y este repo es publico. Se captura con scripts/capturar_golden_operando.py.
 tests/golden/
 .DS_Store
+
+
+# Static files de Django (collectstatic) y archivos de cache de Celery. Se generan
+# en el contenedor y no deben subirse al repo.
+staticfiles/
