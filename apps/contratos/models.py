@@ -296,7 +296,7 @@ class Contrato(Timer):
     # --- Específicas de compraventa de energía (PPA), antes en ppa_contratos ---
     responsable = models.ForeignKey(
         "ppa.PpaResponsable", on_delete=models.SET_NULL, db_column="responsable_id",
-        null=True, blank=True, related_name="contratos_unificados",
+        null=True, blank=True, related_name="contratos",
     )
     # venta | compra (antes ppa_contratos.tipo_contrato).
     tipo_contrato = models.CharField(
@@ -304,11 +304,11 @@ class Contrato(Timer):
     )
     comprador = models.ForeignKey(
         "clientes.Cliente", on_delete=models.SET_NULL, db_column="comprador_id",
-        null=True, blank=True, related_name="contratos_unif_por_comprador",
+        null=True, blank=True, related_name="ppa_contratos_por_comprador_id",
     )
     vendedor = models.ForeignKey(
         "clientes.Cliente", on_delete=models.SET_NULL, db_column="vendedor_id",
-        null=True, blank=True, related_name="contratos_unif_por_vendedor",
+        null=True, blank=True, related_name="ppa_contratos_por_vendedor_id",
     )
     periodicidad_indexacion = models.CharField(max_length=50, null=True, blank=True)
     periodo_indexacion_base = models.CharField(max_length=7, null=True, blank=True)
@@ -341,19 +341,19 @@ class Contrato(Timer):
     )
     contratante = models.ForeignKey(
         "clientes.Cliente", on_delete=models.SET_NULL, db_column="contratante_id",
-        null=True, blank=True, related_name="contratos_unif_por_contratante",
+        null=True, blank=True, related_name="contratos_servicio_por_contratante_id",
     )
     prestador = models.ForeignKey(
         "clientes.Cliente", on_delete=models.SET_NULL, db_column="prestador_id",
-        null=True, blank=True, related_name="contratos_unif_por_prestador",
+        null=True, blank=True, related_name="contratos_servicio_por_prestador_id",
     )
     inversionista = models.ForeignKey(
         "clientes.Cliente", on_delete=models.SET_NULL, db_column="inversionista_id",
-        null=True, blank=True, related_name="contratos_unif_por_inversionista",
+        null=True, blank=True, related_name="contratos_servicio_por_inversionista_id",
     )
     proyecto = models.ForeignKey(
         "proyectos.Proyecto", on_delete=models.DO_NOTHING, db_column="proyecto_id",
-        null=True, blank=True, related_name="contratos_unif_por_proyecto",
+        null=True, blank=True, related_name="contratos_servicio_por_proyecto_id",
     )
     # Tarifas escalares e indexación JSON (redundantes con contrato_tarifas; autoritativas
     # para los lectores actuales durante la transición — decisión del usuario 2026-09-24).
