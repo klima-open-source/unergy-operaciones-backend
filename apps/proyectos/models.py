@@ -178,9 +178,43 @@ class ProyectoInversor(Timer):
         unique_together = [("nombre", "proyecto")]
 
 
+class Inversionista(Timer):
+    """Un tercero en su ROL de inversionista, sobre un `Cliente`.
+
+    `Cliente` es la tabla universal de terceros (arrendatarios, EPCistas,
+    patrimonios autónomos, inversionistas…): NO todo cliente es inversionista.
+    Esta tabla marca a los que SÍ lo son y es el ancla de `ProyectoInversionista`
+    (la participación de un inversionista en un proyecto). Por ahora el único rol
+    modelado es el de inversionista; si aparecen más roles, cada uno tendrá su
+    propia tabla-ancla sobre `Cliente`."""
+
+    id = models.BigAutoField(primary_key=True)
+    cliente = models.ForeignKey(
+        "clientes.Cliente", on_delete=models.PROTECT, db_column="cliente_id",
+        related_name="inversionistas_por_cliente_id",
+    )
+    activo = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "inversionistas"
+        constraints = [
+            models.UniqueConstraint(fields=["cliente"], name="uq_inversionistas_cliente"),
+        ]
+
+
 class ProyectoInversionista(Timer):
+    """Participación de un inversionista en un proyecto.
+
+    Diagrama final: apunta a `Inversionista` (el tercero en su rol), no directo a
+    `Cliente`. `cliente` se conserva como columna DENORMALIZADA de transición
+    (la tabla ya está poblada en prod y el corte a NOT NULL / drop de `cliente_id`
+    no puede meter datos en una migración de Django — CLAUDE.md): el backfill llena
+    `inversionista_id` y los lectores viejos siguen leyendo `.cliente` hasta que se
+    migren. Por eso `inversionista` es nullable por ahora."""
+
     id = models.BigAutoField(primary_key=True)
     proyecto = models.ForeignKey("Proyecto", on_delete=models.DO_NOTHING, db_column="proyecto_id", related_name="inversionistas")
+    inversionista = models.ForeignKey("Inversionista", on_delete=models.DO_NOTHING, db_column="inversionista_id", null=True, blank=True, related_name="proyecto_inversionistas_por_inversionista_id")
     cliente = models.ForeignKey("clientes.Cliente", on_delete=models.DO_NOTHING, db_column="cliente_id", related_name="proyecto_inversionistas_por_cliente_id")
     porcentaje_participacion = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     es_patrimonio_autonomo = models.BooleanField(default=False)

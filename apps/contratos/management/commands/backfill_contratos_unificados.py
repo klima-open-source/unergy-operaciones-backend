@@ -1,28 +1,35 @@
-"""Backfill de los contratos unificados (D-10) y sus tarifas versionadas (D-24).
+"""Backfill de los contratos unificados (D-10) y del modelo de tarifas
+plantilla→instancia (D-24, rediseño 2026-09-25).
 
-Llena `contratos`, `contrato_partes`, `contrato_proyectos` y `contrato_tarifas` desde
-las tablas vivas `ppa_contratos`/`ppa_tarifas`/`ppa_contrato_proyectos` y
-`contratos_servicio`. FASE ADITIVA: las tablas viejas siguen siendo la fuente de verdad
-de todos los lectores; este comando solo puebla las nuevas.
+Puebla, en orden:
+1. `servicio_plantillas` (catálogo de conceptos tarifables).
+2. `inversionistas` (un inversionista por cliente que ya participa en un proyecto) y
+   `proyecto_inversionistas.inversionista_id` (columna nueva; `cliente_id` se conserva).
+3. `contratos`, `contrato_partes` desde `ppa_contratos`/`contratos_servicio`.
+4. `contrato_proyectos` anclando cada vínculo a la PARTICIPACIÓN proyecto↔inversionista.
+5. `servicios` (instancia de plantilla por contrato-proyecto) y `tarifas` (con vigencia)
+   desde `ppa_tarifas` y las columnas escalares/indexación de `contratos_servicio`.
 
-Se corre UNA vez contra producción y se BORRA (CLAUDE.md: los datos nunca van dentro de
-una migración de Django). En el servidor:
+CAPA NUEVA NO CABLEADA: facturación/contabilidad siguen leyendo las fuentes viejas
+(`ppa_tarifas`, columnas `tarifa_*`/`indexacion_*`); este comando solo puebla la capa
+nueva. Se corre UNA vez contra producción y se BORRA (CLAUDE.md: los datos nunca van
+dentro de una migración de Django). En el servidor:
 
     docker compose exec operaciones python manage.py backfill_contratos_unificados --dry-run
     docker compose exec operaciones python manage.py backfill_contratos_unificados
 
-Idempotente vía `--reset` (borra las 4 tablas nuevas antes de recargar). `--dry-run` hace
-todo el trabajo dentro de una transacción y la revierte, imprimiendo el reporte.
+Idempotente vía `--reset`. `--dry-run` hace todo dentro de una transacción y la revierte,
+imprimiendo el reporte.
 
 Reglas heredadas del diseño (docs/refactor):
 - La fila base se expresa con `origen='pactada'` (no hay columna `es_base`).
 - Regla 2: nunca se crea una tarifa con valor 0.0 / NULL; se registra en `omitidas_por_cero`.
-  Los contratos 62/69 (cgm=0 con representación real) y el grupo a (54,115,197,209,210)
-  caen acá: omitir el cero es la opción reversible mientras Juan/Jessica deciden.
 - Las partes se resuelven contra `clientes` por id, nit o razón social; NUNCA se inventan.
+- Un vínculo contrato↔proyecto necesita una participación; si el proyecto no tiene ninguna
+  (o hay varias y ninguna coincide con el inversionista del contrato) se registra en
+  `participaciones_no_resueltas` y el vínculo NO se crea (nada se inventa).
 - El aniversario (mes/día) sale de fecha_firma/fecha_inicio con default 1/1, igual que
-  `apps.contabilidad.services.costos._tarifa_indexada_periodo`, para que la vigencia dé la
-  misma respuesta que el código vivo.
+  `apps.contabilidad.services.costos._tarifa_indexada_periodo`.
 """
 from __future__ import annotations
 
@@ -42,14 +49,16 @@ from apps.contratos.models import (
     ContratoParte,
     ContratoProyecto,
     ContratoRol,
-    ContratoTarifa,
-    ContratoTipo,
     EstadoContrato,
+    Servicio,
+    ServicioPlantilla,
     TarifaConcepto,
     TarifaOrigen,
+    Tarifa,
     TarifaUnidad,
     TipoContrato,
 )
+from apps.proyectos.models import Inversionista, ProyectoInversionista
 
 # Las tablas viejas (ppa_contratos, contratos_servicio, …) ya NO tienen modelo propio:
 # PpaContrato/ContratoServicio son fachadas proxy sobre `contratos`. Por eso el copiado
@@ -59,6 +68,38 @@ from apps.contratos.models import (
 class _Rollback(Exception):
     """Señal interna para revertir la transacción en --dry-run."""
 
+
+# Catálogo de plantillas de servicio (concepto tarifable). (codigo, nombre, unidad_default).
+PLANTILLAS_CATALOGO = [
+    ("administracion", "Administración", TarifaUnidad.PORCENTAJE),
+    ("cgm", "CGM", TarifaUnidad.COP_KWH),
+    ("representacion", "Representación", TarifaUnidad.COP_KWH),
+    ("mantenimiento", "Mantenimiento (O&M)", TarifaUnidad.COP_MES),
+    ("arriendo", "Arriendo (canon)", TarifaUnidad.COP_MES),
+    ("internet", "Internet", TarifaUnidad.COP_MES),
+    ("energia", "Energía (compraventa)", TarifaUnidad.COP_KWH),
+]
+
+# concepto de tarifa -> codigo de plantilla de servicio a la que cuelga.
+CONCEPTO_A_PLANTILLA = {
+    TarifaConcepto.ENERGIA: "energia",
+    TarifaConcepto.CGM: "cgm",
+    TarifaConcepto.REPRESENTACION: "representacion",
+    TarifaConcepto.ADMINISTRACION: "administracion",
+    TarifaConcepto.CANON: "arriendo",
+}
+
+# tipo de contrato -> codigo de plantilla (para crear el Servicio estructural aunque no
+# haya tarifa cargada). operación y mantenimiento son el mismo servicio (O&M).
+TIPO_A_PLANTILLA = {
+    TipoContrato.REPRESENTACION: "representacion",
+    TipoContrato.CGM: "cgm",
+    TipoContrato.OPERACION: "mantenimiento",
+    TipoContrato.MANTENIMIENTO: "mantenimiento",
+    TipoContrato.ARRIENDO: "arriendo",
+    TipoContrato.INTERNET: "internet",
+    TipoContrato.COMPRAVENTA_ENERGIA: "energia",
+}
 
 # servicio_aplica -> conjunto de tipos del contrato. Un contrato puede tener varios:
 # operación y mantenimiento son un solo contrato (O&M) con dos tipos. Para
@@ -201,6 +242,11 @@ class Command(BaseCommand):
         self.partes_no_resueltas: list[tuple] = []
         self.solapes: list[tuple] = []
         self.rangos_vacios: list[tuple] = []
+        self.participaciones_no_resueltas: list[tuple] = []
+        self.tarifas_sin_servicio: list[tuple] = []
+        # Catálogo de plantillas y participaciones por proyecto (se llenan al arrancar).
+        self._plantillas: dict[str, ServicioPlantilla] = {}
+        self._participaciones: dict[int, list] = defaultdict(list)
         # Índice de clientes en memoria (pocos miles): por nit y por razón social.
         self._por_nit = {}
         self._por_nombre = {}
@@ -220,6 +266,8 @@ class Command(BaseCommand):
                         "--dry-run para simular."
                     )
                     return
+                self._seed_plantillas()
+                self._migrar_inversionistas()
                 self._crear_clientes_faltantes()
                 self._migrar_ppa()
                 self._migrar_servicio()
@@ -234,12 +282,91 @@ class Command(BaseCommand):
 
     def _reset(self):
         # CASCADE del FK cubre hijos, pero borro explícito para dejar claro el alcance.
-        n = ContratoTarifa.objects.all().delete()[0]
+        n = Tarifa.objects.all().delete()[0]
+        Servicio.objects.all().delete()
         ContratoParte.objects.all().delete()
         ContratoProyecto.objects.all().delete()
-        ContratoTipo.objects.all().delete()
         m = Contrato.objects.all().delete()[0]
-        self.stdout.write(f"reset: {m} contratos y {n} tarifas borrados.")
+        # La columna nueva de participaciones y los inversionistas también se revierten
+        # (cliente_id, la columna vieja, se conserva).
+        ProyectoInversionista.objects.update(inversionista=None)
+        i = Inversionista.objects.all().delete()[0]
+        self.stdout.write(f"reset: {m} contratos, {n} tarifas y {i} inversionistas borrados.")
+
+    # -------------------------------------------------------------- catálogo
+    def _seed_plantillas(self):
+        """Crea (idempotente) el catálogo de plantillas de servicio y lo indexa por codigo."""
+        for codigo, nombre, unidad in PLANTILLAS_CATALOGO:
+            plantilla, creada = ServicioPlantilla.objects.get_or_create(
+                codigo=codigo, defaults={"nombre": nombre, "unidad_default": unidad},
+            )
+            self._plantillas[codigo] = plantilla
+            if creada:
+                self.rep["plantillas_servicio"] += 1
+
+    # --------------------------------------------------------- inversionistas
+    def _migrar_inversionistas(self):
+        """Un `Inversionista` por cada cliente que ya participa en un proyecto, y llena
+        `proyecto_inversionistas.inversionista_id` (la columna nueva). `cliente_id` queda
+        como estaba (denormalizado de transición)."""
+        cliente_ids = set(
+            ProyectoInversionista.objects.values_list("cliente_id", flat=True)
+        )
+        por_cliente: dict[int, Inversionista] = {}
+        for cid in cliente_ids:
+            if cid is None:
+                continue
+            inv, creado = Inversionista.objects.get_or_create(cliente_id=cid)
+            por_cliente[cid] = inv
+            if creado:
+                self.rep["inversionistas"] += 1
+        for cid, inv in por_cliente.items():
+            n = ProyectoInversionista.objects.filter(
+                cliente_id=cid, inversionista__isnull=True
+            ).update(inversionista=inv)
+            self.rep["participaciones_actualizadas"] += n
+        # Índice de participaciones por proyecto para resolver los vínculos de contrato.
+        for pi in ProyectoInversionista.objects.all():
+            self._participaciones[pi.proyecto_id].append(pi)
+
+    def _resolver_participacion(self, proyecto_id, cliente_id=None):
+        """La `ProyectoInversionista` a la que se ancla un vínculo contrato↔proyecto.
+
+        Si el contrato trae inversionista (servicio) se prefiere la participación de ese
+        cliente. Si no (PPA) o no coincide, se toma la participación "principal" del
+        proyecto (mayor porcentaje, desempate por menor id). None si el proyecto no tiene
+        ninguna participación registrada."""
+        parts = self._participaciones.get(proyecto_id, [])
+        if not parts:
+            return None
+        if cliente_id is not None:
+            exactas = [pi for pi in parts if pi.cliente_id == cliente_id]
+            if exactas:
+                return exactas[0]
+        return sorted(
+            parts, key=lambda pi: (-(pi.porcentaje_participacion or Decimal(-1)), pi.id)
+        )[0]
+
+    def _crear_link(self, contrato, proyecto_id, origen, cliente_id=None):
+        """Crea el vínculo contrato↔participación; lo registra si no se puede resolver."""
+        participacion = self._resolver_participacion(proyecto_id, cliente_id)
+        if participacion is None:
+            self.participaciones_no_resueltas.append((origen, proyecto_id))
+            return None
+        link, _ = ContratoProyecto.objects.get_or_create(
+            contrato=contrato, proyecto_inversionista=participacion
+        )
+        self.rep["links_proyecto"] += 1
+        return link
+
+    def _servicio(self, link, plantilla_codigo):
+        """get_or_create del `Servicio` (instancia) de una plantilla en un contrato-proyecto."""
+        servicio, creado = Servicio.objects.get_or_create(
+            contrato_proyecto=link, servicio_plantilla=self._plantillas[plantilla_codigo]
+        )
+        if creado:
+            self.rep["servicios"] += 1
+        return servicio
 
     @staticmethod
     def _leer(tabla, extra=""):
@@ -303,20 +430,19 @@ class Command(BaseCommand):
                 deleted_at=p.deleted_at,
             )
             self.map_ppa[p.id] = contrato.id
-            ContratoTipo.objects.create(
-                contrato=contrato, tipo=TipoContrato.COMPRAVENTA_ENERGIA
-            )
             self.rep["contratos_compraventa"] += 1
-            self.rep[f"tipo:{TipoContrato.COMPRAVENTA_ENERGIA}"] += 1
 
             self._parte(contrato, p.comprador_id, p.comprador_nombre, p.comprador_nit,
                         ContratoRol.COMPRADOR, ("ppa", p.id))
             self._parte(contrato, p.vendedor_id, p.vendedor_nombre, p.vendedor_nit,
                         ContratoRol.VENDEDOR, ("ppa", p.id))
 
+            # PPA: no trae inversionista; el vínculo se ancla a la participación
+            # principal de cada proyecto. Cada vínculo tiene un servicio de energía.
             for proyecto_id in proyectos_por_contrato.get(p.id, []):
-                ContratoProyecto.objects.create(contrato=contrato, proyecto_id=proyecto_id)
-                self.rep["links_proyecto"] += 1
+                link = self._crear_link(contrato, proyecto_id, ("ppa", p.id))
+                if link is not None:
+                    self._servicio(link, "energia")
 
             self._tarifas_energia(contrato, p)
 
@@ -435,15 +561,19 @@ class Command(BaseCommand):
                 wifi_password=c.wifi_password,
             )
             self.map_srv[c.id] = contrato.id
-            for t in sorted(tipos):
-                ContratoTipo.objects.create(contrato=contrato, tipo=t)
-                self.rep[f"tipo:{t}"] += 1
             self.rep["contratos_servicio"] += 1
 
             self._partes_servicio(contrato, c)
+            # Un contrato de servicio cubre una planta; el vínculo se ancla a la
+            # participación del inversionista del contrato en ese proyecto. Cada tipo
+            # (representación/CGM/O&M/…) es un servicio estructural sobre el vínculo.
             if c.proyecto_id:
-                ContratoProyecto.objects.create(contrato=contrato, proyecto_id=c.proyecto_id)
-                self.rep["links_proyecto"] += 1
+                link = self._crear_link(
+                    contrato, c.proyecto_id, ("srv", c.id), cliente_id=c.inversionista_id
+                )
+                if link is not None:
+                    for t in sorted(tipos):
+                        self._servicio(link, TIPO_A_PLANTILLA[t])
 
             if c.servicio_aplica in ("representacion", "cgm"):
                 self._tarifas_representacion(contrato, c)
@@ -553,23 +683,41 @@ class Command(BaseCommand):
 
     # ----------------------------------------------------------- inserción
     def _insertar_tarifas(self, contrato, origen_id, candidatos):
-        """Detecta solapes por concepto ANTES de insertar (el EXCLUDE los rechazaría)."""
+        """Crea las `Tarifa` de cada concepto colgadas del `Servicio` correspondiente,
+        POR cada contrato-proyecto del contrato (el modelo nuevo ancla la tarifa al
+        servicio, y el servicio al vínculo proyecto↔inversionista).
+
+        Detecta solapes por concepto ANTES de insertar (el EXCLUDE los rechazaría). Si el
+        contrato no tiene ningún vínculo resuelto, las tarifas quedan sin dónde colgar y
+        se registran en `tarifas_sin_servicio`."""
+        if not candidatos:
+            return
+        links = list(ContratoProyecto.objects.filter(contrato=contrato))
+        if not links:
+            for cand in candidatos:
+                self.tarifas_sin_servicio.append((origen_id, cand["concepto"]))
+            return
+
+        # Agrupa por concepto y descarta los conceptos con solape (dato a corregir).
+        validos: dict = {}
         por_concepto = defaultdict(list)
         for cand in candidatos:
             por_concepto[cand["concepto"]].append(cand)
         for concepto, filas in por_concepto.items():
             filas.sort(key=lambda x: (x["vigencia"].lower or dt.date.min))
-            solapa = False
-            for a, b in zip(filas, filas[1:]):
-                if self._solapan(a["vigencia"], b["vigencia"]):
-                    solapa = True
-                    break
-            if solapa:
+            if any(self._solapan(a["vigencia"], b["vigencia"])
+                   for a, b in zip(filas, filas[1:])):
                 self.solapes.append((origen_id, concepto, len(filas)))
-                continue  # no inserto ese concepto: es dato a corregir
-            for cand in filas:
-                ContratoTarifa.objects.create(contrato=contrato, **cand)
-                self.rep[f"tarifa:{concepto}:{cand['origen']}"] += 1
+                continue
+            validos[concepto] = filas
+
+        for link in links:
+            for concepto, filas in validos.items():
+                servicio = self._servicio(link, CONCEPTO_A_PLANTILLA[concepto])
+                for cand in filas:
+                    datos = {k: v for k, v in cand.items() if k != "concepto"}
+                    Tarifa.objects.create(servicio=servicio, **datos)
+                    self.rep[f"tarifa:{concepto}:{cand['origen']}"] += 1
 
     @staticmethod
     def _solapan(r1: DateRange, r2: DateRange) -> bool:
@@ -681,5 +829,16 @@ class Command(BaseCommand):
             self.stdout.write(f"    - {o}")
         self.stdout.write(f"  solapes (concepto NO insertado, dato a corregir): {len(self.solapes)}")
         for o in self.solapes:
+            self.stdout.write(f"    - {o}")
+        self.stdout.write(
+            f"  participaciones_no_resueltas (vínculo NO creado): "
+            f"{len(self.participaciones_no_resueltas)}"
+        )
+        for o in self.participaciones_no_resueltas:
+            self.stdout.write(f"    - {o}")
+        self.stdout.write(
+            f"  tarifas_sin_servicio (contrato sin vínculo): {len(self.tarifas_sin_servicio)}"
+        )
+        for o in self.tarifas_sin_servicio:
             self.stdout.write(f"    - {o}")
         self.stdout.write("")

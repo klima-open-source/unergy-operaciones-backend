@@ -211,7 +211,7 @@ def panel_360(cliente: Cliente, hoy: date | None = None) -> dict:
     plantas_de_ppa: dict[int, set[int]] = defaultdict(set)
     for contrato_id, proyecto_id in PpaContratoProyecto.objects.filter(
         contrato_id__in=[c.id for c in ppas]
-    ).values_list("contrato_id", "proyecto_id"):
+    ).values_list("contrato_id", "proyecto_inversionista__proyecto_id"):
         plantas_de_ppa[contrato_id].add(proyecto_id)
 
     proyecto_ids = {r.proyecto_id for r in participaciones}

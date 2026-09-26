@@ -420,10 +420,11 @@ class ClienteViewSet(viewsets.GenericViewSet):
             )
         anotar(
             PpaContratoProyecto.objects
-            .filter(proyecto_id__in=ids, contrato__deleted_at__isnull=True)
+            .filter(proyecto_inversionista__proyecto_id__in=ids,
+                    contrato__deleted_at__isnull=True)
             .filter(Q(contrato__comprador_id=cliente_id)
                     | Q(contrato__vendedor_id=cliente_id))
-            .values_list("proyecto_id", flat=True),
+            .values_list("proyecto_inversionista__proyecto_id", flat=True),
             "ppa",
         )
         return roles

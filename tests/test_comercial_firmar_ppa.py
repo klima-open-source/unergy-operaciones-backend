@@ -82,6 +82,15 @@ def datos():
         Proyecto.objects.create(nombre_comercial="Balmora 1"),
         Proyecto.objects.create(nombre_comercial="Balmora 2"),
     ]
+    # `contrato_proyectos` ancla a la participación proyecto↔inversionista, así que
+    # firmar un PPA exige que cada planta tenga una participación registrada.
+    from apps.proyectos.models import Inversionista, ProyectoInversionista
+
+    inversionista = Inversionista.objects.create(cliente=generador)
+    for p in plantas:
+        ProyectoInversionista.objects.create(
+            proyecto=p, cliente=generador, inversionista=inversionista
+        )
     oportunidad = Oportunidad.objects.create(
         cliente_id=generador.id, nombre="Balmora", estado="oferta"
     )
@@ -149,7 +158,7 @@ def test_se_vinculan_TODAS_las_plantas_de_la_oferta(datos):
     vinculadas = set(
         PpaContratoProyecto.objects
         .filter(contrato_id=resultado.contrato.id)
-        .values_list("proyecto_id", flat=True)
+        .values_list("proyecto_inversionista__proyecto_id", flat=True)
     )
     assert vinculadas == {p.id for p in datos["plantas"]}
     assert resultado.plantas == 2

@@ -7,7 +7,7 @@ asic_reglas.py::validar_fecha_fin_vs_ppa`: las dos tienen que decir lo mismo.
 
 from datetime import date
 
-from django.db.models import Q
+from django.db.models import F, Q
 
 from apps.clientes import models as cl_models
 from apps.mercado_xm import models as mx_models
@@ -90,15 +90,42 @@ def razones_para_no_borrar(contrato) -> list[str]:
     return razones
 
 
+def _participacion_de_proyecto(proyecto_id: int):
+    """La participación (`ProyectoInversionista`) a la que se ancla un vínculo
+    contrato↔proyecto.
+
+    `contrato_proyectos` ya no apunta al proyecto directo sino a la participación
+    proyecto↔inversionista (rediseño 2026-09-25). Un PPA no trae inversionista, así
+    que se elige de forma determinista la participación "principal" del proyecto: la
+    de mayor porcentaje, y como desempate la de menor id. Si el proyecto no tiene
+    ninguna participación registrada no se puede crear el vínculo."""
+    from apps.proyectos.models import ProyectoInversionista
+
+    return (
+        ProyectoInversionista.objects
+        .filter(proyecto_id=proyecto_id)
+        .order_by(F("porcentaje_participacion").desc(nulls_last=True), "id")
+        .first()
+    )
+
+
 def fijar_proyectos(contrato, proyecto_ids: list[int]) -> None:
     """Reemplaza el conjunto de proyectos del contrato."""
     ppa_models.PpaContratoProyecto.objects.filter(contrato=contrato).delete()
     if not proyecto_ids:
         return
-    ppa_models.PpaContratoProyecto.objects.bulk_create([
-        ppa_models.PpaContratoProyecto(contrato=contrato, proyecto_id=pid)
-        for pid in proyecto_ids
-    ])
+    vinculos = []
+    for pid in proyecto_ids:
+        participacion = _participacion_de_proyecto(pid)
+        if participacion is None:
+            raise ReglaPpa(
+                f"El proyecto {pid} no tiene ninguna participación de inversionista "
+                "registrada; regístrala antes de vincularlo a este contrato."
+            )
+        vinculos.append(ppa_models.PpaContratoProyecto(
+            contrato=contrato, proyecto_inversionista=participacion,
+        ))
+    ppa_models.PpaContratoProyecto.objects.bulk_create(vinculos)
 
 
 # ---------------------------------------------------------------------------

@@ -76,7 +76,7 @@ def _proyectos_por_contrato_ppa(contrato_ids: list[int]) -> dict[int, list[Proye
     vinculos = (
         PpaContratoProyecto.objects
         .filter(contrato_id__in=contrato_ids)
-        .values_list("contrato_id", "proyecto_id")
+        .values_list("contrato_id", "proyecto_inversionista__proyecto_id")
     )
     por_contrato: dict[int, list[int]] = defaultdict(list)
     for contrato_id, proyecto_id in vinculos:

@@ -58,10 +58,10 @@ def _con_relaciones():
         .select_related("operador_red", "portafolio")
         .prefetch_related(
             "inversionistas__cliente",
+            "inversionistas__contrato_proyectos__contrato",
             "info_tecnica",
             "inversores",
             "area_contactos__cliente",
-            "contratos_ppa__contrato",
             "fronteras__operador_red",
         )
     )
@@ -93,7 +93,7 @@ def _filtro_ppa(request):
         return None
 
     vinculos_vivos = PpaContratoProyecto.objects.filter(
-        proyecto_id=OuterRef("pk"), contrato__deleted_at__isnull=True,
+        proyecto_inversionista__proyecto_id=OuterRef("pk"), contrato__deleted_at__isnull=True,
     )
     condicion = Q()
     if ppa_ids:

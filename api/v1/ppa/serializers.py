@@ -47,9 +47,9 @@ class ContratoSerializer(serializers.ModelSerializer):
     comprador_id = serializers.IntegerField(allow_null=True)
     vendedor_id = serializers.IntegerField(allow_null=True)
     proyectos = serializers.SerializerMethodField()
-    # `tarifas_ppa` es la relación de PpaTarifa (tabla ppa_tarifas). En el proxy sobre
-    # `contratos`, `.tarifas` es ContratoTarifa (el modelo nuevo versionado), así que se
-    # apunta explícito a la serie mensual del PPA.
+    # `tarifas_ppa` es la relación de PpaTarifa (tabla ppa_tarifas), la serie mensual
+    # del PPA. Se apunta explícito para no confundirla con el modelo de tarifas nuevo
+    # (Tarifa, por Servicio), que aún no se cablea a esta lectura.
     tarifas = TarifaSerializer(source="tarifas_ppa", many=True, read_only=True)
     compromisos_energia = CompromisoSerializer(
         source="compromisos", many=True, read_only=True
@@ -81,15 +81,17 @@ class ContratoSerializer(serializers.ModelSerializer):
         ]
 
     def get_proyectos(self, obj) -> list:
-        return [
-            {
-                "id": v.proyecto_id,
-                "nombre_comercial": (
-                    v.proyecto.nombre_comercial if v.proyecto else None
-                ),
-            }
-            for v in obj.proyectos.all()
-        ]
+        # `contrato.proyectos` ancla a la participación proyecto↔inversionista;
+        # el proyecto se lee por `.proyecto_inversionista.proyecto` (precargado).
+        salida = []
+        for v in obj.proyectos.all():
+            pi = v.proyecto_inversionista
+            proyecto = pi.proyecto if pi else None
+            salida.append({
+                "id": proyecto.id if proyecto else None,
+                "nombre_comercial": proyecto.nombre_comercial if proyecto else None,
+            })
+        return salida
 
     def get_carpeta_link(self, obj) -> str | None:
         """El enlace de Drive vive como documento comercial `tipo='contrato'`.
