@@ -547,28 +547,14 @@ def test_asignar_no_toca_los_contratos_borrados(datos):
 # tres decisiones que la función toma, y que antes dependían de por dónde
 # entrara el contrato (ver `apps/ppa/services/escritura.py`).
 
-def _planta_con_participacion(nombre):
-    """Una planta con una participación de inversionista, requisito para vincularla
-    a un contrato (`contrato_proyectos` ancla a `proyecto_inversionista`)."""
-    from apps.clientes.models import Cliente
-    from apps.proyectos.models import Inversionista, Proyecto, ProyectoInversionista
-
-    planta = Proyecto.objects.create(nombre_comercial=nombre)
-    cliente = Cliente.objects.create(razon_social_nombre=f"Inversionista {nombre}")
-    inversionista = Inversionista.objects.create(cliente=cliente)
-    ProyectoInversionista.objects.create(
-        proyecto=planta, cliente=cliente, inversionista=inversionista
-    )
-    return planta
-
-
 def test_el_contrato_se_crea_completo_en_una_transaccion(datos):
     """Contrato, plantas, tarifas y compromisos de un solo golpe. Antes eran
     tres peticiones sin transacción común, y de ahí salieron 13 contratos sin
     tarifas y 14 sin compromisos."""
     from apps.ppa.models import PpaCompromisoEnergia, PpaContratoProyecto, PpaTarifa
+    from apps.proyectos.models import Proyecto
 
-    planta = _planta_con_participacion("Planta Uno")
+    planta = Proyecto.objects.create(nombre_comercial="Planta Uno")
 
     respuesta = _crear(datos, {
         **CUERPO_MINIMO,
@@ -613,7 +599,9 @@ def test_la_respuesta_avisa_de_lo_que_quedo_cojo(datos):
 
 
 def test_un_contrato_completo_no_trae_avisos(datos):
-    planta = _planta_con_participacion("Planta Dos")
+    from apps.proyectos.models import Proyecto
+
+    planta = Proyecto.objects.create(nombre_comercial="Planta Dos")
 
     respuesta = _crear(datos, {
         **CUERPO_MINIMO,

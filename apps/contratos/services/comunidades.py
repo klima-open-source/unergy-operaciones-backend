@@ -65,7 +65,7 @@ def plantas_en_comunidad(hoy: date) -> set[int]:
     return set(
         PpaContratoProyecto.objects
         .filter(contrato__in=de_comunidad)
-        .values_list("proyecto_inversionista__proyecto_id", flat=True)
+        .values_list("proyecto_id", flat=True)
     )
 
 

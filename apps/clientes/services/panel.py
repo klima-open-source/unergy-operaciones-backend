@@ -82,7 +82,7 @@ def proyectos_por_cliente(cliente_ids: set[int]) -> dict[int, set[int]]:
             Q(contrato__comprador_id__in=cliente_ids)
             | Q(contrato__vendedor_id__in=cliente_ids)
         )
-        .values_list("contrato__comprador_id", "contrato__vendedor_id", "proyecto_inversionista__proyecto_id")
+        .values_list("contrato__comprador_id", "contrato__vendedor_id", "proyecto_id")
     )
     for comprador_id, vendedor_id, pid in filas_ppa:
         if comprador_id in cliente_ids:

@@ -930,7 +930,7 @@ def _proyectos_por_ppa(ppa_ids: set[int]) -> dict[int, list]:
     por_contrato: dict[int, list[int]] = {}
     for contrato_id, proyecto_id in PpaContratoProyecto.objects.filter(
         contrato_id__in=ppa_ids
-    ).values_list("contrato_id", "proyecto_inversionista__proyecto_id"):
+    ).values_list("contrato_id", "proyecto_id"):
         por_contrato.setdefault(contrato_id, []).append(proyecto_id)
 
     proyectos = _proyectos_por_id(
@@ -1491,10 +1491,10 @@ def _ppas_de_proyectos(proyecto_ids: set[int]) -> dict[int, list]:
     salida: dict[int, list] = {}
     for vinculo in (
         PpaContratoProyecto.objects
-        .filter(proyecto_inversionista__proyecto_id__in=proyecto_ids, contrato__deleted_at__isnull=True)
-        .select_related("contrato", "proyecto_inversionista")
+        .filter(proyecto_id__in=proyecto_ids, contrato__deleted_at__isnull=True)
+        .select_related("contrato")
     ):
-        salida.setdefault(vinculo.proyecto_inversionista.proyecto_id, []).append(vinculo.contrato)
+        salida.setdefault(vinculo.proyecto_id, []).append(vinculo.contrato)
     return salida
 
 

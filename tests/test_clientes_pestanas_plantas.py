@@ -109,22 +109,6 @@ def _inversionista(cliente, proyecto):
     return ProyectoInversionista.objects.create(cliente=cliente, proyecto=proyecto)
 
 
-def _participacion(proyecto):
-    """La participación proyecto↔inversionista a la que ancla un vínculo de contrato
-    (una por proyecto). Reutiliza la existente para no duplicarla."""
-    from apps.clientes.models import Cliente
-    from apps.proyectos.models import Inversionista, ProyectoInversionista
-
-    existente = ProyectoInversionista.objects.filter(proyecto=proyecto).first()
-    if existente is not None:
-        return existente
-    cliente = Cliente.objects.create(razon_social_nombre=f"Inversionista {proyecto.id}")
-    inversionista = Inversionista.objects.create(cliente=cliente)
-    return ProyectoInversionista.objects.create(
-        proyecto=proyecto, cliente=cliente, inversionista=inversionista
-    )
-
-
 def _contrato_servicio(proyecto, **kw):
     from apps.contratos.models import ContratoServicio
 
@@ -136,9 +120,7 @@ def _ppa_con_planta(cliente, proyecto, como="comprador"):
     from apps.ppa.models import PpaContrato, PpaContratoProyecto
 
     contrato = PpaContrato.objects.create(**{f"{como}_id": cliente.id})
-    PpaContratoProyecto.objects.create(
-        contrato=contrato, proyecto_inversionista=_participacion(proyecto)
-    )
+    PpaContratoProyecto.objects.create(contrato=contrato, proyecto=proyecto)
     return contrato
 
 

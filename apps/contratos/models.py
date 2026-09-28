@@ -171,11 +171,11 @@ class PgExclusionConstraint(ExclusionConstraint):
 class TipoContrato(models.TextChoices):
     """Tipos ATÓMICOS de servicio que puede tener un contrato.
 
-    Un contrato puede tener VARIOS conceptos tarifables, modelados como `Servicio`
-    (instancias de `ServicioPlantilla`) por contrato-proyecto: así O&M es un contrato
-    con {operacion, mantenimiento} y representación uno con {representacion, cgm}, sin
-    inventar valores combinados. Este enum se conserva como vocabulario de referencia
-    para `servicio_aplica` y las plantillas."""
+    Un contrato puede tener VARIOS (ver el modelo `ContratoTipo`, tabla puente
+    `contrato_tipos`): así O&M es un contrato con {operacion, mantenimiento} y
+    representación uno con {representacion, cgm}, sin inventar valores combinados.
+    La administración NO es un tipo: es un concepto de tarifa (TarifaConcepto) del
+    contrato de representación."""
 
     REPRESENTACION = "representacion", "Representación"
     CGM = "cgm", "CGM"
@@ -251,18 +251,17 @@ class Contrato(Timer):
     """Acuerdo entre partes sobre una o varias plantas — la ÚNICA tabla de contratos.
 
     Reemplaza a `ppa_contratos` y `contratos_servicio`: un contrato de cualquier tipo
-    (PPA, representación, O&M, arriendo) es una fila acá. Los conceptos tarifables de
-    un contrato (representación, CGM, mantenimiento…) se modelan por
-    contrato-proyecto como `Servicio` (instancia de `ServicioPlantilla`); ya no hay
-    tabla puente de tipos.
+    (PPA, representación, O&M, arriendo) es una fila acá. Los TIPOS van en la tabla
+    puente `contrato_tipos` (un contrato puede tener varios: representación + CGM, u
+    operación + mantenimiento); se llega a ellos por `contrato.tipos`.
 
     Es una tabla ANCHA a propósito (decisión del usuario 2026-09-24): los atributos
     escalares específicos de cada tipo son columnas nullable acá. Lo que NO son columnas:
-    - precios/indexación versionados -> `Tarifa` (por `Servicio`, con vigencia);
+    - precios/indexación versionados -> `contrato_tarifas` (por concepto, con vigencia);
     - partes (comprador/vendedor/contratante/prestador) -> `contrato_partes` (los
       `*_nombre`/`*_nit` se conservan como copia denormalizada mientras se migran los
       lectores);
-    - participaciones proyecto↔inversionista cubiertas -> `contrato_proyectos`."""
+    - plantas cubiertas -> `contrato_proyectos`."""
 
     id = models.BigAutoField(primary_key=True)
     estado = models.CharField(
@@ -407,6 +406,24 @@ class Contrato(Timer):
         ]
 
 
+class ContratoTipo(models.Model):
+    """Un tipo de servicio de un contrato (tabla puente `contrato_tipos`).
+
+    Un contrato puede tener varias filas acá: representación + CGM en el mismo
+    contrato, u operación + mantenimiento en el mismo (O&M). Evita tener que inventar
+    valores de enum combinados. Se accede por `contrato.tipos`."""
+
+    contrato = models.ForeignKey(
+        "contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_id",
+        related_name="tipos",
+    )
+    tipo = models.CharField(max_length=19, choices=TipoContrato.choices)
+    pk = models.CompositePrimaryKey("contrato_id", "tipo")
+
+    class Meta:
+        db_table = "contrato_tipos"
+
+
 class ContratoParte(models.Model):
     """Qué papel juega cada cliente en un contrato; reemplaza las columnas
     contratante/prestador/comprador/vendedor. El DDL solo tiene `created_at`, así
@@ -435,135 +452,41 @@ class ContratoParte(models.Model):
 
 
 class ContratoProyecto(models.Model):
-    """Qué participación proyecto↔inversionista cubre un contrato (fiel al diagrama).
+    """Qué plantas cubre un contrato (N:M); unifica el escalar de contratos_servicio
+    y la N:M de los PPA. Espejo de PpaContratoProyecto."""
 
-    El contrato ya no apunta al proyecto directo, sino a la PARTICIPACIÓN de un
-    inversionista en el proyecto (`ProyectoInversionista`). Se llega al proyecto por
-    `contrato_proyecto.proyecto_inversionista.proyecto`. Es el ancla de `Servicio`
-    (los conceptos tarifables de este contrato sobre esa participación)."""
-
-    id = models.BigAutoField(primary_key=True)
     contrato = models.ForeignKey(
         "contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_id",
         related_name="proyectos",
     )
-    proyecto_inversionista = models.ForeignKey(
-        "proyectos.ProyectoInversionista", on_delete=models.PROTECT,
-        db_column="proyecto_inversionista_id", related_name="contrato_proyectos",
+    proyecto = models.ForeignKey(
+        "proyectos.Proyecto", on_delete=models.CASCADE, db_column="proyecto_id",
+        related_name="contratos_ppa",
     )
+    pk = models.CompositePrimaryKey("contrato_id", "proyecto_id")
 
     class Meta:
         db_table = "contrato_proyectos"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["contrato", "proyecto_inversionista"],
-                name="uq_contrato_proyectos",
-            ),
-        ]
 
 
-class ServicioPlantilla(Timer):
-    """Catálogo de conceptos tarifables (una plantilla de servicio).
+class ContratoTarifa(models.Model):
+    """Qué se cobra en un contrato, por concepto y CON VIGENCIA (D-24).
 
-    Un `Servicio` (instancia) en un contrato-proyecto se crea a partir de una de
-    estas plantillas: administración, CGM, representación, mantenimiento, arriendo,
-    internet, energía. Es el vocabulario estable de lo que se puede cobrar."""
+    Las tarifas se renegocian e indexan cada año: la misma CGM de Ayura 1 vale 5,0 en
+    2024, 5,26 en 2025 y 5,52826 en 2026. La `vigencia` (rango [desde, hasta)) permite
+    que la liquidación de un periodo use la tarifa vigente EN ese periodo, no la actual.
 
-    id = models.BigAutoField(primary_key=True)
-    codigo = models.CharField(max_length=20, unique=True)
-    nombre = models.CharField(max_length=120)
-    unidad_default = models.CharField(
-        max_length=10, choices=TarifaUnidad.choices, null=True, blank=True
-    )
-    descripcion = models.TextField(null=True, blank=True)
-    activo = models.BooleanField(default=True)
-
-    class Meta:
-        db_table = "servicio_plantillas"
-
-
-class TarifaPlantilla(Timer):
-    """Valor sugerido para un servicio (plantilla de tarifa).
-
-    Varias plantillas pueden ser elegibles para un mismo servicio (p. ej. la CGM
-    por año, o por tipo de cliente). Al instanciar un `Servicio` se copia una de
-    estas a una `Tarifa` concreta (`tarifa_plantilla_origen`), que a partir de ahí
-    vive su propia vida (vigencia/histórico)."""
-
-    id = models.BigAutoField(primary_key=True)
-    servicio_plantilla = models.ForeignKey(
-        "contratos.ServicioPlantilla", on_delete=models.CASCADE,
-        db_column="servicio_plantilla_id", related_name="tarifas_plantilla",
-    )
-    nombre = models.CharField(max_length=120)
-    valor = models.DecimalField(max_digits=14, decimal_places=6)
-    unidad = models.CharField(max_length=10, choices=TarifaUnidad.choices)
-    indice = models.CharField(max_length=20, null=True, blank=True)
-    anio = models.IntegerField(null=True, blank=True)
-    activa = models.BooleanField(default=True)
-
-    class Meta:
-        db_table = "tarifa_plantillas"
-        constraints = [
-            models.CheckConstraint(
-                name="ck_tarifa_plantillas_valor", condition=Q(valor__gte=0)
-            ),
-            models.CheckConstraint(
-                name="ck_tarifa_plantillas_pct",
-                condition=~Q(unidad=TarifaUnidad.PORCENTAJE) | Q(valor__lte=1),
-            ),
-        ]
-
-
-class Servicio(Timer):
-    """Un concepto tarifable ACTIVO en un contrato-proyecto (instancia de plantilla).
-
-    Al escoger un servicio (plantilla) en un contrato-proyecto se crea una fila acá;
-    sus valores en el tiempo son `Tarifa` (`servicio.tarifas`, con vigencia)."""
-
-    id = models.BigAutoField(primary_key=True)
-    contrato_proyecto = models.ForeignKey(
-        "contratos.ContratoProyecto", on_delete=models.CASCADE,
-        db_column="contrato_proyecto_id", related_name="servicios",
-    )
-    servicio_plantilla = models.ForeignKey(
-        "contratos.ServicioPlantilla", on_delete=models.PROTECT,
-        db_column="servicio_plantilla_id", related_name="servicios",
-    )
-    activo = models.BooleanField(default=True)
-    fecha_inicio = models.DateField(null=True, blank=True)
-    fecha_fin = models.DateField(null=True, blank=True)
-
-    class Meta:
-        db_table = "servicios"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["contrato_proyecto", "servicio_plantilla"],
-                name="uq_servicios_contrato_proyecto_plantilla",
-            ),
-        ]
-
-
-class Tarifa(models.Model):
-    """Qué se cobra por un `Servicio`, CON VIGENCIA (D-24), reemplaza contrato_tarifas.
-
-    Las tarifas se renegocian e indexan cada año: la misma CGM vale 5,0 en 2024,
-    5,26 en 2025… La `vigencia` (rango [desde, hasta)) permite que la liquidación de
-    un periodo use la tarifa vigente EN ese periodo. La base es la fila con
-    `origen='pactada'`. Una tarifa cargada por error se ANULA (anulada_en/motivo), no
-    se borra. Las anuladas salen del EXCLUDE de no-solape. El DDL solo tiene
+    La base es la fila con `origen='pactada'` (no hay columna `es_base`). Una tarifa
+    cargada por error se ANULA (anulada_en/motivo), no se borra: el histórico completo es
+    el requisito. Las anuladas salen del EXCLUDE de no-solape. El DDL solo tiene
     `created_at`, así que NO hereda Timer."""
 
     id = models.BigAutoField(primary_key=True)
-    servicio = models.ForeignKey(
-        "contratos.Servicio", on_delete=models.CASCADE, db_column="servicio_id",
+    contrato = models.ForeignKey(
+        "contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_id",
         related_name="tarifas",
     )
-    tarifa_plantilla_origen = models.ForeignKey(
-        "contratos.TarifaPlantilla", on_delete=models.SET_NULL,
-        db_column="tarifa_plantilla_origen_id", null=True, blank=True,
-        related_name="tarifas_instanciadas",
-    )
+    concepto = models.CharField(max_length=14, choices=TarifaConcepto.choices)
     valor = models.DecimalField(max_digits=14, decimal_places=6)
     # Obligatoria: administración es un porcentaje y CGM es COP/kWh, y en las columnas
     # de hoy son indistinguibles.
@@ -578,31 +501,31 @@ class Tarifa(models.Model):
     anulada_motivo = models.TextField(null=True, blank=True)
     anulada_por = models.ForeignKey(
         "plataforma.Usuario", on_delete=models.SET_NULL, db_column="anulada_por_id",
-        null=True, blank=True, related_name="tarifas_srv_anuladas",
+        null=True, blank=True, related_name="tarifas_anuladas",
     )
     registrado_por = models.ForeignKey(
         "plataforma.Usuario", on_delete=models.SET_NULL, db_column="registrado_por_id",
-        null=True, blank=True, related_name="tarifas_srv_registradas",
+        null=True, blank=True, related_name="tarifas_registradas",
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = "tarifas"
+        db_table = "contrato_tarifas"
         constraints = [
             models.CheckConstraint(
-                name="ck_tarifas_valor", condition=Q(valor__gte=0)
+                name="ck_contrato_tarifas_valor", condition=Q(valor__gte=0)
             ),
             PgCheckConstraint(
-                name="ck_tarifas_vigencia", condition=Q(vigencia__isempty=False)
+                name="ck_contrato_tarifas_vigencia", condition=Q(vigencia__isempty=False)
             ),
             # Un porcentaje se guarda como fracción (<= 1).
             models.CheckConstraint(
-                name="ck_tarifas_pct",
+                name="ck_contrato_tarifas_pct",
                 condition=~Q(unidad=TarifaUnidad.PORCENTAJE) | Q(valor__lte=1),
             ),
             # Solo `indexacion` lleva índice/porcentaje; el resto los deja en NULL.
             models.CheckConstraint(
-                name="ck_tarifas_indice",
+                name="ck_contrato_tarifas_indice",
                 condition=(
                     (Q(origen=TarifaOrigen.INDEXACION) & Q(indice__isnull=False))
                     | (
@@ -614,22 +537,24 @@ class Tarifa(models.Model):
             ),
             # Lo migrado debe decir por qué su fecha es incierta.
             models.CheckConstraint(
-                name="ck_tarifas_migracion",
+                name="ck_contrato_tarifas_migracion",
                 condition=~Q(origen=TarifaOrigen.MIGRACION) | Q(nota__isnull=False),
             ),
             models.CheckConstraint(
-                name="ck_tarifas_anulada",
+                name="ck_contrato_tarifas_anulada",
                 condition=(
                     (Q(anulada_en__isnull=True) & Q(anulada_motivo__isnull=True))
                     | (Q(anulada_en__isnull=False) & Q(anulada_motivo__isnull=False))
                 ),
             ),
-            # Un servicio no puede tener dos valores vigentes a la vez. Las anuladas
-            # quedan fuera.
+            # Un concepto no puede tener dos valores vigentes a la vez en el mismo
+            # contrato. Las anuladas quedan fuera. Mismo mecanismo que protegerá la
+            # composición accionaria (D-08).
             PgExclusionConstraint(
-                name="ex_tarifas_sin_solape",
+                name="ex_contrato_tarifas_sin_solape",
                 expressions=[
-                    ("servicio", RangeOperators.EQUAL),
+                    ("contrato", RangeOperators.EQUAL),
+                    ("concepto", RangeOperators.EQUAL),
                     ("vigencia", RangeOperators.OVERLAPS),
                 ],
                 condition=Q(anulada_en__isnull=True),

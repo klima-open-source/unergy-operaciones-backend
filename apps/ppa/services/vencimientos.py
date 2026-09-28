@@ -136,7 +136,7 @@ def revisar_vencimientos() -> list[int]:
         PpaContrato.objects.filter(
             fecha_fin__isnull=False, fecha_fin__gte=hoy, fecha_fin__lte=horizonte,
             deleted_at__isnull=True,
-        ).prefetch_related("proyectos__proyecto_inversionista__proyecto")
+        ).prefetch_related("proyectos__proyecto")
     )
     if not contratos:
         return []
@@ -155,10 +155,9 @@ def revisar_vencimientos() -> list[int]:
         if umbral is None or (ppa.id, umbral) in ya_alertadas:
             continue
 
-        # Un PPA se vincula a 0..N proyectos (vía participación); se toma el primero.
+        # Un PPA se vincula a 0..N proyectos; se toma el primero si existe.
         vinculos = list(ppa.proyectos.all())
-        primera = vinculos[0].proyecto_inversionista if vinculos else None
-        proyecto = primera.proyecto if primera else None
+        proyecto = vinculos[0].proyecto if vinculos else None
         if proyecto is None:
             logger.warning(
                 "PPA %s (%s) sin ningún proyecto vinculado — la alerta se crea "

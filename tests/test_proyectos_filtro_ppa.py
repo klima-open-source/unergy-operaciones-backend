@@ -106,28 +106,10 @@ def _contrato(**kw):
     return PpaContrato.objects.create(**kw)
 
 
-def _participacion(proyecto):
-    """La participación proyecto↔inversionista a la que ancla el vínculo (una por
-    proyecto). `contrato_proyectos` ya no apunta al proyecto directo."""
-    from apps.clientes.models import Cliente
-    from apps.proyectos.models import Inversionista, ProyectoInversionista
-
-    existente = ProyectoInversionista.objects.filter(proyecto=proyecto).first()
-    if existente is not None:
-        return existente
-    cliente = Cliente.objects.create(razon_social_nombre=f"Inversionista {proyecto.id}")
-    inversionista = Inversionista.objects.create(cliente=cliente)
-    return ProyectoInversionista.objects.create(
-        proyecto=proyecto, cliente=cliente, inversionista=inversionista
-    )
-
-
 def _vincular(proyecto, contrato):
     from apps.ppa.models import PpaContratoProyecto
 
-    PpaContratoProyecto.objects.create(
-        proyecto_inversionista=_participacion(proyecto), contrato=contrato
-    )
+    PpaContratoProyecto.objects.create(proyecto=proyecto, contrato=contrato)
 
 
 def test_filtra_por_un_contrato_ppa_especifico(datos):

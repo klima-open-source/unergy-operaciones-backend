@@ -73,7 +73,7 @@ class Command(BaseCommand):
         con_ppa = {
             pid for pid in PpaContratoProyecto.objects
             .filter(contrato__in=ppa_vivos)
-            .values_list("proyecto_inversionista__proyecto_id", flat=True) if pid in plantas
+            .values_list("proyecto_id", flat=True) if pid in plantas
         }
 
         self.stdout.write(f"Plantas vivas: {len(plantas)}\n")

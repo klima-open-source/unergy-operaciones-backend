@@ -85,10 +85,10 @@ def _contratos_por_proyecto(proyecto_ids: list[int]) -> dict[int, list[str]]:
     salida: dict[int, list[str]] = {}
     filas = (
         PpaContratoProyecto.objects
-        .filter(proyecto_inversionista__proyecto_id__in=proyecto_ids)
+        .filter(proyecto_id__in=proyecto_ids)
         .select_related("contrato")
         .values_list(
-            "proyecto_inversionista__proyecto_id", "contrato__nombre_interno",
+            "proyecto_id", "contrato__nombre_interno",
             "contrato__numero_codigo_contrato",
         )
     )
