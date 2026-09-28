@@ -30,7 +30,7 @@ from apps.mercado_xm.services.gescon_vigencia import resolver_vigencias
 from apps.plataforma.services.fechas import hoy_col
 from apps.ppa.models import PpaContrato, PpaResponsable
 
-from .periodos import UNGC_COMERCIALIZADOR
+from .periodos import UNGC_COMERCIALIZADOR, _recortar, _restar_intervalos
 
 # Los tres filtros que se repiten en cada consulta a GESCON: publicada y sin
 # contar los desistimientos. Escribirlos una vez evita que una consulta nueva
@@ -245,6 +245,42 @@ def _clasificar_remanente_bolsa(proyecto_id: int, first_day: date, last_day: dat
     if asic is not None:
         return "comercializador", asic
     return "libre", None
+
+
+def _ventanas_ungc(proyecto_id: int, ini: date, fin: date) -> list[tuple]:
+    """Días del tramo [ini, fin] en que la planta tiene un SIC vigente con UNGC
+    de comprador: `[(desde, hasta, asic, fin_efectivo), ...]` en orden.
+
+    Es el reemplazo por días de `_clasificar_remanente_bolsa`, que decidía el
+    tramo ENTERO por la existencia de un SIC: una planta con UNGC desde el 23 (o
+    hasta el 12) salía UNGC el mes completo. Aquí cada SIC cubre solo su
+    vigencia real —fin EFECTIVO, que descuenta terminaciones y relevos— y dos
+    SIC que se pisen no cuentan el mismo día dos veces: gana el que empezó
+    antes. Lo que no cubre ninguno es bolsa libre.
+    """
+    asics = (
+        AsicSolicitud.objects
+        .filter(
+            GESCON_PUBLICADA,
+            proyecto_id=proyecto_id,
+            codigo_sic_contrato__isnull=False,
+            codigo_sic_comprador=UNGC_COMERCIALIZADOR,
+        )
+        .exclude(tipo_solicitud="terminacion")
+        .filter(Q(fecha_inicio__isnull=True) | Q(fecha_inicio__lte=fin))
+        .filter(Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=ini))
+        .order_by(_asc_nulls_first("fecha_inicio"), "id")
+    )
+    ventanas, cubiertos = [], []
+    for asic in asics:
+        fin_efectivo = _fin_efectivo_asic(asic, fin) or asic.fecha_fin
+        tramo = _recortar(asic.fecha_inicio, fin_efectivo, ini, fin)
+        if tramo is None:
+            continue
+        for desde, hasta in _restar_intervalos(tramo, cubiertos):
+            ventanas.append((desde, hasta, asic, fin_efectivo))
+        cubiertos.append(tramo)
+    return sorted(ventanas, key=lambda v: v[0])
 
 
 

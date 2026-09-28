@@ -31,9 +31,9 @@ from apps.ppa.models import PpaContratoProyecto
 from apps.proyectos.models import Proyecto
 
 from .consultas import (
-    GESCON_PUBLICADA, _asc_nulls_first, _clasificar_remanente_bolsa,
-    _contratos_venta_ocultos, _contratos_vigentes, _fin_efectivo_asic, _query_contratos_venta,
-    _resolve_gescon,
+    GESCON_PUBLICADA, _asc_nulls_first,
+    _contratos_venta_ocultos, _contratos_vigentes, _query_contratos_venta,
+    _resolve_gescon, _ventanas_ungc,
 )
 from .periodos import (
     UNGC_COMERCIALIZADOR, _con_segmento, _estado_segmento, _fecha_corte,
@@ -277,27 +277,36 @@ def plantas_contratos(year: int, month: int, incluir_todos: bool = False) -> dic
             p.fecha_inicio_comercializacion, p.fecha_fin_representacion, first_day, last_day
         )
         for seg_ini, seg_fin in _restar_intervalos(operativa, assigned_windows.get(p.id) or []):
-            # La modalidad se evalúa SOBRE EL TRAMO, no sobre el mes: una planta
-            # que salió de contrato el 23 se juzga por lo que tenga del 24 al 31.
-            piscina, asic = _clasificar_remanente_bolsa(p.id, seg_ini, seg_fin)
-            fin_efectivo = _fin_efectivo_asic(asic, seg_fin) if asic else None
-            entry = {
-                "id": p.id,
-                "nombre": p.nombre_comercial,
-                "piscina": piscina,
-                "codigo_sic": asic.codigo_sic_contrato if asic else None,
-                "codigo_sic_comprador": asic.codigo_sic_comprador if asic else None,
-                # Ventana de la modalidad: inicio del registro SIC y fin EFECTIVO
-                # (recortado por relevos). Nulos en la piscina libre — ahí la
-                # ventana que importa es el propio tramo (segmento_*).
-                "fecha_inicio": asic.fecha_inicio.isoformat() if asic and asic.fecha_inicio else None,
-                "fecha_fin": fin_efectivo.isoformat() if fin_efectivo else None,
-                "segmento_inicio": seg_ini.isoformat(),
-                "segmento_fin": seg_fin.isoformat(),
-                "estado": _estado_segmento(seg_ini, seg_fin, corte),
-            }
-            bolsa_plantas.append(entry)
-            (bolsa_comercializador if piscina == "comercializador" else bolsa_libre).append(entry)
+            # La modalidad se evalúa POR DÍA, no por tramo: los días que cubre un
+            # SIC con UNGC (según su vigencia real) son comercializador y el
+            # resto es libre. Antes un solo día de UNGC marcaba el tramo entero.
+            ungc = _ventanas_ungc(p.id, seg_ini, seg_fin)
+            partes = [(desde, hasta, asic, fin_ef) for desde, hasta, asic, fin_ef in ungc]
+            partes += [
+                (desde, hasta, None, None)
+                for desde, hasta in _restar_intervalos(
+                    (seg_ini, seg_fin), [(v[0], v[1]) for v in ungc]
+                )
+            ]
+            for desde, hasta, asic, fin_efectivo in sorted(partes, key=lambda x: x[0]):
+                piscina = "comercializador" if asic else "libre"
+                entry = {
+                    "id": p.id,
+                    "nombre": p.nombre_comercial,
+                    "piscina": piscina,
+                    "codigo_sic": asic.codigo_sic_contrato if asic else None,
+                    "codigo_sic_comprador": asic.codigo_sic_comprador if asic else None,
+                    # Ventana de la modalidad: inicio del registro SIC y fin EFECTIVO
+                    # (recortado por relevos y terminaciones). Nulos en la piscina
+                    # libre — ahí la ventana que importa es el propio tramo.
+                    "fecha_inicio": asic.fecha_inicio.isoformat() if asic and asic.fecha_inicio else None,
+                    "fecha_fin": fin_efectivo.isoformat() if fin_efectivo else None,
+                    "segmento_inicio": desde.isoformat(),
+                    "segmento_fin": hasta.isoformat(),
+                    "estado": _estado_segmento(desde, hasta, corte),
+                }
+                bolsa_plantas.append(entry)
+                (bolsa_comercializador if piscina == "comercializador" else bolsa_libre).append(entry)
 
     out = {
         "year": year,
