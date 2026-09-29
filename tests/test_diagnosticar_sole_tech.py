@@ -95,3 +95,34 @@ def test_ya_no_hace_login():
 
     for resto in ("SOLENIUM_USER", "SOLENIUM_PASS", "auth.sole.tech", "Bearer"):
         assert resto not in fuente
+
+
+def test_con_los_dos_ids_no_lee_la_base(monkeypatch):
+    """En local la base puede no estar: con las dos plantas de muestra dadas,
+    el comando tiene que llegar a sole.tech sin tocarla."""
+    from io import StringIO
+
+    from django.core.management import call_command
+
+    from apps.energia.management.commands import diagnosticar_sole_tech as modulo
+    from apps.proyectos.models import Proyecto
+
+    def sin_base(*a, **k):
+        raise AssertionError("no debía leer la base")
+
+    monkeypatch.setattr(Proyecto.objects, "filter", sin_base)
+    monkeypatch.setenv("SOLARVIEW_TOKEN", "tok")
+    visitadas = []
+
+    def falso(http, que, metodo, url, **kwargs):
+        visitadas.append(url)
+        return modulo.Medida(que, url, 200, 1), None
+
+    monkeypatch.setattr(modulo, "medir", falso)
+
+    call_command("diagnosticar_sole_tech", "--id-solenium", "5", "--id-solarview", "12",
+                 stdout=StringIO())
+
+    assert any("/project/5/inverter/" in u for u in visitadas)
+    assert any("/project-detail/12/" in u for u in visitadas)
+

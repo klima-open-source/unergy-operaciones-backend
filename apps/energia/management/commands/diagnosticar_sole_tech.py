@@ -11,10 +11,14 @@ Todo sole.tech entra con el mismo token (`Authorization: Token <TOKEN>`, ver
   - `api.sole.tech` (SolarView): generación solar, flota, detalle.
   - `sunfactory.sole.tech`: el pipeline de obra.
 
-Desde local no se puede correr: el `.env` local no trae el token. Va en el
-servidor:
+En el servidor:
 
     docker compose exec operaciones python manage.py diagnosticar_sole_tech
+
+En local hace falta el token en el `.env`, y si la base no está a mano, dar las
+dos plantas de muestra para que no la lea:
+
+    python manage.py diagnosticar_sole_tech --id-solenium 123 --id-solarview 12
 
 `--flota` mide además lo que hace `generacion_hoy()`: una llamada a
 `/generation/` por planta, de a 8 en paralelo, como en la petición web. Son unas
@@ -106,6 +110,14 @@ class Command(BaseCommand):
             "--timeout", type=float, default=TIMEOUT_POR_DEFECTO,
             help=f"Segundos de espera por llamada (por defecto {TIMEOUT_POR_DEFECTO:g}).",
         )
+        parser.add_argument(
+            "--id-solenium", type=int,
+            help="Planta de muestra en data.sole.tech. Con este y --id-solarview no se lee la base.",
+        )
+        parser.add_argument(
+            "--id-solarview", type=int,
+            help="Planta de muestra en api.sole.tech. Con este y --id-solenium no se lee la base.",
+        )
 
     def handle(self, *args, **opciones):
         from apps.comun.config import settings
@@ -114,11 +126,21 @@ class Command(BaseCommand):
 
         hoy = hoy_col()
         ayer = hoy - timedelta(days=1)
-        en_operacion = Proyecto.objects.filter(estado="en_operacion", deleted_at__isnull=True)
-        ids_solenium = ids_enteros(en_operacion.values_list("project_id_solenium", flat=True))
-        ids_solarview = ids_enteros(en_operacion.values_list("project_id_solarview", flat=True))
-        muestra_solenium = ids_solenium[0] if ids_solenium else None
-        muestra_solarview = ids_solarview[0] if ids_solarview else None
+        muestra_solenium = opciones["id_solenium"]
+        muestra_solarview = opciones["id_solarview"]
+
+        # La base solo hace falta para lo que no vino por argumento: las
+        # plantas de muestra, o la flota entera con --flota. Con los dos ids a
+        # mano el comando corre sin base (en local, por ejemplo).
+        ids_solarview: list[int] = []
+        if muestra_solenium is None or muestra_solarview is None or opciones["flota"]:
+            en_operacion = Proyecto.objects.filter(estado="en_operacion", deleted_at__isnull=True)
+            ids_solenium = ids_enteros(en_operacion.values_list("project_id_solenium", flat=True))
+            ids_solarview = ids_enteros(en_operacion.values_list("project_id_solarview", flat=True))
+            if muestra_solenium is None and ids_solenium:
+                muestra_solenium = ids_solenium[0]
+            if muestra_solarview is None and ids_solarview:
+                muestra_solarview = ids_solarview[0]
 
         medidas: list[Medida] = []
         with httpx.Client(timeout=opciones["timeout"], follow_redirects=True) as http:
