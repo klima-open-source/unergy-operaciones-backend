@@ -6,8 +6,8 @@ llamadas son GET.
 Prueba el token (`Authorization: Token <TOKEN>`, ver `apps/comun/sole_tech.py`)
 en los tres hosts de sole.tech que usa la plataforma:
 
-  - `api.sole.tech` (SolarView): generación solar, flota, detalle, inversores.
-    Es el único que lo acepta (medido el 2026-09-29).
+  - `api.sole.tech` (SolarView): generación solar, flota, detalle, inversores,
+    alarmas y reconectadores. Es el único que lo acepta (medido el 2026-09-29).
   - `data.sole.tech` (Solenium, la API vieja) y `sunfactory.sole.tech`: lo
     rechazan. Se prueban igual, para ver el día que eso cambie.
 
@@ -16,7 +16,7 @@ En el servidor:
     docker compose exec operaciones python manage.py diagnosticar_sole_tech
 
 En local hace falta el token en el `.env`. Si la base no está a mano,
-`--sin-base` toma como muestra el primer proyecto de cada listado de sole.tech:
+`--sin-base` toma como muestra el primer proyecto del listado de SolarView:
 
     python manage.py diagnosticar_sole_tech --sin-base
 
@@ -124,11 +124,7 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--sin-base", action="store_true",
-            help="No lee la base: las plantas de muestra salen de los listados de sole.tech.",
-        )
-        parser.add_argument(
-            "--id-solenium", type=int,
-            help="Planta de muestra en data.sole.tech (si no, la de la base o la del listado).",
+            help="No lee la base: la planta de muestra sale del listado de SolarView.",
         )
         parser.add_argument(
             "--id-solarview", type=int,
@@ -142,30 +138,25 @@ class Command(BaseCommand):
 
         hoy = hoy_col()
         ayer = hoy - timedelta(days=1)
-        muestra_solenium = opciones["id_solenium"]
         muestra_solarview = opciones["id_solarview"]
 
-        # La base solo hace falta para lo que no vino por argumento: las
-        # plantas de muestra, o la flota entera con --flota. Sin ella (en local,
-        # por ejemplo), las muestras salen del primer proyecto de cada listado
-        # de sole.tech.
+        # La base solo hace falta para lo que no vino por argumento: la planta
+        # de muestra, o la flota entera con --flota. Sin ella (en local, por
+        # ejemplo), la muestra sale del primer proyecto del listado de SolarView.
         ids_solarview: list[int] = []
         if opciones["sin_base"]:
             if opciones["flota"]:
                 self.stdout.write(self.style.WARNING("  --flota necesita la base: no se mide"))
                 opciones["flota"] = False
-        elif muestra_solenium is None or muestra_solarview is None or opciones["flota"]:
+        elif muestra_solarview is None or opciones["flota"]:
             en_operacion = Proyecto.objects.filter(estado="en_operacion", deleted_at__isnull=True)
-            ids_solenium = ids_enteros(en_operacion.values_list("project_id_solenium", flat=True))
             ids_solarview = ids_enteros(en_operacion.values_list("project_id_solarview", flat=True))
-            if muestra_solenium is None and ids_solenium:
-                muestra_solenium = ids_solenium[0]
             if muestra_solarview is None and ids_solarview:
                 muestra_solarview = ids_solarview[0]
 
         medidas: list[Medida] = []
         with httpx.Client(timeout=opciones["timeout"], follow_redirects=True) as http:
-            medidas += self._solenium(http, settings, muestra_solenium)
+            medidas += self._otros_hosts(http, settings)
             medidas += self._solarview(http, settings, muestra_solarview, ayer, hoy)
             if opciones["flota"]:
                 self._flota(http, settings, ids_solarview, ayer, hoy)
@@ -174,7 +165,7 @@ class Command(BaseCommand):
 
     # ── data.sole.tech (Solenium) y sunfactory.sole.tech ────────────────────
 
-    def _solenium(self, http, settings, sol_id) -> list[Medida]:
+    def _otros_hosts(self, http, settings) -> list[Medida]:
         from apps.comun import sole_tech
 
         self._titulo("data.sole.tech (Solenium) y sunfactory.sole.tech")
@@ -182,25 +173,19 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("  SOLARVIEW_TOKEN vacío en este .env"))
             return []
 
+        # Alarmas, inversores y reconectadores ya leen de SolarView. De
+        # data.sole.tech solo queda el ON/OFF de los reconectadores (con las
+        # credenciales de quien aprieta el botón), y Sun Factory sigue con su
+        # login: con el token, los dos responden 401. Se prueban para ver el
+        # día que eso cambie.
         data = settings.SOLENIUM_DATA_URL.rstrip("/")
         sunfactory = settings.SUNFACTORY_API_URL.rstrip("/")
-        listado, cuerpo = medir(
-            http, "proyectos (inversores de monitoreo)", "GET", f"{data}/project/",
-            headers=sole_tech.cabeceras(), params={"menu": 1},
-        )
-        sol_id = sol_id or primer_id(cuerpo)
         llamadas = [
-            ("disponibilidad (alarmas)", f"{data}/project_availability/", None),
-            ("resumen de flota (dashboard)", f"{data}/project_summary/", None),
-            ("proyectos de Sun Factory (pipeline de obra)", f"{sunfactory}/project/", {"limit": 1}),
+            ("data.sole.tech con el token (hoy solo lo usa el ON/OFF)", f"{data}/project/", {"menu": 1}),
+            ("sunfactory.sole.tech con el token (usa su propio login)",
+             f"{sunfactory}/project/", {"limit": 1}),
         ]
-        if sol_id:
-            llamadas += [
-                (f"inversores de {sol_id} (monitoreo / puesta en marcha)",
-                 f"{data}/project/{sol_id}/inverter/", None),
-                (f"relay de {sol_id} (reconectadores)", f"{data}/project/{sol_id}/relay/", None),
-            ]
-        return [listado] + [
+        return [
             medir(http, que, "GET", url, headers=sole_tech.cabeceras(), params=params)[0]
             for que, url, params in llamadas
         ]
@@ -234,6 +219,14 @@ class Command(BaseCommand):
                  f"{base}/solarview/config/project-detail/{sv_id}/", None),
                 (f"inversores de {sv_id}",
                  f"{base}/solarview/measurements/inverters-list/", {"project_id": sv_id}),
+                # Un 404 acá es "la planta no tiene reconectador", no una falla:
+                # 14 de las 39 plantas de SolarView no tienen (2026-09-29).
+                # El estado y los eventos piden `project_id`; el histórico,
+                # `recloser` -- los dos con el id del proyecto.
+                (f"estado del reconectador de {sv_id} (reconectadores)",
+                 f"{base}/solarview/config/recloser/", {"project_id": sv_id}),
+                (f"eventos del reconectador de {sv_id}",
+                 f"{base}/solarview/config/recloser/events/", {"project_id": sv_id}),
                 (f"histórico de reconectador de {sv_id}",
                  f"{base}/solarview/config/recloser/historical/",
                  {"recloser": sv_id, "start_date": f"{hoy.isoformat()} 00:00:00",

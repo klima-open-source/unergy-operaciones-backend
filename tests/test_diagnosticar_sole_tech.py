@@ -97,9 +97,9 @@ def test_ya_no_hace_login():
         assert resto not in fuente
 
 
-def test_con_los_dos_ids_no_lee_la_base(monkeypatch):
-    """En local la base puede no estar: con las dos plantas de muestra dadas,
-    el comando tiene que llegar a sole.tech sin tocarla."""
+def test_con_el_id_de_solarview_no_lee_la_base(monkeypatch):
+    """En local la base puede no estar: con la planta de muestra dada, el
+    comando tiene que llegar a sole.tech sin tocarla."""
     from io import StringIO
 
     from django.core.management import call_command
@@ -120,16 +120,15 @@ def test_con_los_dos_ids_no_lee_la_base(monkeypatch):
 
     monkeypatch.setattr(modulo, "medir", falso)
 
-    call_command("diagnosticar_sole_tech", "--id-solenium", "5", "--id-solarview", "12",
-                 stdout=StringIO())
+    call_command("diagnosticar_sole_tech", "--id-solarview", "12", stdout=StringIO())
 
-    assert any("/project/5/inverter/" in u for u in visitadas)
     assert any("/project-detail/12/" in u for u in visitadas)
+    assert any("/recloser/" in u for u in visitadas)
 
 
 def test_sin_base_toma_las_muestras_de_los_listados(monkeypatch):
-    """Sin base y sin ids, la planta de muestra es el primer proyecto que
-    devuelve cada listado de sole.tech."""
+    """Sin base y sin id, la planta de muestra es el primer proyecto que
+    devuelve el listado de SolarView."""
     from io import StringIO
 
     from django.core.management import call_command
@@ -146,8 +145,6 @@ def test_sin_base_toma_las_muestras_de_los_listados(monkeypatch):
 
     def falso(http, que, metodo, url, **kwargs):
         visitadas.append(url)
-        if url.endswith("data.sole.tech/api/project/"):
-            return modulo.Medida(que, url, 200, 1), {"results": [{"id": 41}]}
         if url.endswith("/company-projects/"):
             return modulo.Medida(que, url, 200, 1), {"results": [{"id": 12}]}
         return modulo.Medida(que, url, 200, 1), None
@@ -156,7 +153,6 @@ def test_sin_base_toma_las_muestras_de_los_listados(monkeypatch):
 
     call_command("diagnosticar_sole_tech", "--sin-base", stdout=StringIO())
 
-    assert any("/project/41/inverter/" in u for u in visitadas)
     assert any("/project-detail/12/" in u for u in visitadas)
 
 
