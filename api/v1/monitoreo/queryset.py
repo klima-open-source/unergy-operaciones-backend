@@ -14,7 +14,7 @@ from datetime import date
 from apps.contratos import models as ct_models
 from apps.contratos.services import vigencia as vigencia_service
 from apps.energia.services import unergy_api
-from apps.monitoreo.services import solenium_inversores
+from apps.monitoreo.services import inversores_en_vivo
 from apps.proyectos import models as py_models
 from apps.proyectos.services import portafolios as portafolios_service
 from apps.plataforma.services.fechas import hoy_col
@@ -242,7 +242,7 @@ def build_fmo(sub_project: str, desde: date | None, hasta: date | None) -> dict:
         }
 
     contrato = _contrato_om(proyecto)
-    inversores, error = solenium_inversores.inversores(proyecto)
+    inversores, error = inversores_en_vivo.inversores(proyecto)
 
     return {
         "ok": True,

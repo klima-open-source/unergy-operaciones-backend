@@ -1,40 +1,25 @@
-"""Datos en vivo del informe de puesta en marcha: Solenium y Gaia.
+"""Datos en vivo del informe de puesta en marcha: inversores y Gaia.
 
-Los dos se consultan al abrir la ficha, así que van con caché corto: sin él,
-cada clic dentro de la misma ficha golpea las dos APIs externas.
+Los inversores salen de SolarView por `apps.monitoreo.services.inversores_en_vivo`,
+la misma función que usa el informe mensual. La instantánea de Gaia se consulta
+acá, con caché corto: sin él, cada clic dentro de la misma ficha golpea la API.
 
-`ponytail: caché en dicts de módulo con TTL de 60 s`. Igual que en el resto de
-la migración, vale con `WORKERS=1`; al subir workers cada proceso tendrá el
-suyo, lo que solo significa más llamadas, no datos incorrectos.
+`ponytail: caché en dicts de módulo con TTL de 60 s`. Al subir workers cada
+proceso tendrá el suyo, lo que solo significa más llamadas, no datos incorrectos.
 """
 
 import logging
-import re
 import time
+
+from apps.monitoreo.services import inversores_en_vivo
 
 logger = logging.getLogger("operaciones.informe_om")
 
 TTL = 60
 
-_inversores_cache: dict[str, tuple[float, list]] = {}
 _frontera_cache: dict[int, tuple[float, dict]] = {}
 
-_solenium = None
 _gaia = None
-
-# Solenium no expone la capacidad nominal; se aproxima leyendo el número con
-# el que empieza el nombre del dispositivo ("330KTL-Inversor1" -> 330). Es una
-# aproximación del MODELO: puede no coincidir con la ficha técnica.
-_CAPACIDAD_EN_NOMBRE = re.compile(r"^(\d+(?:\.\d+)?)")
-
-
-def _cliente_solenium():
-    global _solenium
-    if _solenium is None:
-        from app.services.mgs.solenium_client import SoleniumClient
-
-        _solenium = SoleniumClient()
-    return _solenium if _solenium.enabled else None
 
 
 def _cliente_gaia():
@@ -46,53 +31,11 @@ def _cliente_gaia():
     return _gaia if _gaia.enabled else None
 
 
-def capacidad_kw(nombre: str | None) -> float | None:
-    if not nombre:
-        return None
-    encontrado = _CAPACIDAD_EN_NOMBRE.match(nombre)
-    return float(encontrado.group(1)) if encontrado else None
-
-
 def inversores(proyecto) -> list[dict]:
-    """Inversores según la API de Solenium, no según `proyecto_inversores`.
-
-    La fuente en vivo trae potencia actual y estado, que la tabla no tiene.
-
-    NOTA: sigue en Solenium, no SolarView. Migrar esta fuente concreta
-    (SolarView si hay `project_id_solarview`, si no Solenium) queda pendiente
-    aparte.
-    """
-    if not proyecto.project_id_solenium:
-        return []
-    sol_id = str(proyecto.project_id_solenium)
-
-    guardado = _inversores_cache.get(sol_id)
-    if guardado and time.monotonic() - guardado[0] < TTL:
-        return guardado[1]
-
-    cliente = _cliente_solenium()
-    if cliente is None:
-        return []
-    try:
-        crudos = cliente.get_project_inverters(int(sol_id))
-    except Exception:
-        logger.warning(
-            "no se pudo obtener inversores de Solenium proyecto_id=%s", proyecto.id
-        )
-        return []
-
-    lista = [
-        {
-            "id": inv.get("id"),
-            "nombre": inv.get("dev_name") or f'Inversor {inv.get("id")}',
-            "potencia_nominal_kw": capacidad_kw(inv.get("dev_name")),
-            "power_kw": inv.get("power"),
-            "state": inv.get("state"),
-        }
-        for inv in crudos if inv.get("id") is not None
-    ]
-    _inversores_cache[sol_id] = (time.monotonic(), lista)
-    return lista
+    """Inversores en vivo de SolarView, no los de `proyecto_inversores`: la
+    fuente en vivo trae potencia actual y estado, que la tabla no tiene. Sin
+    inversores (o sin `project_id_solarview`) la ficha muestra la lista vacía."""
+    return inversores_en_vivo.inversores(proyecto)[0]
 
 
 def frontera(proyecto) -> dict:
