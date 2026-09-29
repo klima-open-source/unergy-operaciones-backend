@@ -1,8 +1,8 @@
 """El ciclo de monitoreo de MGS: evalúa los nodos de Quoia y persiste alarmas.
 
 Puerto de `app/services/mgs/scheduler.py`. El motor (`AlarmEngine`) y los
-clientes (`GaiaClient`, `SoleniumClient` --con el token de sole.tech, ver
-`apps.comun.sole_tech`--, `SoleniumChecker`) se reusan de `app/services/mgs/`: no tocan la base y no saben de framework. Lo que
+clientes (`GaiaClient`, `SoleniumClient`, `SoleniumChecker`) se reusan de
+`app/services/mgs/` tal cual: no tocan la base y no saben de framework. Lo que
 vive acá es lo que sí la toca — resolver qué proyecto es cada nodo, guardar las
 alarmas y cerrar las que se superaron.
 
@@ -46,10 +46,10 @@ def _motor_y_checker():
     if _motor is None:
         from app.services.mgs.alarm_engine import AlarmEngine
         from app.services.mgs.solenium_checker import SoleniumChecker
-        from apps.comun.sole_tech import SoleniumConToken
+        from app.services.mgs.solenium_client import SoleniumClient
 
         _motor = AlarmEngine()
-        _solenium_checker = SoleniumChecker(SoleniumConToken())
+        _solenium_checker = SoleniumChecker(SoleniumClient())
     return _motor, _solenium_checker
 
 

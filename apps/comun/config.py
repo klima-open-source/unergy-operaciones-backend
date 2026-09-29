@@ -52,11 +52,8 @@ DEFECTOS = {
     # 2026-09-07 contra los dos dominios; las rutas (/api/token/, /api/) no
     # cambiaron. Estos defaults NO estan en el .env (ver el docstring de
     # apps/comun/config.py), asi que este archivo es el que manda.
-    #
-    # Todo sole.tech entra con el token (`apps/comun/sole_tech.py`). El login
-    # de auth.sole.tech solo lo sigue usando el ON/OFF de los reconectadores,
-    # con las credenciales de quien aprieta el boton.
     "SUNFACTORY_API_URL": "https://sunfactory.sole.tech/api",
+    "SUNFACTORY_AUTH_URL": "https://auth.sole.tech/api/token/",
     "SOLENIUM_AUTH_URL": "https://auth.sole.tech/api",
     "SOLENIUM_DATA_URL": "https://data.sole.tech/api",
     "SOLARVIEW_BASE_URL": "https://api.sole.tech",

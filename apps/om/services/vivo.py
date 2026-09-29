@@ -31,9 +31,9 @@ _CAPACIDAD_EN_NOMBRE = re.compile(r"^(\d+(?:\.\d+)?)")
 def _cliente_solenium():
     global _solenium
     if _solenium is None:
-        from apps.comun.sole_tech import SoleniumConToken
+        from app.services.mgs.solenium_client import SoleniumClient
 
-        _solenium = SoleniumConToken()
+        _solenium = SoleniumClient()
     return _solenium if _solenium.enabled else None
 
 

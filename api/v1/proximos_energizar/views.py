@@ -12,12 +12,11 @@ from rest_framework.response import Response
 from api.exceptions import ServicioNoDisponible
 from api.logging import class_logger_wrapper
 from api.permissions import RolePermission
-from apps.comun import sole_tech
 from apps.proyectos.models import Proyecto
 from apps.proyectos.services import proximos_energizar as pe_service
 from apps.proyectos.services.tsf_sync import (
     _pick_energization_milestone, _sunfactory_all_projects,
-    _sunfactory_milestones_raw, sync_tsf_projects,
+    _sunfactory_milestones_raw, _sunfactory_token, sync_tsf_projects,
 )
 
 
@@ -76,15 +75,16 @@ class ProximosEnergizarViewSet(viewsets.GenericViewSet):
                 "detalle": "Este proyecto no tiene sunfactory_project_id.",
             })
 
-        if not sole_tech.configurado():
-            raise ServicioNoDisponible("Token de sole.tech no configurado (SOLARVIEW_TOKEN).")
+        token = _sunfactory_token()
+        if not token:
+            raise ServicioNoDisponible("Credenciales de Sun Factory no configuradas.")
         try:
-            milestones = _sunfactory_milestones_raw(p.sunfactory_project_id)
+            milestones = _sunfactory_milestones_raw(token, p.sunfactory_project_id)
         except Exception as exc:
             raise ServicioNoDisponible(f"No se pudo consultar milestones: {exc}")
 
         listado = next(
-            (row for row in _sunfactory_all_projects()
+            (row for row in _sunfactory_all_projects(token)
              if row.get("id") == p.sunfactory_project_id),
             None,
         )

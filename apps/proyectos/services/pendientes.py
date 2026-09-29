@@ -52,10 +52,9 @@ from apps.proyectos.models import (
     GeneracionDiaria, Proyecto, ProyectoPendienteIgnorado,
 )
 from apps.proyectos.services.generacion_unergy import DIAS_VENTANA
-from apps.comun import sole_tech
 from apps.proyectos.services.tsf_sync import (
     _SF_IMPORT_STATES, _STATUS_TO_FASE, _core, _derive_commercial_name,
-    _parece_codigo, _sunfactory_all_projects,
+    _parece_codigo, _sunfactory_all_projects, _sunfactory_token,
 )
 
 # `ponytail: el cliente de Quoia sigue en app/services/mgs/gaia_client.py`.
@@ -121,10 +120,14 @@ def _candidatos_sunfactory() -> list[_Candidato]:
     """Todos los estados (no solo el pipeline de construcción) -- para
     /proyectos/pendientes nos interesa tanto lo que sigue en obra como lo
     que Sun Factory ya marcó como operando, no solo lo primero."""
-    if not sole_tech.configurado():
+    try:
+        token = _sunfactory_token()
+    except Exception:
+        token = None
+    if not token:
         return []
     try:
-        raw = _sunfactory_all_projects()
+        raw = _sunfactory_all_projects(token)
     except Exception:
         return []
 

@@ -20,7 +20,7 @@ from apps.comun.nombre_matching import mejor_candidato
 from apps.proyectos.models import Proyecto, ProyectoInfoTecnica
 
 # `ponytail: el cliente de Solenium sigue en app/services/mgs/`. Es HTTP puro.
-from apps.comun.sole_tech import SoleniumConToken
+from app.services.mgs.solenium_client import SoleniumClient
 
 logger = logging.getLogger("operaciones.proyectos.solenium")
 
@@ -131,7 +131,7 @@ def backfill_info_tecnica_solenium(apply: bool = False) -> dict:
     if not candidatos_proyecto:
         return {"ok": True, "revisados": 0, "asignados": [], "sin_match_seguro": []}
 
-    client = SoleniumConToken()
+    client = SoleniumClient()
     if not client.enabled:
         return {"ok": False, "error": "Credenciales de Solenium no configuradas."}
     try:
@@ -211,7 +211,7 @@ def sincronizar_info_tecnica_solenium_si_aplica(proyecto: Proyecto) -> dict | No
     if it and it.capacidad_instalada_kwp is not None:
         return None  # ya tiene info técnica de alguna fuente, no hay nada que rellenar
     try:
-        client = SoleniumConToken()
+        client = SoleniumClient()
         if not client.enabled:
             return None
         solenium_projects = client.get_projects()

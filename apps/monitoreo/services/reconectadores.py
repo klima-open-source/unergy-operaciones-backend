@@ -3,7 +3,7 @@
 Todo el trato con Solenium vive acá: la vista solo elige proyectos y traduce a
 HTTP. Dos rutas de credenciales, y la diferencia importa:
 
-- **Leer** el estado usa el token del SERVIDOR (`SoleniumConToken`): la
+- **Leer** el estado usa las credenciales del SERVIDOR (`SoleniumClient`): la
   pantalla debe cargar sin pedirle nada al usuario.
 - **Mandar un ON/OFF** exige las credenciales del USUARIO en el cuerpo de la
   petición, se validan contra Solenium en cada llamada y NO se guardan. Abrir o
@@ -22,7 +22,7 @@ logger = logging.getLogger("operaciones.reconectadores")
 # Las URLs salen de la configuracion, no hardcodeadas. Estaban fijas en este
 # archivo y cuando Solenium migro de solenium.co a sole.tech (2026-09-07) el
 # ON/OFF de los relays quedo roto sin que hubiera forma de arreglarlo sin
-# desplegar. Ahora es el mismo `SOLENIUM_*` que usa el cliente de lectura,
+# desplegar. Ahora es el mismo `SOLENIUM_*` que usa `SoleniumClient` para leer,
 # asi que las dos rutas de credenciales apuntan siempre al mismo servidor -- que
 # apuntaran a hosts distintos era un bug esperando.
 _AUTH = settings.SOLENIUM_AUTH_URL.rstrip("/").removesuffix("/token")
@@ -67,12 +67,12 @@ _cliente = None
 
 
 def cliente():
-    """El cliente de `data.sole.tech` con el token del servidor, creado una vez."""
+    """El `SoleniumClient` del servidor, creado una vez."""
     global _cliente
     if _cliente is None:
-        from apps.comun.sole_tech import SoleniumConToken
+        from app.services.mgs.solenium_client import SoleniumClient
 
-        _cliente = SoleniumConToken()
+        _cliente = SoleniumClient()
     if not _cliente.enabled:
         raise SoleniumNoConfigurado("Solenium no configurado en el servidor")
     return _cliente

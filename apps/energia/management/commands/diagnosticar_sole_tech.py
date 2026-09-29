@@ -3,13 +3,13 @@
 **Solo lee. No escribe nada, ni en la base ni en sole.tech:** todas las
 llamadas son GET.
 
-Todo sole.tech entra con el mismo token (`Authorization: Token <TOKEN>`, ver
-`apps/comun/sole_tech.py`), en sus tres hosts:
+Prueba el token (`Authorization: Token <TOKEN>`, ver `apps/comun/sole_tech.py`)
+en los tres hosts de sole.tech que usa la plataforma:
 
-  - `data.sole.tech` (Solenium): alarmas, inversores de monitoreo y de puesta
-    en marcha, potencia del dashboard, estado de los reconectadores.
-  - `api.sole.tech` (SolarView): generación solar, flota, detalle.
-  - `sunfactory.sole.tech`: el pipeline de obra.
+  - `api.sole.tech` (SolarView): generación solar, flota, detalle, inversores.
+    Es el único que lo acepta (medido el 2026-09-29).
+  - `data.sole.tech` (Solenium, la API vieja) y `sunfactory.sole.tech`: lo
+    rechazan. Se prueban igual, para ver el día que eso cambie.
 
 En el servidor:
 

@@ -31,7 +31,6 @@ from django.db.models import Case, F, IntegerField, Q, Value, When
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
-from apps.comun import sole_tech
 from apps.comun.config import settings
 from apps.comun.nombre_matching import mejor_candidato
 from apps.proyectos.models import Proyecto
@@ -107,6 +106,20 @@ def _tsf_code_from_base_name(base_name: str | None) -> str | None:
 
 # ── Cronogramas EPC de Sun Factory (Solenium) ───────────────────────────────────
 
+def _sunfactory_token() -> str | None:
+    user = settings.SUNFACTORY_USERNAME or settings.SOLENIUM_USER
+    password = settings.SUNFACTORY_PASSWORD or settings.SOLENIUM_PASS
+    if not (user and password and settings.SUNFACTORY_AUTH_URL):
+        return None
+    with httpx.Client(timeout=30) as client:
+        resp = client.post(
+            settings.SUNFACTORY_AUTH_URL,
+            json={"username": user, "password": password},
+        )
+        resp.raise_for_status()
+        return resp.json()["access"]
+
+
 def _pick_energization_milestone(milestones: list[dict]) -> dict | None:
     """Función PURA: elige el hito de energización de una lista de milestones."""
     if not milestones:
@@ -128,14 +141,14 @@ def _pick_energization_milestone(milestones: list[dict]) -> dict | None:
     return {"energization_date": ed, "avance_pct": avance, "milestone": chosen.get("name")}
 
 
-def _sunfactory_milestones_raw(project_id: int) -> list[dict]:
+def _sunfactory_milestones_raw(token: str, project_id: int) -> list[dict]:
     """Milestones crudos de un proyecto vía Sun Factory (con paginación). Separado
     de `_sunfactory_energization` para poder inspeccionarlos sin filtrar (ver
     endpoint de diagnóstico `/proximos-energizar/{id}/debug-sunfactory`)."""
     base = settings.SUNFACTORY_API_URL.rstrip("/")
     milestones: list[dict] = []
     url: str | None = f"{base}/project/{project_id}/milestones/?limit=200"
-    with httpx.Client(timeout=40, headers=sole_tech.cabeceras()) as client:
+    with httpx.Client(timeout=40, headers={"Authorization": f"Bearer {token}"}) as client:
         pages = 0
         while url and pages < 20:
             resp = client.get(url)
@@ -147,10 +160,10 @@ def _sunfactory_milestones_raw(project_id: int) -> list[dict]:
     return milestones
 
 
-def _sunfactory_energization(project_id: int) -> dict | None:
+def _sunfactory_energization(token: str, project_id: int) -> dict | None:
     """Hito de energización de un proyecto vía Sun Factory (con paginación)."""
     try:
-        milestones = _sunfactory_milestones_raw(project_id)
+        milestones = _sunfactory_milestones_raw(token, project_id)
     except Exception as exc:
         logger.debug("Sun Factory milestones failed for project %s: %s", project_id, exc)
         return None
@@ -175,12 +188,12 @@ _SF_IMPORT_STATES = {
 }
 
 
-def _sunfactory_all_projects() -> list[dict]:
+def _sunfactory_all_projects(token: str) -> list[dict]:
     """Lista completa de proyectos de Sun Factory (paginando /project/)."""
     base = settings.SUNFACTORY_API_URL.rstrip("/")
     url: str | None = f"{base}/project/?limit=200"
     out: list[dict] = []
-    with httpx.Client(timeout=60, headers=sole_tech.cabeceras()) as client:
+    with httpx.Client(timeout=60, headers={"Authorization": f"Bearer {token}"}) as client:
         pages = 0
         while url and pages < 30:
             resp = client.get(url)
@@ -209,14 +222,16 @@ def fetch_sunfactory_projects(enrich_dates: bool = True) -> tuple[list[dict], li
        monthly_mwh }`. `origina_code` = base_name (o `SF-<id>` si no tiene),
     usado como llave estable de upsert."""
     warnings: list[str] = []
-    # Sun Factory entra con el token de sole.tech, como todo sole.tech (ver
-    # `apps.comun.sole_tech`); hasta el 2026-09-29 hacía login con usuario y
-    # contraseña.
-    if not sole_tech.configurado():
-        return [], ["Token de sole.tech no configurado (SOLARVIEW_TOKEN)."]
+    try:
+        token = _sunfactory_token()
+    except Exception as exc:
+        logger.warning("Sun Factory auth falló: %s", exc)
+        return [], [f"No se pudo autenticar contra Sun Factory: {exc}"]
+    if not token:
+        return [], ["Credenciales de Sun Factory no configuradas (SUNFACTORY_/SOLENIUM_)."]
 
     try:
-        raw = _sunfactory_all_projects()
+        raw = _sunfactory_all_projects(token)
     except Exception as exc:
         logger.warning("Sun Factory lista de proyectos falló: %s", exc)
         return [], [f"No se pudo leer la lista de proyectos de Sun Factory: {exc}"]
@@ -230,7 +245,7 @@ def fetch_sunfactory_projects(enrich_dates: bool = True) -> tuple[list[dict], li
         ids = [p["id"] for p in wanted if p.get("id") is not None]
         try:
             with ThreadPoolExecutor(max_workers=min(len(ids), 12)) as pool:
-                for pid, energ in pool.map(lambda i: (i, _sunfactory_energization(i)), ids):
+                for pid, energ in pool.map(lambda i: (i, _sunfactory_energization(token, i)), ids):
                     if energ:
                         energ_map[pid] = energ
         except Exception as exc:

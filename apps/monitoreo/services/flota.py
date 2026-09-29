@@ -1,8 +1,7 @@
 """Resumen de la flota desde Solenium — con caché en proceso.
 
-El cliente HTTP es el de `app/services/mgs/solenium_client.py`, con el token de
-sole.tech (`apps.comun.sole_tech.SoleniumConToken`): no toca la base y no sabe
-de framework.
+El cliente HTTP (`app/services/mgs/solenium_client.py`) se reusa tal cual: no
+toca la base y no sabe de framework.
 
 `ponytail: caché en un dict de módulo, no en django.core.cache`. Vale mientras
 el despliegue corra con un solo proceso web (`WORKERS=1`, ver README). Al sacar
@@ -31,9 +30,9 @@ def resumen() -> dict:
 
     vacio = {"fleet_power_kw": None, "fleet_online": None, "fleet_total": None}
     try:
-        from apps.comun.sole_tech import SoleniumConToken
+        from app.services.mgs.solenium_client import SoleniumClient
 
-        cliente = SoleniumConToken()
+        cliente = SoleniumClient()
         if not cliente.enabled:
             return vacio
         plantas = cliente.get_project_summary()
