@@ -23,8 +23,6 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date, timedelta
 
-from django.utils.timezone import localtime
-
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
@@ -139,124 +137,6 @@ _ORDEN_GRUPO_FUENTE = [
 ]
 
 
-_ETIQUETA_FUENTE_CRUDA_GENERACION = {
-    "cgm": "CGM", "principal": "Medidor principal", "respaldo": "Medidor respaldo",
-    "principal_sin_cgm": "Medidor principal", "respaldo_sin_cgm": "Medidor respaldo",
-    "principal_sin_historico": "Medidor principal", "respaldo_sin_historico": "Medidor respaldo",
-    "reconectador": "Reconectador", "excel_terceros": "Excel de terceros", "externo": "Reporta otra empresa",
-    "inversores": "Inversores × FP", "crudos": "Datos crudos", "crudos_parcial": "Datos crudos (parcial)",
-    "solenium_power": "Inversores (power)",
-    "historico": "Histórico propio", "historico_vecino": "Histórico (vecino de predio)",
-    "ninguno": "Apagado", "editado_manualmente": "Editado manualmente", "relleno_horario": "Relleno horario",
-    "revisar": "Sin fuente",
-}
-
-
-AUTOMATICO = "Automático (CGM)"
-OTRA_FUENTE = "Otra fuente"
-
-
-def _distribucion_automatico(gen_filas, con_filas):
-    """Cuantos dias-frontera se reportaron automatico via CGM, y cuantos no.
-
-    Es una pregunta distinta de la de los otros dos graficos. Esos dicen **de
-    donde salio el dato**; este dice **cuanto salio solo**, que es la metrica
-    para saber si la automatizacion avanza.
-
-    Generacion y consumo van JUNTOS: lo que se quiere medir es el reporte
-    entero, no una de sus mitades. Un dia-frontera de generacion y uno de
-    consumo cuentan igual, porque los dos son un reporte que alguien tuvo que
-    hacer o que salio solo.
-
-    Los dias EXCLUIDOS no entran en ninguno de los dos lados: no se reportaron a
-    proposito, asi que no son ni un exito ni un fallo de la automatizacion.
-    Contarlos como "otra fuente" empeoraria la metrica por una decision
-    deliberada.
-    """
-    cuenta = {AUTOMATICO: 0, OTRA_FUENTE: 0}
-    por_frontera: dict[int, dict] = {}
-
-    for filas in (gen_filas, con_filas):
-        for fid, nombre, etiqueta_cruda, n in filas:
-            low = (etiqueta_cruda or "").strip().lower()
-            info = por_frontera.setdefault(fid, {
-                "nombre": _NOMBRES_CORREGIDOS.get(fid, nombre),
-                "dias_totales": 0, "dias_excluidos": 0, "grupos": {},
-            })
-            if low == "excluida":
-                info["dias_excluidos"] += n
-                continue
-            grupo = AUTOMATICO if low == "cgm" else OTRA_FUENTE
-            cuenta[grupo] += n
-            info["dias_totales"] += n
-            g = info["grupos"].setdefault(grupo, {"dias": 0})
-            g["dias"] += n
-
-    distribucion = [
-        {"etiqueta": etq, "total": cuenta[etq]}
-        for etq in (AUTOMATICO, OTRA_FUENTE) if cuenta[etq]
-    ]
-    detalle = [
-        {
-            "frontera_id": fid,
-            "nombre_proyecto": info["nombre"],
-            "grupo": grupo,
-            "dias_totales": info["dias_totales"],
-            "dias_excluidos": info["dias_excluidos"],
-            "dias_grupo": g["dias"],
-            "desglose": [],
-        }
-        for fid, info in por_frontera.items()
-        for grupo, g in info["grupos"].items()
-    ]
-    detalle.sort(key=lambda d: (-d["dias_grupo"], d["nombre_proyecto"] or ""))
-    return distribucion, detalle
-
-
-def _fronteras_registradas_por_dia(desde: date, hasta: date) -> dict[date, set[int]]:
-    """Qué fronteras estaban registradas en ASIC cada día del rango.
-
-    **No es el denominador de la tasa** --ese son las clasificadas, ver
-    `serie_automatico`-- sino la alarma que va al lado: si una frontera
-    registrada deja de aparecer en el reporte, hay que poder verlo. Así pasaron
-    desapercibidas las 9 que se borraron el 2026-09-15.
-
-    Devuelve CONJUNTOS y no conteos a propósito. Restar dos totales daría un
-    número que parece la brecha y no lo es: el 14 de septiembre había 147
-    registradas y 144 clasificadas, pero 6 de esas 144 todavía no estaban
-    registradas --reportaron antes de su `fecha_registro_asic`--, así que la
-    resta decía 3 y las que de verdad faltaban eran 9.
-
-    **La fecha de alta es `fecha_registro_asic`**, no `created_at`: esta última
-    dice cuándo alguien cargó la FILA acá. Las dos no coinciden en NINGUNA de
-    las 153 fronteras --casi todas se cargaron el 2026-05-02, cuando se pobló la
-    tabla, y BAYUNCA I está en ASIC desde 2020--. Se filtra por `estado` y
-    `codigo_frontera` igual que `orquestador._fronteras_con_reporte`.
-
-    Una frontera borrada cuenta hasta el día en que se borró, no después.
-    """
-    filas = (
-        Frontera.objects
-        .filter(estado="activa", codigo_frontera__isnull=False)
-        .values_list("id", "fecha_registro_asic", "deleted_at")
-    )
-    vigencias = [
-        (fid, registro, localtime(borrada).date() if borrada else None)
-        for fid, registro, borrada in filas
-        if registro is not None  # sin registro en ASIC no debe un reporte
-    ]
-
-    por_dia: dict[date, set[int]] = {}
-    dia = desde
-    while dia <= hasta:
-        por_dia[dia] = {
-            fid for fid, alta, baja in vigencias
-            if alta <= dia and (baja is None or baja > dia)
-        }
-        dia += timedelta(days=1)
-    return por_dia
-
-
 # Un día con MENOS de esta fracción de los reportes habituales del rango no fue
 # una corrida: fue una corrida que no ocurrió. El umbral cae en un hueco enorme
 # --los días normales traen 136-144 filas y los rotos 1-- así que dónde se ponga
@@ -283,28 +163,25 @@ MOTIVO_SIN_CGM = "clasificacion_fallida"
 
 def _clasificadas_y_cgm_por_dia(desde: date, hasta: date):
     """Una sola pasada de generación+consumo: qué fronteras se clasificaron
-    cada día, cuántas por mitad, y cuáles usaron CGM. La comparten
-    `serie_automatico` y `_agregar_ventana_por_frontera` para no consultar lo
-    mismo dos veces.
+    cada día, cuántas por mitad, y cuáles usaron CGM -- lo que necesita
+    `_motivos_del_rango` para juzgar cada día.
     """
     con_cgm: dict[date, set[int]] = defaultdict(set)
     clasificadas: dict[date, set[int]] = defaultdict(set)
     por_mitad: dict[str, dict[date, int]] = {
         "gen": defaultdict(int), "con": defaultdict(int),
     }
-    nombres: dict[int, str] = {}
     for modelo, campo, mitad in ((ReporteEnergiaGeneracion, "medidor_usado", "gen"),
                                  (ReporteEnergiaConsumo, "caso", "con")):
         # `.lower()` a propósito: generación guarda "cgm" y consumo "CGM".
         for fila in (modelo.objects.filter(fecha__range=(desde, hasta))
-                     .values("frontera_id", "frontera__nombre_frontera", "fecha", campo)):
+                     .values("frontera_id", "fecha", campo)):
             fid = fila["frontera_id"]
-            nombres[fid] = fila["frontera__nombre_frontera"]
             clasificadas[fila["fecha"]].add(fid)
             por_mitad[mitad][fila["fecha"]] += 1
             if (fila[campo] or "").strip().lower() == "cgm":
                 con_cgm[fila["fecha"]].add(fid)
-    return clasificadas, por_mitad, con_cgm, nombres
+    return clasificadas, por_mitad, con_cgm
 
 
 def _motivos_del_rango(
@@ -313,10 +190,30 @@ def _motivos_del_rango(
     con_cgm: dict[date, set[int]],
 ) -> dict[date, str | None]:
     """El motivo (o `None`) por el que un día no cuenta para la tasa de
-    automático -- ver el docstring de `serie_automatico` para las tres reglas.
-    Se evalúa SIEMPRE sobre el día completo, con todas las fronteras, antes de
-    cualquier filtro por `frontera_id` -- ese invariante es el que prueba
-    `tests/test_resumen_historico_filtro_frontera.py` y no puede romperse.
+    automático: los días en que el clasificador no hizo su trabajo. Son tres
+    casos, y cada uno se detecta por una regla -- ninguno es una fecha escrita
+    en el código, así que el mismo fallo dentro de seis meses también sale solo.
+    Se evalúan en orden y la primera manda.
+
+        `sin_corrida`           el día no trajo ni la mitad del volumen normal.
+                                El 5 y 6 de septiembre de 2026 quedó UNA fila de
+                                145: fue la migración del servidor.
+        `corrida_parcial`       las dos mitades se separaron. El 4 de
+                                septiembre hizo toda la generación y dejó 19
+                                fronteras de consumo sin clasificar.
+        `clasificacion_fallida` el día corrió entero y no usó CGM en NINGUNA
+                                frontera. Eso no pasa nunca (confirmado con la
+                                usuaria el 2026-09-16, sobre el 9 de agosto):
+                                un cero absoluto es el programa fallando, no una
+                                jornada sin automatización.
+
+    Contarlos movería la métrica por causas que no son la automatización --una
+    migración, media corrida, un fallo del clasificador-- y no habría forma de
+    saber cuál.
+
+    Se evalúa SIEMPRE sobre el día completo, con todas las fronteras: las tres
+    reglas describen la corrida, no una frontera. En UNA frontera un día sin
+    CGM es lo más normal del mundo; entre 145 no pasa nunca.
     """
     dias_del_rango = []
     dia = desde
@@ -326,7 +223,7 @@ def _motivos_del_rango(
 
     tipico = _mediana([len(clasificadas.get(d, ())) for d in dias_del_rango])
     # La regla del equilibrio solo tiene sentido si el rango trae las DOS
-    # mitades -- ver el comentario original en `serie_automatico`.
+    # mitades: un rango con solo generación no tiene contra qué compararse.
     hay_las_dos = any(por_mitad["gen"].values()) and any(por_mitad["con"].values())
 
     motivos: dict[date, str | None] = {}
@@ -344,137 +241,6 @@ def _motivos_del_rango(
         else:
             motivos[dia] = None
     return motivos
-
-
-def serie_automatico(desde: date, hasta: date, frontera_id: int | None = None) -> dict:
-    """Tasa diaria de reporte automático (CGM), y el total del rango.
-
-    **Qué mide.** Cada día: de las fronteras que el clasificador procesó,
-    cuántas se reportaron solas vía CGM. Es la pregunta de la automatización
-    --cuánto salió solo-- separada de la de las otras dos barras, que dicen de
-    dónde salió el dato.
-
-    **El denominador son las CLASIFICADAS.** Se probó dividir sobre las
-    registradas en ASIC, para que una frontera que no reporta nada penalizara en
-    vez de salir de los dos lados de la división. Medido el 2026-09-15 contra
-    producción, la brecha entre las que debían y las que reportaron era TODOS
-    los días exactamente las mismas 9 fronteras --BAYUNCA I, SAN ONOFRE, DELTA
-    2, NAOS 2 y 3, con sus consumos-- que estaban en nuestra tabla y no en el
-    catálogo de Quoia, y que se borraron ese día. Sin ellas los dos conjuntos
-    coinciden, así que ese denominador agregaba maquinaria (una fecha de alta
-    por frontera, y un desajuste propio: seis fronteras reportaron ANTES de su
-    `fecha_registro_asic`, lo que podía dar tasas de más del 100%) sin cambiar
-    ningún número.
-
-    Lo que sí se conserva es la alarma que motivaba aquello: `registradas` y
-    `sin_reportar` van en cada día, al lado y no como divisor. Si una frontera
-    vuelve a dejar de reportar, se ve -- que es como esas 9 pasaron
-    desapercibidas.
-
-    **Por qué el total es la razón de totales y no el promedio de las tasas.**
-    El denominador cambia de un día a otro, así que el promedio le daría el
-    mismo peso a un día con 144 fronteras que a uno con 136. La razón de totales
-    le da a cada día el peso que tuvo.
-
-    **Los días en que el clasificador no hizo su trabajo quedan fuera de la
-    tasa, pero NO de la serie.** Son tres casos, y cada uno se detecta por una
-    regla: ninguno es una fecha escrita en el código, así que el mismo fallo
-    dentro de seis meses también sale solo.
-
-        `sin_corrida`           el día no trajo ni la mitad del volumen normal.
-                                El 5 y 6 de septiembre de 2026 quedó UNA fila de
-                                145: fue la migración del servidor.
-        `corrida_parcial`       las dos mitades se separaron. El 4 de
-                                septiembre hizo toda la generación y dejó 19
-                                fronteras de consumo sin clasificar.
-        `clasificacion_fallida` el día corrió entero y no usó CGM en NINGUNA
-                                frontera. Eso no pasa nunca (confirmado con la
-                                usuaria el 2026-09-16, sobre el 9 de agosto):
-                                un cero absoluto es el programa fallando, no una
-                                jornada sin automatización.
-
-    Contarlos movería la métrica por causas que no son la automatización --una
-    migración, media corrida, un fallo del clasificador-- y no habría forma de
-    saber cuál. Siguen apareciendo en `dias` con `excluido=True` y su `motivo`,
-    para que el gráfico los pinte y diga por qué: esconderlos taparía días en
-    que 145 fronteras debían reportar y no se reportó ninguna.
-
-    **`frontera_id` filtra los CONTEOS, nunca las exclusiones** (2026-09-21).
-    Las tres reglas de arriba se siguen evaluando sobre el día completo, con
-    todas las fronteras, porque las tres describen la corrida y no una
-    frontera: si el clasificador no corrió el 5 de septiembre, eso es igual de
-    cierto mires la frontera que mires. Evaluarlas sobre el subconjunto
-    filtrado rompería la tercera de la peor manera posible: `sin_cgm` existe
-    porque un cero absoluto entre 145 fronteras no pasa nunca, pero en UNA
-    frontera un día sin CGM es lo más normal del mundo. Se leería como "el
-    programa falló" y ese día saldría de la tasa -- o sea, se borrarían justo
-    los días en que la frontera NO se automatizó, y la tasa daría casi 100%
-    siempre. Decidido así el 2026-09-21: el día lo juzga el día; el filtro
-    solo decide qué se cuenta una vez que el día ya se dio por bueno.
-    """
-    if hasta < desde:
-        raise NoProcesable("'hasta' no puede ser anterior a 'desde'")
-
-    clasificadas, por_mitad, con_cgm, nombres = _clasificadas_y_cgm_por_dia(desde, hasta)
-    motivos = _motivos_del_rango(desde, hasta, clasificadas, por_mitad, con_cgm)
-
-    registradas = _fronteras_registradas_por_dia(desde, hasta)
-    dias_del_rango = sorted(registradas)
-
-    dias = []
-    total_cgm = 0
-    total_clasificadas = 0
-    excluidos = 0
-    for dia in dias_del_rango:
-        motivo = motivos[dia]
-        cgm_dia = con_cgm.get(dia, set())
-        clasificadas_dia = clasificadas.get(dia, set())
-        registradas_dia = registradas[dia]
-
-        if frontera_id is not None:
-            una = {frontera_id}
-            cgm_dia = cgm_dia & una
-            clasificadas_dia = clasificadas_dia & una
-            registradas_dia = registradas_dia & una
-
-        cgm = len(cgm_dia)
-        universo = len(clasificadas_dia)
-
-        if motivo is None:
-            total_cgm += cgm
-            total_clasificadas += universo
-        else:
-            excluidos += 1
-
-        dias.append({
-            "fecha": dia,
-            "automaticas": cgm,
-            "fronteras": universo,
-            "registradas": len(registradas_dia),
-            # Diferencia de CONJUNTOS, no de totales: ver el docstring de
-            # `_fronteras_registradas_por_dia`.
-            "sin_reportar": len(registradas_dia - clasificadas_dia),
-            "excluido": motivo is not None,
-            "motivo": motivo,
-            "tasa": round(cgm / universo * 100, 1) if universo else 0.0,
-        })
-
-    return {
-        "dias": dias,
-        "dias_contados": len(dias) - excluidos,
-        "dias_excluidos": excluidos,
-        "automaticas": total_cgm,
-        "fronteras": total_clasificadas,
-        "tasa": (round(total_cgm / total_clasificadas * 100, 1)
-                 if total_clasificadas else 0.0),
-        # Se calcula con los conjuntos completos y se recorta después: así las
-        # tasas de la tabla salen de los mismos días contados que el titular,
-        # con filtro o sin él.
-        "por_frontera": [
-            f for f in _automatico_por_frontera(dias, con_cgm, clasificadas, nombres)
-            if frontera_id is None or f["frontera_id"] == frontera_id
-        ],
-    }
 
 
 def _equilibrio(generacion: int, consumo: int) -> float:
@@ -495,111 +261,6 @@ def _mediana(valores: list[int]) -> float:
     if len(limpios) % 2:
         return float(limpios[mitad])
     return (limpios[mitad - 1] + limpios[mitad]) / 2
-
-
-def _automatico_por_frontera(dias, con_cgm, reportaron, nombres) -> list[dict]:
-    """Cada frontera con su % de días automáticos, **la peor primero**.
-
-    Reemplaza al desglose por grupo, que no decía nada: al abrir "Otra fuente"
-    casi todas las filas daban 96-100%, porque esa barra es el complemento --
-    cualquier frontera que no sea automática SIEMPRE tiene casi todos sus días
-    ahí (reportado por la usuaria el 2026-09-15).
-
-    Acá el orden es la información: arriba quedan las fronteras que nunca
-    reportan solas, que son la cola de trabajo. Solo se miran los días que
-    cuentan para la tasa, o el detalle contradiría al titular.
-    """
-    contados = [d["fecha"] for d in dias if not d["excluido"]]
-    totales: dict[int, int] = defaultdict(int)
-    automaticos: dict[int, int] = defaultdict(int)
-    for fecha in contados:
-        for fid in reportaron.get(fecha, ()):
-            totales[fid] += 1
-        for fid in con_cgm.get(fecha, ()):
-            automaticos[fid] += 1
-
-    filas = [
-        {
-            "frontera_id": fid,
-            "nombre_proyecto": _NOMBRES_CORREGIDOS.get(fid, nombres.get(fid, "")),
-            "dias": n,
-            "automaticos": automaticos.get(fid, 0),
-            "tasa": round(automaticos.get(fid, 0) / n * 100, 1),
-        }
-        for fid, n in totales.items() if n
-    ]
-    filas.sort(key=lambda f: (f["tasa"], -f["dias"], f["nombre_proyecto"] or ""))
-    return filas
-
-
-def _distribucion_y_detalle(
-    filas: list[tuple[int, str, str | None, int]], mapa: dict[str, str],
-    etiquetas_legibles: dict[str, str] | None = None,
-) -> tuple[list[dict], list[dict]]:
-    """A partir de (frontera_id, nombre_frontera, etiqueta_cruda, n) --
-    devuelve (a) el total agrupado global (para las tarjetas KPI) y (b) el
-    detalle por frontera+grupo con desglose de fuentes crudas (para el
-    drill-down al hacer clic en una tarjeta).
-
-    **`dias_totales` son los días REPORTABLES: 'excluida' no entra.** Antes sí
-    entraba acá y no en el gráfico de automáticos, así que una frontera con días
-    excluidos mostraba porcentajes que no sumaban 100 en un desglose y sí en el
-    otro (2026-09-15). El desglose divide `dias_grupo / dias_totales`, y el
-    gráfico de arriba divide sobre la suma de los grupos: para que los dos
-    cuenten lo mismo, el denominador tiene que ser el mismo.
-
-    Los días excluidos no se pierden: van aparte en `dias_excluidos`. No se
-    reportaron a propósito, así que no son ni un acierto ni un fallo -- son otra
-    pregunta, no una fuente peor."""
-    conteos_globales: dict[str, int] = {}
-    por_frontera: dict[int, dict] = {}
-    for fid, nombre, etiqueta_cruda, n in filas:
-        info = por_frontera.setdefault(fid, {
-            "nombre": _NOMBRES_CORREGIDOS.get(fid, nombre),
-            "dias_totales": 0, "dias_excluidos": 0, "grupos": {},
-        })
-        if etiqueta_cruda is None:
-            grupo, etq_legible = "sin_fuente", "Sin fuente"
-        else:
-            low = etiqueta_cruda.strip().lower()
-            if low == "excluida":
-                info["dias_excluidos"] += n
-                continue  # no es una fuente -- ese día no se reportó a propósito
-            grupo = mapa.get(low, "otro")
-            etq_legible = (etiquetas_legibles or {}).get(low, etiqueta_cruda)
-        info["dias_totales"] += n
-        conteos_globales[grupo] = conteos_globales.get(grupo, 0) + n
-        g = info["grupos"].setdefault(grupo, {"dias": 0, "desglose": {}})
-        g["dias"] += n
-        g["desglose"][etq_legible] = g["desglose"].get(etq_legible, 0) + n
-
-    # De mayor a menor: comparar alturas es la pregunta que hace este grafico.
-    # El orden de confianza queda de desempate, para que dos grupos empatados no
-    # bailen de posicion entre una corrida y otra.
-    global_dist = [
-        {"etiqueta": _ETIQUETA_GRUPO_FUENTE[g], "total": conteos_globales[g]}
-        for g in sorted(
-            (g for g in _ORDEN_GRUPO_FUENTE if g in conteos_globales),
-            key=lambda g: (-conteos_globales[g], _ORDEN_GRUPO_FUENTE.index(g)),
-        )
-    ]
-    detalle = [
-        {
-            "frontera_id": fid,
-            "nombre_proyecto": info["nombre"],
-            "grupo": _ETIQUETA_GRUPO_FUENTE[grupo],
-            "dias_totales": info["dias_totales"],
-            "dias_excluidos": info["dias_excluidos"],
-            "dias_grupo": g["dias"],
-            "desglose": [
-                {"etiqueta": e, "dias": n}
-                for e, n in sorted(g["desglose"].items(), key=lambda kv: -kv[1])
-            ],
-        }
-        for fid, info in por_frontera.items()
-        for grupo, g in info["grupos"].items()
-    ]
-    return global_dist, detalle
 
 
 def resumen(fecha: date) -> dict:
@@ -645,25 +306,22 @@ def _agregar_ventana_por_frontera(desde: date, hasta: date) -> list[dict]:
     """Una fila por frontera+tipo, con la ventana actual `[desde, hasta]` y la
     anterior de igual duración ya comparadas.
 
-    Reusa la MISMA agrupación de fuente que `_distribucion_y_detalle`
-    (`_GRUPO_FUENTE_GENERACION`/`_GRUPO_FUENTE_CONSUMO`/`_ETIQUETA_GRUPO_FUENTE`)
-    y la MISMA detección de día-completo-excluido que `serie_automatico`
-    (`_motivos_del_rango`) -- un día de corrida rota tiene que verse excluido
-    para TODAS las fronteras por igual, no solo para la que se esté mirando.
+    La fuente se agrupa con `_GRUPO_FUENTE_GENERACION`/`_GRUPO_FUENTE_CONSUMO`,
+    y un día de corrida rota (`_motivos_del_rango`) queda excluido para TODAS
+    las fronteras por igual.
 
     **`nunca_clasificado`** no se decide contra un catálogo de qué frontera
     "debería" tener fila (`Frontera.tipo_frontera` no alcanza para eso: una
     frontera `consumo_propio` nunca va a tener fila en generación, y no es un
     error). Se decide por CONTINUIDAD: si tuvo fila en la ventana anterior y
-    CERO en la actual, dejó de aparecer -- el mismo patrón que
-    `_fronteras_registradas_por_dia` ya usa para detectar fronteras que se
-    borraron sin que nadie lo notara. Una fila sin historial en NINGUNA de las
+    CERO en la actual, dejó de aparecer -- así pasaron desapercibidas las 9
+    fronteras que se borraron el 2026-09-15. Una fila sin historial en NINGUNA de las
     dos ventanas simplemente no aparece en el resultado: no es un dato nuestro.
     """
     previo_desde, previo_hasta = _ventana_anterior(desde, hasta)
     rango_desde, rango_hasta = previo_desde, hasta
 
-    clasificadas, por_mitad, con_cgm, _nombres = _clasificadas_y_cgm_por_dia(rango_desde, rango_hasta)
+    clasificadas, por_mitad, con_cgm = _clasificadas_y_cgm_por_dia(rango_desde, rango_hasta)
     motivos = _motivos_del_rango(rango_desde, rango_hasta, clasificadas, por_mitad, con_cgm)
 
     acumulado: dict[tuple[int, str], dict] = {}
@@ -691,7 +349,7 @@ def _agregar_ventana_por_frontera(desde: date, hasta: date) -> list[dict]:
             # "excluida" es la exclusión A MANO de esta fila puntual (una
             # `ReporteEnergiaExclusion` resuelta) -- distinta del motivo de
             # `_motivos_del_rango`, que es la corrida ENTERA fallando. Las dos
-            # cuentan como excluido, igual que ya hacía `_distribucion_y_detalle`.
+            # cuentan como excluido.
             excluido = motivos[f["fecha"]] is not None or crudo == "excluida"
             if excluido:
                 if v is info["actual"]:
@@ -770,7 +428,7 @@ def resumen_ventana(desde: date, hasta: date) -> dict:
     """La tabla unificada del Resumen: una fila por frontera+tipo con su tasa
     de automático, la fuente dominante cuando no lo fue, y cómo cambió contra
     el período inmediatamente anterior de igual duración -- reemplaza a los
-    tres gráficos separados que mostraba `resumen_historico` (fuente de
+    tres gráficos separados que mostraba el Resumen viejo (fuente de
     generación, fuente de consumo, automático-vs-otra-fuente): la maqueta que
     aprobó la usuaria fusiona esas tres preguntas en una sola fila por
     frontera, más 5 tarjetas KPI.
@@ -845,8 +503,8 @@ def listar_fronteras(fecha: date, tipo: str | None = None,
             # `automatico`/`grupo_fuente`/`etiqueta_fuente`: para que el tab Día
             # del Resumen no reimplemente la agrupación de fuente en el
             # frontend -- misma regla que `_semaforo`/`resumen` (caso decide
-            # automático) y `_distribucion_y_detalle` (medidor_usado decide la
-            # fuente, solo cuando NO fue automático).
+            # automático) y `_agregar_ventana_por_frontera` (medidor_usado
+            # decide la fuente, solo cuando NO fue automático).
             automatico = str(rep.caso) in ("1", "CGM")
             grupo_fuente = etiqueta_fuente = None
             if not automatico:
