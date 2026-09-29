@@ -1,13 +1,18 @@
-"""Relays (reconectadores) de las plantas, vía Solenium.
+"""Relays (reconectadores) de las plantas.
 
-Todo el trato con Solenium vive acá: la vista solo elige proyectos y traduce a
-HTTP. Dos rutas de credenciales, y la diferencia importa:
+Todo el trato con el proveedor vive acá: la vista solo elige proyectos y
+traduce a HTTP. Leer y mandar un comando van por caminos distintos:
 
-- **Leer** el estado usa las credenciales del SERVIDOR (`SoleniumClient`): la
-  pantalla debe cargar sin pedirle nada al usuario.
-- **Mandar un ON/OFF** exige las credenciales del USUARIO en el cuerpo de la
-  petición, se validan contra Solenium en cada llamada y NO se guardan. Abrir o
-  cerrar un relay apaga una planta: tiene que quedar atribuido a una persona.
+- **Leer** el estado sale de SolarView (`api.sole.tech`), con el token del
+  servidor y por `project_id_solarview`: `GET /solarview/config/recloser/?project_id=`
+  devuelve la medición más reciente con las mismas claves que traía Solenium
+  (`active`, `time`, `i_a`… `pf`). Verificado en vivo el 2026-09-29: 25 de las
+  39 plantas de SolarView tienen reconectador; las otras responden 404.
+- **Mandar un ON/OFF** sigue en Solenium (`data.sole.tech`): exige las
+  credenciales del USUARIO en el cuerpo de la petición, se validan en cada
+  llamada y NO se guardan. Abrir o cerrar un relay apaga una planta: tiene que
+  quedar atribuido a una persona. SolarView todavía no tiene un endpoint
+  documentado para el comando; se revisa aparte.
 """
 
 import logging
@@ -19,24 +24,25 @@ from apps.comun.config import settings
 
 logger = logging.getLogger("operaciones.reconectadores")
 
-# Las URLs salen de la configuracion, no hardcodeadas. Estaban fijas en este
-# archivo y cuando Solenium migro de solenium.co a sole.tech (2026-09-07) el
-# ON/OFF de los relays quedo roto sin que hubiera forma de arreglarlo sin
-# desplegar. Ahora es el mismo `SOLENIUM_*` que usa `SoleniumClient` para leer,
-# asi que las dos rutas de credenciales apuntan siempre al mismo servidor -- que
-# apuntaran a hosts distintos era un bug esperando.
+# Las URLs del comando salen de la configuracion, no hardcodeadas. Estaban fijas
+# en este archivo y cuando Solenium migro de solenium.co a sole.tech
+# (2026-09-07) el ON/OFF de los relays quedo roto sin que hubiera forma de
+# arreglarlo sin desplegar.
 _AUTH = settings.SOLENIUM_AUTH_URL.rstrip("/").removesuffix("/token")
 _DATA = settings.SOLENIUM_DATA_URL.rstrip("/")
 
 AUTH_URL = f"{_AUTH}/token/"
 RELAY_SET = f"{_DATA}/project/{{sol_id}}/relay/set-status/"
-RELAY_GET = f"{_DATA}/project/{{sol_id}}/relay/"
 
-# Solenium tarda; 8 en paralelo es lo que hace que la pantalla cargue.
+# La lectura: ruta relativa a `SOLARVIEW_BASE_URL`. El parámetro es
+# `project_id`, no `recloser` como en el histórico (la documentación no lo dice).
+RELAY_ACTUAL = "/solarview/config/recloser/"
+
+# ~175 ms por planta; 8 en paralelo para que la pantalla cargue rápido.
 HILOS = 8
 
-# Medida de Solenium -> campo de la respuesta. Son las mismas columnas del panel
-# "Reconectadores" de Solenium.
+# Medida del proveedor -> campo de la respuesta. Son las mismas columnas del
+# panel "Reconectadores", y las mismas claves en Solenium y en SolarView.
 TELEMETRIA = {
     "corriente_a": "i_a", "corriente_b": "i_b", "corriente_c": "i_c",
     "corriente_n": "i_n",
@@ -47,7 +53,7 @@ TELEMETRIA = {
 }
 
 
-class SoleniumNoConfigurado(RuntimeError):
+class SolarViewNoConfigurado(RuntimeError):
     pass
 
 
@@ -67,45 +73,55 @@ _cliente = None
 
 
 def cliente():
-    """El `SoleniumClient` del servidor, creado una vez."""
+    """El `SolarViewClient` del servidor, creado una vez."""
     global _cliente
     if _cliente is None:
-        from app.services.mgs.solenium_client import SoleniumClient
+        from app.services.mgs.solarview_client import SolarViewClient
 
-        _cliente = SoleniumClient()
+        _cliente = SolarViewClient()
     if not _cliente.enabled:
-        raise SoleniumNoConfigurado("Solenium no configurado en el servidor")
+        raise SolarViewNoConfigurado(
+            "SolarView no configurado en el servidor (SOLARVIEW_TOKEN)")
     return _cliente
 
 
+def url_relay(c) -> str:
+    return f"{c._base_url}{RELAY_ACTUAL}"
+
+
 def _numero(valor) -> float | None:
-    """Solenium a veces manda las medidas como texto o como null."""
+    """El proveedor a veces manda las medidas como texto o como null."""
     try:
         return float(valor)
     except (TypeError, ValueError):
         return None
 
 
-def leer_relay(sol_id: int) -> tuple[bool, dict]:
-    """Devuelve (tiene reconectador, medidas).
+def leer_relay(sv_id: int) -> tuple[bool, dict]:
+    """Devuelve (tiene reconectador, medidas), con el id de SolarView.
 
-    `False` cubre DOS casos que no se pueden distinguir desde acá: Solenium
+    `False` cubre DOS casos que no se pueden distinguir desde acá: SolarView
     respondió 404 (la planta no tiene relay físico) o hubo error/timeout (no se
     pudo confirmar). En ambos el proyecto se omite del listado, porque mostrarlo
     "sin dato" sugeriría que tiene relay y está caído.
     """
     try:
-        datos = cliente()._get(RELAY_GET.format(sol_id=sol_id))
+        c = cliente()
+        datos = c._get(url_relay(c), params={"project_id": sv_id})
         if not datos:
             return False, {}
         return True, (datos.get("results") or {})
     except Exception as exc:
-        logger.warning("relay_get sol_id=%d error=%s", sol_id, exc)
+        logger.warning("relay_get sv_id=%d error=%s", sv_id, exc)
         return False, {}
 
 
 def build_estado(proyecto_id: int, nombre: str, sol_id: int, medidas: dict) -> dict:
-    """Traduce el `results` de Solenium a la forma que consume el móvil."""
+    """Traduce el `results` del proveedor a la forma que consume el móvil.
+
+    `sol_id` es el id de SolarView de la planta. El nombre del campo se
+    conserva por compatibilidad; el ON/OFF no lo usa (va por el id del proyecto).
+    """
     momento = medidas.get("time")
     estado = {
         "proyecto_id": proyecto_id,
@@ -124,22 +140,22 @@ def build_estado(proyecto_id: int, nombre: str, sol_id: int, medidas: dict) -> d
 def estados_de(proyectos) -> list[dict]:
     """El estado de cada proyecto, consultados en paralelo.
 
-    Los proyectos sin relay o con `project_id_solenium` no numérico se omiten.
+    Los proyectos sin relay o con `project_id_solarview` no numérico se omiten.
     """
     def uno(proyecto):
         try:
-            sol_id = int(proyecto.project_id_solenium)
+            sv_id = int(proyecto.project_id_solarview)
         except (TypeError, ValueError):
             logger.warning(
-                "project_id_solenium inválido proyecto_id=%s valor=%r",
-                proyecto.id, proyecto.project_id_solenium,
+                "project_id_solarview inválido proyecto_id=%s valor=%r",
+                proyecto.id, proyecto.project_id_solarview,
             )
             return None
-        tiene, medidas = leer_relay(sol_id)
+        tiene, medidas = leer_relay(sv_id)
         if not tiene:
             return None
         return build_estado(
-            proyecto.id, proyecto.nombre_comercial, sol_id, medidas
+            proyecto.id, proyecto.nombre_comercial, sv_id, medidas
         )
 
     with ThreadPoolExecutor(max_workers=HILOS) as pool:

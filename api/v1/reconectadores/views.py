@@ -28,12 +28,13 @@ class ReconectadorViewSet(viewsets.GenericViewSet):
     """Estado y comandos ON/OFF de los relays.
 
     GET  /api/v1/reconectadores/estados                estado y telemetría de todos
-    GET  /api/v1/reconectadores/debug-relay/{id}       respuesta cruda de Solenium
+    GET  /api/v1/reconectadores/debug-relay/{id}       respuesta cruda de SolarView
     POST /api/v1/reconectadores/{id}/comando           ON/OFF
 
-    Leer usa las credenciales del servidor. **Mandar un comando exige las del
-    usuario** en el cuerpo: se validan contra Solenium en cada llamada y no se
-    almacenan. Abrir un relay apaga una planta y tiene que quedar atribuido.
+    Leer va a SolarView con el token del servidor. **Mandar un comando** sigue en
+    Solenium y **exige las credenciales del usuario** en el cuerpo: se validan en
+    cada llamada y no se almacenan. Abrir un relay apaga una planta y tiene que
+    quedar atribuido.
     """
 
     permission_classes = [RolePermission]
@@ -45,7 +46,7 @@ class ReconectadorViewSet(viewsets.GenericViewSet):
     def estados(self, request):
         try:
             relay_service.cliente()
-        except relay_service.SoleniumNoConfigurado as exc:
+        except relay_service.SolarViewNoConfigurado as exc:
             return Response({"detail": str(exc)}, status=503)
 
         estados = relay_service.estados_de(relay_queryset.proyectos_con_relay())
@@ -58,26 +59,29 @@ class ReconectadorViewSet(viewsets.GenericViewSet):
         url_path=r"debug-relay/(?P<proyecto_id>[^/.]+)",
     )
     def debug_relay(self, request, proyecto_id=None):
-        """Respuesta cruda de Solenium para el relay de un proyecto."""
+        """Respuesta cruda de SolarView para el relay de un proyecto."""
         try:
             cliente = relay_service.cliente()
-        except relay_service.SoleniumNoConfigurado as exc:
+        except relay_service.SolarViewNoConfigurado as exc:
             return Response({"detail": str(exc)}, status=503)
 
         proyecto = py_models.Proyecto.objects.filter(pk=proyecto_id).first()
-        if proyecto is None or not proyecto.project_id_solenium:
-            raise NotFound("Proyecto sin sol_id")
+        try:
+            sv_id = int(proyecto.project_id_solarview) if proyecto else None
+        except (TypeError, ValueError):
+            sv_id = None
+        if sv_id is None:
+            raise NotFound("Proyecto sin project_id_solarview")
 
-        sol_id = int(proyecto.project_id_solenium)
-        url = relay_service.RELAY_GET.format(sol_id=sol_id)
-        tiene, medidas = relay_service.leer_relay(sol_id)
+        url = relay_service.url_relay(cliente)
+        tiene, medidas = relay_service.leer_relay(sv_id)
         return Response({
-            "sol_id": sol_id,
+            "sol_id": sv_id,
             "url": url,
-            "raw": cliente._get(url),
+            "raw": cliente._get(url, params={"project_id": sv_id}),
             "tiene_reconectador": tiene,
             "parsed": relay_service.build_estado(
-                proyecto.id, proyecto.nombre_comercial, sol_id, medidas
+                proyecto.id, proyecto.nombre_comercial, sv_id, medidas
             ) if tiene else None,
         })
 
