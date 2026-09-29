@@ -122,7 +122,7 @@ def _sembrar(frontera, dias_automaticos_previo, dias_automaticos_actual):
 def _fila(frontera_id):
     from apps.energia.services.reporte.vistas import resumen_ventana
 
-    r = resumen_ventana(DESDE, HASTA, None)
+    r = resumen_ventana(DESDE, HASTA)
     fila = next(f for f in r["filas"] if f["frontera_id"] == frontera_id)
     return fila, r["kpis"]
 

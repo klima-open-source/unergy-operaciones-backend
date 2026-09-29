@@ -641,7 +641,7 @@ def _ventana_vacia() -> dict:
     }
 
 
-def _agregar_ventana_por_frontera(desde: date, hasta: date, frontera_id: int | None = None) -> list[dict]:
+def _agregar_ventana_por_frontera(desde: date, hasta: date) -> list[dict]:
     """Una fila por frontera+tipo, con la ventana actual `[desde, hasta]` y la
     anterior de igual duración ya comparadas.
 
@@ -666,7 +666,6 @@ def _agregar_ventana_por_frontera(desde: date, hasta: date, frontera_id: int | N
     clasificadas, por_mitad, con_cgm, _nombres = _clasificadas_y_cgm_por_dia(rango_desde, rango_hasta)
     motivos = _motivos_del_rango(rango_desde, rango_hasta, clasificadas, por_mitad, con_cgm)
 
-    solo_una = {"frontera_id": frontera_id} if frontera_id is not None else {}
     acumulado: dict[tuple[int, str], dict] = {}
 
     for modelo, campo, tipo, mapa_fuente in (
@@ -674,16 +673,15 @@ def _agregar_ventana_por_frontera(desde: date, hasta: date, frontera_id: int | N
         (ReporteEnergiaConsumo, "caso", "consumo", _GRUPO_FUENTE_CONSUMO),
     ):
         filas = (
-            modelo.objects.filter(fecha__range=(rango_desde, rango_hasta), **solo_una)
+            modelo.objects.filter(fecha__range=(rango_desde, rango_hasta))
             .values("frontera_id", "frontera__nombre_frontera", "frontera__codigo_frontera",
-                    "frontera__proyecto_id", "fecha", campo)
+                    "fecha", campo)
         )
         for f in filas:
             fid = f["frontera_id"]
             clave = (fid, tipo)
             info = acumulado.setdefault(clave, {
                 "nombre_proyecto": _NOMBRES_CORREGIDOS.get(fid, f["frontera__nombre_frontera"]),
-                "proyecto_id": f["frontera__proyecto_id"],
                 "codigo_frontera": f["frontera__codigo_frontera"],
                 "actual": _ventana_vacia(), "previo": _ventana_vacia(),
             })
@@ -741,7 +739,7 @@ def _agregar_ventana_por_frontera(desde: date, hasta: date, frontera_id: int | N
             ]
 
         filas_resultado.append({
-            "frontera_id": fid, "proyecto_id": info["proyecto_id"], "tipo": tipo,
+            "frontera_id": fid, "tipo": tipo,
             "nombre_proyecto": info["nombre_proyecto"], "codigo_frontera": info["codigo_frontera"],
             "dias_automaticos": act["automaticos"], "dias_no_automaticos": act["no_automaticos"],
             "tasa": tasa, "nunca_clasificado": nunca_clasificado,
@@ -768,7 +766,7 @@ def _agregar_ventana_por_frontera(desde: date, hasta: date, frontera_id: int | N
 UMBRAL_DIAS_CAMBIO = 2
 
 
-def resumen_ventana(desde: date, hasta: date, frontera_id: int | None = None) -> dict:
+def resumen_ventana(desde: date, hasta: date) -> dict:
     """La tabla unificada del Resumen: una fila por frontera+tipo con su tasa
     de automático, la fuente dominante cuando no lo fue, y cómo cambió contra
     el período inmediatamente anterior de igual duración -- reemplaza a los
@@ -780,7 +778,7 @@ def resumen_ventana(desde: date, hasta: date, frontera_id: int | None = None) ->
     if hasta < desde:
         raise NoProcesable("'hasta' no puede ser anterior a 'desde'")
 
-    filas = _agregar_ventana_por_frontera(desde, hasta, frontera_id)
+    filas = _agregar_ventana_por_frontera(desde, hasta)
 
     dias_automaticos_totales = sum(f["dias_automaticos"] for f in filas)
     dias_totales = sum(f["dias_automaticos"] + f["dias_no_automaticos"] for f in filas)
@@ -824,7 +822,6 @@ def resumen_ventana(desde: date, hasta: date, frontera_id: int | None = None) ->
             "mejoraron": mejoraron,
             "empeoraron": empeoraron,
         },
-        "frontera_id": frontera_id,
     }
 
 

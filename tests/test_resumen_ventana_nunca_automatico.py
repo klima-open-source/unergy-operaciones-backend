@@ -109,7 +109,7 @@ def _ancla():
 def _ventana():
     from apps.energia.services.reporte.vistas import resumen_ventana
 
-    return resumen_ventana(DESDE, HASTA, None)
+    return resumen_ventana(DESDE, HASTA)
 
 
 def test_cero_por_ciento_con_datos_reales_cuenta_como_nunca(base_limpia):

@@ -101,7 +101,7 @@ def _ancla():
 def _fila(frontera_id):
     from apps.energia.services.reporte.vistas import resumen_ventana
 
-    r = resumen_ventana(DESDE, _dia(6), None)
+    r = resumen_ventana(DESDE, _dia(6))
     return next(f for f in r["filas"] if f["frontera_id"] == frontera_id)
 
 
