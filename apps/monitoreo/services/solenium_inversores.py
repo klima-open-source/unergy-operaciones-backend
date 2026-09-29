@@ -1,77 +1,34 @@
-"""Inversores de una planta desde Solenium, con su token en caché.
+"""Inversores de una planta desde Solenium (`data.sole.tech`).
 
-`ponytail: caché de token en un dict de módulo`. El token vale ~20 h y con
-`WORKERS=1` un solo proceso lo comparte. Al subir workers cada uno pedirá el
-suyo — funciona igual, solo son más llamadas de auth.
+Se autentica con el token de sole.tech (`apps.comun.sole_tech`). Hasta el
+2026-09-29 hacía su propio login con usuario y contraseña y guardaba el JWT
+20 h en un dict de módulo; ese login ya no funciona.
 """
 
 import logging
-import os
-import time
 
 import httpx
 
+from apps.comun import sole_tech
+from apps.comun.config import settings
+
 logger = logging.getLogger("operaciones.monitoreo")
 
-TTL_TOKEN = 20 * 3600
 # Cuántas palabras del nombre tienen que coincidir para dar por bueno el match.
 UMBRAL_MATCH = 0.5
-
-_token: dict = {"valor": None, "expira": 0.0}
-
-
-def _env(nombre: str) -> str:
-    return os.environ.get(nombre, "")
-
-
-def token() -> str | None:
-    ahora = time.time()
-    if _token["valor"] and ahora < _token["expira"]:
-        return _token["valor"]
-    if not _env("SOLENIUM_USER") or not _env("SOLENIUM_PASS"):
-        return None
-    try:
-        with httpx.Client(timeout=30) as http:
-            respuesta = http.post(
-                _env("SOLENIUM_AUTH_URL"),
-                json={
-                    "username": _env("SOLENIUM_USER"),
-                    "password": _env("SOLENIUM_PASS"),
-                },
-            )
-        if respuesta.status_code != 200:
-            return None
-        datos = respuesta.json()
-    except Exception:
-        logger.debug("auth de Solenium falló", exc_info=True)
-        return None
-
-    valor = datos.get("access") or datos.get("token") or datos.get("key") or ""
-    if valor:
-        _token["valor"], _token["expira"] = valor, ahora + TTL_TOKEN
-    return valor or None
-
-
-def _invalidar():
-    _token["valor"] = None
 
 
 def inversores(proyecto) -> tuple[list, str | None]:
     """(inversores, error). Nunca levanta: el error viaja como texto."""
-    tok = token()
-    if not tok:
-        return [], "Solenium no configurado o sin credenciales"
+    if not sole_tech.configurado():
+        return [], "Solenium no configurado: falta el token de sole.tech"
 
-    cabeceras = {"Authorization": f"Bearer {tok}"}
+    datos = settings.SOLENIUM_DATA_URL.rstrip("/")
     try:
-        with httpx.Client(timeout=30) as http:
-            listado = http.get(
-                f'{_env("SOLENIUM_DATA_URL")}/project/',
-                params={"menu": "1"}, headers=cabeceras,
-            )
+        with httpx.Client(timeout=30, headers=sole_tech.cabeceras()) as http:
+            listado = http.get(f"{datos}/project/", params={"menu": "1"})
             if listado.status_code == 401:
-                _invalidar()
-                return [], "Solenium: sesión expirada"
+                return [], "Solenium: el token de sole.tech fue rechazado"
 
             sol_id = proyecto.project_id_solenium or ""
             if not sol_id:
@@ -82,16 +39,9 @@ def inversores(proyecto) -> tuple[list, str | None]:
                     "project_id_solenium en el proyecto)"
                 )
 
-            detalle = http.get(
-                f'{_env("SOLENIUM_DATA_URL")}/project/{sol_id}/inverter/',
-                headers=cabeceras,
-            )
-            # El token se invalida TAMBIÉN acá: si solo se limpiaba en la
-            # primera llamada, un 401 en /inverter/ dejaba el token vencido en
-            # caché hasta 20 h y todos los sondeos seguían fallando.
+            detalle = http.get(f"{datos}/project/{sol_id}/inverter/")
             if detalle.status_code == 401:
-                _invalidar()
-                return [], "Solenium: sesión expirada"
+                return [], "Solenium: el token de sole.tech fue rechazado"
             if detalle.status_code != 200:
                 return [], f"Solenium inversores HTTP {detalle.status_code}"
 

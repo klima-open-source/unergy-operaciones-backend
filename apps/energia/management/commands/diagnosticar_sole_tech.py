@@ -1,22 +1,18 @@
 """Qué responde hoy cada API de sole.tech que usa la plataforma, y cuánto tarda.
 
-**Solo lee. No escribe nada, ni en la base ni en sole.tech.** El único POST es
-el de pedir un token con usuario y contraseña (`auth.sole.tech/api/token/`),
-que no cambia nada del otro lado.
+**Solo lee. No escribe nada, ni en la base ni en sole.tech:** todas las
+llamadas son GET.
 
-Para qué. La plataforma entra a sole.tech por dos puertas:
+Todo sole.tech entra con el mismo token (`Authorization: Token <TOKEN>`, ver
+`apps/comun/sole_tech.py`), en sus tres hosts:
 
-  - **Usuario y contraseña** (`SOLENIUM_USER`/`SOLENIUM_PASS` contra
-    `auth.sole.tech`, JWT para `data.sole.tech`): alarmas, inversores de
-    monitoreo y de puesta en marcha, potencia del dashboard, reconectadores.
-  - **Token** (`SOLARVIEW_TOKEN` contra `api.sole.tech`): generación solar,
-    flota, detalle.
+  - `data.sole.tech` (Solenium): alarmas, inversores de monitoreo y de puesta
+    en marcha, potencia del dashboard, estado de los reconectadores.
+  - `api.sole.tech` (SolarView): generación solar, flota, detalle.
+  - `sunfactory.sole.tech`: el pipeline de obra.
 
-Antes de pasar a SolarView lo que sigue por la primera hay que saber qué está
-muerto de verdad y qué no, y cuánto tarda cada endpoint. Desde local no se puede:
-el `.env` local no trae esas credenciales.
-
-Se corre en el servidor:
+Desde local no se puede correr: el `.env` local no trae el token. Va en el
+servidor:
 
     docker compose exec operaciones python manage.py diagnosticar_sole_tech
 
@@ -98,11 +94,6 @@ def ids_enteros(valores) -> list[int]:
     return ids
 
 
-def _base_auth(url: str) -> str:
-    """`SOLENIUM_AUTH_URL` llega con y sin `/token` al final; los clientes lo quitan igual."""
-    return url.rstrip("/").removesuffix("/token")
-
-
 class Command(BaseCommand):
     help = "Mide qué responde cada API de sole.tech que usa la plataforma (solo lectura)."
 
@@ -138,63 +129,47 @@ class Command(BaseCommand):
 
         self._imprimir(medidas)
 
-    # ── Usuario y contraseña: auth.sole.tech + data.sole.tech ────────────────
+    # ── data.sole.tech (Solenium) y sunfactory.sole.tech ────────────────────
 
     def _solenium(self, http, settings, sol_id) -> list[Medida]:
-        self._titulo("Usuario y contraseña (auth.sole.tech → data.sole.tech)")
-        usuario, clave = settings.SOLENIUM_USER, settings.SOLENIUM_PASS
-        if not (usuario and clave):
-            self.stdout.write(self.style.WARNING("  SOLENIUM_USER / SOLENIUM_PASS vacíos en este .env"))
+        from apps.comun import sole_tech
+
+        self._titulo("data.sole.tech (Solenium) y sunfactory.sole.tech")
+        if not sole_tech.configurado():
+            self.stdout.write(self.style.WARNING("  SOLARVIEW_TOKEN vacío en este .env"))
             return []
 
-        auth = _base_auth(settings.SOLENIUM_AUTH_URL)
         data = settings.SOLENIUM_DATA_URL.rstrip("/")
-        login, cuerpo = medir(
-            http, "login usuario/contraseña", "POST", f"{auth}/token/",
-            json={"username": usuario, "password": clave},
-        )
-        medidas = [login]
-        token = (cuerpo or {}).get("access") if login.ok and isinstance(cuerpo, dict) else None
-        if not token:
-            self.stdout.write(self.style.WARNING(
-                "  Sin token: no se prueban los endpoints de data.sole.tech con JWT."
-            ))
-        else:
-            cabeceras = {"Authorization": f"Bearer {token}"}
-            llamadas = [
-                ("proyectos (inversores de monitoreo)", f"{data}/project/", {"menu": 1}),
-                ("disponibilidad (alarmas)", f"{data}/project_availability/", None),
-                ("resumen de flota (dashboard)", f"{data}/project_summary/", None),
+        sunfactory = settings.SUNFACTORY_API_URL.rstrip("/")
+        llamadas = [
+            ("proyectos (inversores de monitoreo)", f"{data}/project/", {"menu": 1}),
+            ("disponibilidad (alarmas)", f"{data}/project_availability/", None),
+            ("resumen de flota (dashboard)", f"{data}/project_summary/", None),
+            ("proyectos de Sun Factory (pipeline de obra)", f"{sunfactory}/project/", {"limit": 1}),
+        ]
+        if sol_id:
+            llamadas += [
+                (f"inversores de {sol_id} (monitoreo / puesta en marcha)",
+                 f"{data}/project/{sol_id}/inverter/", None),
+                (f"relay de {sol_id} (reconectadores)", f"{data}/project/{sol_id}/relay/", None),
             ]
-            if sol_id:
-                llamadas += [
-                    (f"inversores de {sol_id} (monitoreo / puesta en marcha)",
-                     f"{data}/project/{sol_id}/inverter/", None),
-                    (f"relay de {sol_id} (reconectadores)", f"{data}/project/{sol_id}/relay/", None),
-                ]
-            for que, url, params in llamadas:
-                medidas.append(medir(http, que, "GET", url, headers=cabeceras, params=params)[0])
-
-        # Si data.sole.tech aceptara el token de SolarView, la migración de
-        # esos servicios sería solo cambiar la cabecera.
-        if settings.SOLARVIEW_TOKEN:
-            medidas.append(medir(
-                http, "data.sole.tech con el TOKEN de SolarView", "GET", f"{data}/project/",
-                headers={"Authorization": f"Token {settings.SOLARVIEW_TOKEN}"},
-            )[0])
-        return medidas
+        return [
+            medir(http, que, "GET", url, headers=sole_tech.cabeceras(), params=params)[0]
+            for que, url, params in llamadas
+        ]
 
     # ── Token: api.sole.tech ────────────────────────────────────────────────
 
     def _solarview(self, http, settings, sv_id, ayer, hoy) -> list[Medida]:
-        self._titulo("Token (api.sole.tech)")
-        token = settings.SOLARVIEW_TOKEN
-        if not token:
+        from apps.comun import sole_tech
+
+        self._titulo("api.sole.tech (SolarView)")
+        if not sole_tech.configurado():
             self.stdout.write(self.style.WARNING("  SOLARVIEW_TOKEN vacío en este .env"))
             return []
 
         base = settings.SOLARVIEW_BASE_URL.rstrip("/")
-        cabeceras = {"Authorization": f"Token {token}"}
+        cabeceras = sole_tech.cabeceras()
         llamadas = [
             ("disponibilidad de la flota", f"{base}/solarview/kpis/availability/", None),
             ("proyectos de la compañía", f"{base}/solarview/config/company-projects/", None),
@@ -222,11 +197,13 @@ class Command(BaseCommand):
 
     def _flota(self, http, settings, ids, ayer, hoy):
         self._titulo(f"generacion_hoy(): /generation/ por planta, de a {HILOS_FLOTA}")
-        if not settings.SOLARVIEW_TOKEN:
+        from apps.comun import sole_tech
+
+        if not sole_tech.configurado():
             self.stdout.write(self.style.WARNING("  SOLARVIEW_TOKEN vacío: no se mide"))
             return
         url = f"{settings.SOLARVIEW_BASE_URL.rstrip('/')}/solarview/measurements/generation/"
-        cabeceras = {"Authorization": f"Token {settings.SOLARVIEW_TOKEN}"}
+        cabeceras = sole_tech.cabeceras()
 
         def una(sv_id: int) -> Medida:
             return medir(http, str(sv_id), "GET", url, headers=cabeceras, params={

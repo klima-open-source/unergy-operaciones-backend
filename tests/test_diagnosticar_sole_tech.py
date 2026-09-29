@@ -1,4 +1,4 @@
-"""El diagnóstico de sole.tech: mide, no se cae, y no escribe.
+"""El diagnóstico de sole.tech: mide, no se cae, no escribe y no hace login.
 
 Se corre en el servidor contra APIs que pueden estar muertas, así que un
 timeout, un 401 o un DNS caído tienen que salir como una línea del reporte y no
@@ -73,15 +73,25 @@ def test_los_ids_vacios_o_raros_se_saltan():
 
 
 def test_solo_lee():
-    """El único POST es el de pedir el token. Un ON/OFF de relay o cualquier
-    otra escritura acá apagaría una planta desde un comando de diagnóstico."""
+    """Todo es GET. Un ON/OFF de relay o cualquier otra escritura acá apagaría
+    una planta desde un comando de diagnóstico."""
     import inspect
 
     from apps.energia.management.commands import diagnosticar_sole_tech as modulo
 
     fuente = inspect.getsource(modulo)
 
-    assert fuente.count('"POST"') == 1
-    assert '"POST", f"{auth}/token/"' in fuente
-    for verbo in ('"PUT"', '"PATCH"', '"DELETE"', "set-status"):
+    for verbo in ('"POST"', '"PUT"', '"PATCH"', '"DELETE"', "set-status"):
         assert verbo not in fuente
+
+
+def test_ya_no_hace_login():
+    """Todo sole.tech entra con el token: ni usuario ni contraseña."""
+    import inspect
+
+    from apps.energia.management.commands import diagnosticar_sole_tech as modulo
+
+    fuente = inspect.getsource(modulo)
+
+    for resto in ("SOLENIUM_USER", "SOLENIUM_PASS", "auth.sole.tech", "Bearer"):
+        assert resto not in fuente

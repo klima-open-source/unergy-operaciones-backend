@@ -31,6 +31,7 @@ from django.db.models import Case, F, IntegerField, Q, Value, When
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
+from apps.comun import sole_tech
 from apps.comun.config import settings
 from apps.comun.nombre_matching import mejor_candidato
 from apps.proyectos.models import Proyecto
@@ -107,17 +108,12 @@ def _tsf_code_from_base_name(base_name: str | None) -> str | None:
 # ── Cronogramas EPC de Sun Factory (Solenium) ───────────────────────────────────
 
 def _sunfactory_token() -> str | None:
-    user = settings.SUNFACTORY_USERNAME or settings.SOLENIUM_USER
-    password = settings.SUNFACTORY_PASSWORD or settings.SOLENIUM_PASS
-    if not (user and password and settings.SUNFACTORY_AUTH_URL):
-        return None
-    with httpx.Client(timeout=30) as client:
-        resp = client.post(
-            settings.SUNFACTORY_AUTH_URL,
-            json={"username": user, "password": password},
-        )
-        resp.raise_for_status()
-        return resp.json()["access"]
+    """El token de sole.tech, o None si no está configurado.
+
+    Sun Factory ya no entra con usuario y contraseña: como todo sole.tech, se
+    autentica con `Authorization: Token <TOKEN>` (ver `apps.comun.sole_tech`).
+    """
+    return sole_tech.token() or None
 
 
 def _pick_energization_milestone(milestones: list[dict]) -> dict | None:
@@ -148,7 +144,7 @@ def _sunfactory_milestones_raw(token: str, project_id: int) -> list[dict]:
     base = settings.SUNFACTORY_API_URL.rstrip("/")
     milestones: list[dict] = []
     url: str | None = f"{base}/project/{project_id}/milestones/?limit=200"
-    with httpx.Client(timeout=40, headers={"Authorization": f"Bearer {token}"}) as client:
+    with httpx.Client(timeout=40, headers=sole_tech.cabeceras(token)) as client:
         pages = 0
         while url and pages < 20:
             resp = client.get(url)
@@ -193,7 +189,7 @@ def _sunfactory_all_projects(token: str) -> list[dict]:
     base = settings.SUNFACTORY_API_URL.rstrip("/")
     url: str | None = f"{base}/project/?limit=200"
     out: list[dict] = []
-    with httpx.Client(timeout=60, headers={"Authorization": f"Bearer {token}"}) as client:
+    with httpx.Client(timeout=60, headers=sole_tech.cabeceras(token)) as client:
         pages = 0
         while url and pages < 30:
             resp = client.get(url)
@@ -222,13 +218,9 @@ def fetch_sunfactory_projects(enrich_dates: bool = True) -> tuple[list[dict], li
        monthly_mwh }`. `origina_code` = base_name (o `SF-<id>` si no tiene),
     usado como llave estable de upsert."""
     warnings: list[str] = []
-    try:
-        token = _sunfactory_token()
-    except Exception as exc:
-        logger.warning("Sun Factory auth falló: %s", exc)
-        return [], [f"No se pudo autenticar contra Sun Factory: {exc}"]
+    token = _sunfactory_token()
     if not token:
-        return [], ["Credenciales de Sun Factory no configuradas (SUNFACTORY_/SOLENIUM_)."]
+        return [], ["Token de sole.tech no configurado (SOLARVIEW_TOKEN)."]
 
     try:
         raw = _sunfactory_all_projects(token)

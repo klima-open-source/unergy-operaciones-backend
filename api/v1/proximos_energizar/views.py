@@ -77,7 +77,7 @@ class ProximosEnergizarViewSet(viewsets.GenericViewSet):
 
         token = _sunfactory_token()
         if not token:
-            raise ServicioNoDisponible("Credenciales de Sun Factory no configuradas.")
+            raise ServicioNoDisponible("Token de sole.tech no configurado (SOLARVIEW_TOKEN).")
         try:
             milestones = _sunfactory_milestones_raw(token, p.sunfactory_project_id)
         except Exception as exc:
