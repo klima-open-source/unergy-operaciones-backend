@@ -1,0 +1,87 @@
+"""El diagnóstico de sole.tech: mide, no se cae, y no escribe.
+
+Se corre en el servidor contra APIs que pueden estar muertas, así que un
+timeout, un 401 o un DNS caído tienen que salir como una línea del reporte y no
+como un traceback a mitad de camino.
+"""
+import httpx
+import pytest
+
+django = pytest.importorskip("django", reason="requiere el entorno de Django (uv sync)")
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _base():
+    import os
+
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    os.environ.setdefault("SECRET_KEY", "x" * 40)
+    django.setup()
+
+
+def _cliente(manejador) -> httpx.Client:
+    return httpx.Client(transport=httpx.MockTransport(manejador))
+
+
+def test_una_respuesta_buena_cuenta_lo_que_trae():
+    from apps.energia.management.commands.diagnosticar_sole_tech import medir
+
+    with _cliente(lambda r: httpx.Response(200, json={"results": [1, 2, 3]})) as http:
+        m, cuerpo = medir(http, "prueba", "GET", "https://api.sole.tech/x/")
+
+    assert m.ok
+    assert m.estado == 200
+    assert m.nota == "3 elementos"
+    assert cuerpo == {"results": [1, 2, 3]}
+
+
+def test_un_401_es_una_falla_con_su_motivo():
+    from apps.energia.management.commands.diagnosticar_sole_tech import medir
+
+    with _cliente(lambda r: httpx.Response(401, text="Invalid token.")) as http:
+        m, _ = medir(http, "prueba", "GET", "https://api.sole.tech/x/")
+
+    assert not m.ok
+    assert m.estado == 401
+    assert "Invalid token" in m.nota
+
+
+@pytest.mark.parametrize("error, nota", [
+    (httpx.ReadTimeout("lento"), "timeout"),
+    (httpx.ConnectError("sin DNS"), "ConnectError"),
+])
+def test_un_timeout_o_una_conexion_caida_no_levantan(error, nota):
+    from apps.energia.management.commands.diagnosticar_sole_tech import medir
+
+    def manejador(request):
+        raise error
+
+    with _cliente(manejador) as http:
+        m, cuerpo = medir(http, "prueba", "GET", "https://data.sole.tech/api/project/")
+
+    assert not m.ok
+    assert m.estado is None
+    assert m.nota == nota
+    assert cuerpo is None
+
+
+def test_los_ids_vacios_o_raros_se_saltan():
+    """`project_id_solarview` y `project_id_solenium` son texto en la base."""
+    from apps.energia.management.commands.diagnosticar_sole_tech import ids_enteros
+
+    assert ids_enteros(["12", None, "", "abc", 7]) == [12, 7]
+
+
+def test_solo_lee():
+    """El único POST es el de pedir el token. Un ON/OFF de relay o cualquier
+    otra escritura acá apagaría una planta desde un comando de diagnóstico."""
+    import inspect
+
+    from apps.energia.management.commands import diagnosticar_sole_tech as modulo
+
+    fuente = inspect.getsource(modulo)
+
+    assert fuente.count('"POST"') == 1
+    assert '"POST", f"{auth}/token/"' in fuente
+    for verbo in ('"PUT"', '"PATCH"', '"DELETE"', "set-status"):
+        assert verbo not in fuente
