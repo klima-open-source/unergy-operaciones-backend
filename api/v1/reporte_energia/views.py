@@ -89,7 +89,7 @@ class ReporteEnergiaViewSet(viewsets.GenericViewSet):
 
     @action(detail=False, methods=["get"], url_path="resumen-historico")
     def resumen_historico(self, request):
-        return Response(vistas.resumen_historico(
+        return Response(vistas.resumen_ventana(
             _fecha(request, "desde"), _fecha(request, "hasta"),
             frontera_id=_frontera_id_opcional(request),
         ))

@@ -1,6 +1,6 @@
 """Filtro por frontera en el Resumen histórico del Reporte de Energía.
 
-`resumen_historico(desde, hasta, frontera_id=)` recorta la vista a UNA
+`resumen_ventana(desde, hasta, frontera_id=)` recorta la vista a UNA
 frontera. Lo que se fija acá es la parte que no es obvia: **el filtro cambia
 los conteos, nunca la decisión de qué días cuentan para la tasa**.
 
@@ -119,10 +119,10 @@ def _serie(frontera_id=None):
     return serie_automatico(DIA1, DIA3, frontera_id)
 
 
-def _historico(frontera_id=None):
-    from apps.energia.services.reporte.vistas import resumen_historico
+def _ventana(frontera_id=None):
+    from apps.energia.services.reporte.vistas import resumen_ventana
 
-    return resumen_historico(DIA1, DIA3, frontera_id)
+    return resumen_ventana(DIA1, DIA3, frontera_id)
 
 
 # ── Lo que el filtro SÍ cambia: los conteos ─────────────────────────────────
@@ -163,16 +163,41 @@ def test_el_filtro_recorta_registradas_y_sin_reportar(base_limpia):
     assert [d["sin_reportar"] for d in _serie(f1.id)["dias"]] == [0, 0, 0]
 
 
-def test_el_filtro_recorta_la_distribucion_de_fuente(base_limpia):
+def test_el_filtro_recorta_las_filas(base_limpia):
+    fronteras = _escenario()
+    f1 = fronteras[1]
+
+    completo = _ventana()
+    filtrado = _ventana(f1.id)
+
+    assert len(completo["filas"]) == len(fronteras)
+    assert [f["frontera_id"] for f in filtrado["filas"]] == [f1.id]
+    assert filtrado["frontera_id"] == f1.id
+
+
+def test_el_filtro_no_cambia_que_dia3_siga_excluido(base_limpia):
+    """DIA3 nadie salió por CGM -- el clasificador falló, y eso sigue siendo
+    cierto mires la frontera que mires. F1 usó "principal" ese día igual que
+    las otras tres; si `resumen_ventana` evaluara el motivo sobre el
+    subconjunto filtrado, no habría con qué distinguir ese día roto de un día
+    real en que F1 no se automatizó -- que es justo la fila que sí cuenta
+    (DIA1, donde F1 usó "principal" y el día corrió bien)."""
     f1 = _escenario()[1]
 
-    completo = _historico()
-    filtrado = _historico(f1.id)
+    fila = _ventana(f1.id)["filas"][0]
 
-    assert sum(g["total"] for g in completo["distribucion_fuente_generacion"]) == 12
-    assert sum(g["total"] for g in filtrado["distribucion_fuente_generacion"]) == 3
-    assert {d["frontera_id"] for d in filtrado["detalle_fuente_generacion"]} == {f1.id}
-    assert filtrado["frontera_id"] == f1.id
+    # DIA1 (no automático, cuenta) + DIA2 (automático, cuenta) + DIA3
+    # (excluido, no cuenta en ninguno de los dos).
+    assert fila["dias_automaticos"] == 1
+    assert fila["dias_no_automaticos"] == 1
+    assert fila["tasa"] == 50.0
+    assert len(fila["dias"]) == 3
+    dia3 = fila["dias"][2]
+    assert dia3["excluido"] is True
+    # La fuente del único día no-automático que sí cuenta (DIA1, "principal")
+    # se agrupa igual que en los gráficos viejos.
+    assert fila["fuente_dominante"] == "medidor"
+    assert fila["fuente_dominante_etiqueta"] == "Medidor"
 
 
 # ── Lo que el filtro NO cambia: qué días cuentan ────────────────────────────

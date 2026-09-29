@@ -154,38 +154,6 @@ def test_el_detalle_viene_ordenado_de_mayor_a_menor():
     assert [d["nombre_proyecto"] for d in detalle] == ["Grande", "Media", "Chica"]
 
 
-def test_el_resumen_manda_las_dos_claves():
-    """El contrato con el frontend."""
-    import inspect
-
-    from apps.energia.services.reporte import vistas
-
-    fuente = inspect.getsource(vistas)
-
-    assert '"distribucion_automatico": dist_auto,' in fuente
-    assert '"detalle_automatico": detalle_auto,' in fuente
-
-
-def test_el_front_conoce_las_dos_etiquetas():
-    """El color sale de un diccionario indexado por la etiqueta EXACTA. Una
-    etiqueta sin color cae al gris de "Otro", sin error: la barra aparece pero
-    apagada y confundible."""
-    from pathlib import Path
-
-    vista = (
-        Path(__file__).resolve().parents[2]
-        / "unergy-operaciones-frontend"
-        / "app/features/fronteras/components/ReporteEnergiaAutomatizacionView.vue"
-    )
-    if not vista.exists():
-        pytest.skip("el repositorio del frontend no está al lado de este")
-
-    fuente = vista.read_text(encoding="utf-8")
-
-    assert "'Automático (CGM)':" in fuente
-    assert "'Otra fuente':" in fuente
-
-
 # ── Los días excluidos cuentan igual en los tres gráficos ───────────────────
 # Hasta el 2026-09-15 no: `_distribucion_y_detalle` los sumaba a `dias_totales`
 # y `_distribucion_automatico` no. Efecto visible: al abrir una frontera con

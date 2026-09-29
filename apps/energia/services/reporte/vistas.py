@@ -23,7 +23,6 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date, timedelta
 
-from django.db.models import Count, Q
 from django.utils.timezone import localtime
 
 import logging
@@ -282,6 +281,71 @@ MOTIVO_PARCIAL = "corrida_parcial"
 MOTIVO_SIN_CGM = "clasificacion_fallida"
 
 
+def _clasificadas_y_cgm_por_dia(desde: date, hasta: date):
+    """Una sola pasada de generación+consumo: qué fronteras se clasificaron
+    cada día, cuántas por mitad, y cuáles usaron CGM. La comparten
+    `serie_automatico` y `_agregar_ventana_por_frontera` para no consultar lo
+    mismo dos veces.
+    """
+    con_cgm: dict[date, set[int]] = defaultdict(set)
+    clasificadas: dict[date, set[int]] = defaultdict(set)
+    por_mitad: dict[str, dict[date, int]] = {
+        "gen": defaultdict(int), "con": defaultdict(int),
+    }
+    nombres: dict[int, str] = {}
+    for modelo, campo, mitad in ((ReporteEnergiaGeneracion, "medidor_usado", "gen"),
+                                 (ReporteEnergiaConsumo, "caso", "con")):
+        # `.lower()` a propósito: generación guarda "cgm" y consumo "CGM".
+        for fila in (modelo.objects.filter(fecha__range=(desde, hasta))
+                     .values("frontera_id", "frontera__nombre_frontera", "fecha", campo)):
+            fid = fila["frontera_id"]
+            nombres[fid] = fila["frontera__nombre_frontera"]
+            clasificadas[fila["fecha"]].add(fid)
+            por_mitad[mitad][fila["fecha"]] += 1
+            if (fila[campo] or "").strip().lower() == "cgm":
+                con_cgm[fila["fecha"]].add(fid)
+    return clasificadas, por_mitad, con_cgm, nombres
+
+
+def _motivos_del_rango(
+    desde: date, hasta: date,
+    clasificadas: dict[date, set[int]], por_mitad: dict[str, dict[date, int]],
+    con_cgm: dict[date, set[int]],
+) -> dict[date, str | None]:
+    """El motivo (o `None`) por el que un día no cuenta para la tasa de
+    automático -- ver el docstring de `serie_automatico` para las tres reglas.
+    Se evalúa SIEMPRE sobre el día completo, con todas las fronteras, antes de
+    cualquier filtro por `frontera_id` -- ese invariante es el que prueba
+    `tests/test_resumen_historico_filtro_frontera.py` y no puede romperse.
+    """
+    dias_del_rango = []
+    dia = desde
+    while dia <= hasta:
+        dias_del_rango.append(dia)
+        dia += timedelta(days=1)
+
+    tipico = _mediana([len(clasificadas.get(d, ())) for d in dias_del_rango])
+    # La regla del equilibrio solo tiene sentido si el rango trae las DOS
+    # mitades -- ver el comentario original en `serie_automatico`.
+    hay_las_dos = any(por_mitad["gen"].values()) and any(por_mitad["con"].values())
+
+    motivos: dict[date, str | None] = {}
+    for dia in dias_del_rango:
+        corrio = bool(clasificadas.get(dia)
+                      and len(clasificadas[dia]) >= tipico * COBERTURA_MINIMA_DE_UNA_CORRIDA)
+        if not corrio:
+            motivos[dia] = MOTIVO_SIN_CORRIDA
+        elif hay_las_dos and _equilibrio(
+            por_mitad["gen"][dia], por_mitad["con"][dia]
+        ) < EQUILIBRIO_MINIMO_ENTRE_MITADES:
+            motivos[dia] = MOTIVO_PARCIAL
+        elif not con_cgm.get(dia):
+            motivos[dia] = MOTIVO_SIN_CGM
+        else:
+            motivos[dia] = None
+    return motivos
+
+
 def serie_automatico(desde: date, hasta: date, frontera_id: int | None = None) -> dict:
     """Tasa diaria de reporte automático (CGM), y el total del rango.
 
@@ -351,61 +415,21 @@ def serie_automatico(desde: date, hasta: date, frontera_id: int | None = None) -
     if hasta < desde:
         raise NoProcesable("'hasta' no puede ser anterior a 'desde'")
 
-    con_cgm: dict[date, set[int]] = defaultdict(set)
-    clasificadas: dict[date, set[int]] = defaultdict(set)
-    por_mitad: dict[str, dict[date, int]] = {
-        "gen": defaultdict(int), "con": defaultdict(int),
-    }
-    nombres: dict[int, str] = {}
-    for modelo, campo, mitad in ((ReporteEnergiaGeneracion, "medidor_usado", "gen"),
-                                 (ReporteEnergiaConsumo, "caso", "con")):
-        # `.lower()` a propósito: generación guarda "cgm" y consumo "CGM".
-        for fila in (modelo.objects.filter(fecha__range=(desde, hasta))
-                     .values("frontera_id", "frontera__nombre_frontera", "fecha", campo)):
-            fid = fila["frontera_id"]
-            nombres[fid] = fila["frontera__nombre_frontera"]
-            clasificadas[fila["fecha"]].add(fid)
-            por_mitad[mitad][fila["fecha"]] += 1
-            if (fila[campo] or "").strip().lower() == "cgm":
-                con_cgm[fila["fecha"]].add(fid)
+    clasificadas, por_mitad, con_cgm, nombres = _clasificadas_y_cgm_por_dia(desde, hasta)
+    motivos = _motivos_del_rango(desde, hasta, clasificadas, por_mitad, con_cgm)
 
     registradas = _fronteras_registradas_por_dia(desde, hasta)
     dias_del_rango = sorted(registradas)
-
-    # Primera pasada: el volumen normal. No se puede medir la cobertura contra
-    # las registradas, porque con este denominador todos los días cubren el 100%
-    # por construcción.
-    tipico = _mediana([len(clasificadas.get(d, ())) for d in dias_del_rango])
-    corrio = {
-        d: bool(clasificadas.get(d)
-                and len(clasificadas[d]) >= tipico * COBERTURA_MINIMA_DE_UNA_CORRIDA)
-        for d in dias_del_rango
-    }
-    # La regla del equilibrio solo tiene sentido si el rango trae las DOS
-    # mitades. Con una sola --un rango de solo generación, o una base de
-    # pruebas-- no hay nada que comparar y marcaría todo como parcial.
-    hay_las_dos = any(por_mitad["gen"].values()) and any(por_mitad["con"].values())
 
     dias = []
     total_cgm = 0
     total_clasificadas = 0
     excluidos = 0
     for dia in dias_del_rango:
+        motivo = motivos[dia]
         cgm_dia = con_cgm.get(dia, set())
         clasificadas_dia = clasificadas.get(dia, set())
         registradas_dia = registradas[dia]
-
-        # El motivo se decide con el día COMPLETO, antes de aplicar
-        # `frontera_id` -- ver el docstring.
-        motivo = None
-        if not corrio[dia]:
-            motivo = MOTIVO_SIN_CORRIDA
-        elif hay_las_dos and _equilibrio(
-            por_mitad["gen"][dia], por_mitad["con"][dia]
-        ) < EQUILIBRIO_MINIMO_ENTRE_MITADES:
-            motivo = MOTIVO_PARCIAL
-        elif not cgm_dia:
-            motivo = MOTIVO_SIN_CGM
 
         if frontera_id is not None:
             una = {frontera_id}
@@ -603,78 +627,201 @@ def resumen(fecha: date) -> dict:
     }
 
 
-def resumen_historico(desde: date, hasta: date, frontera_id: int | None = None) -> dict:
-    """Patrones a lo largo de VARIOS días, por frontera — distinto de `resumen`,
-    que es de un solo día.
+def _ventana_anterior(desde: date, hasta: date) -> tuple[date, date]:
+    """La ventana inmediatamente anterior, de la MISMA duración que `[desde,
+    hasta]` -- lo que necesita `resumen_ventana` para "mejoró/empeoró"."""
+    dias = (hasta - desde).days + 1
+    return desde - timedelta(days=dias), desde - timedelta(days=1)
 
-    Responde dos cosas: de qué fuente salió el dato de cada día-frontera, y
-    cuánto del reporte salió automático por CGM.
 
-    Tres secciones se quitaron por el camino: "Intervención manual recurrente" y
-    "Recuperación activa de medidores" (2026-08-26), y "Datos incompletos de
-    medidores e inversores" (2026-09-15).
+def _ventana_vacia() -> dict:
+    return {
+        "automaticos": 0, "no_automaticos": 0,
+        "fechas_excluidas": [], "fuentes": {}, "dias": [],
+    }
 
-    Esa última contaba en cuántos días llegó incompleta cada fuente, y se quitó
-    porque la pregunta estaba mal planteada: "incompleto" es una bandera de sí/no
-    que junta cuatro situaciones distintas --el medidor arrancó tarde, se cayó
-    temprano, tuvo huecos en medio, o la planta no generó ese día-- y faltar una
-    hora se veía igual que faltar diez. Ni el conteo ni el porcentaje arreglaban
-    eso. Medirlo bien es contar HORAS faltantes, y para que eso no cueste una
-    lectura de ~1.000 curvas JSON por consulta habría que calcularlas al generar
-    el reporte y guardarlas en columnas nuevas. Se decidió que no valía el
-    trabajo por ahora.
 
-    **Las banderas del modelo se quedan**: `medidor_principal_completo`,
-    `medidor_respaldo_completo` y `solenium_completo` las usa el clasificador
-    para decidir el caso de cada reporte. Lo que se fue es la métrica construida
-    encima de ellas.
+def _agregar_ventana_por_frontera(desde: date, hasta: date, frontera_id: int | None = None) -> list[dict]:
+    """Una fila por frontera+tipo, con la ventana actual `[desde, hasta]` y la
+    anterior de igual duración ya comparadas.
+
+    Reusa la MISMA agrupación de fuente que `_distribucion_y_detalle`
+    (`_GRUPO_FUENTE_GENERACION`/`_GRUPO_FUENTE_CONSUMO`/`_ETIQUETA_GRUPO_FUENTE`)
+    y la MISMA detección de día-completo-excluido que `serie_automatico`
+    (`_motivos_del_rango`) -- un día de corrida rota tiene que verse excluido
+    para TODAS las fronteras por igual, no solo para la que se esté mirando.
+
+    **`nunca_clasificado`** no se decide contra un catálogo de qué frontera
+    "debería" tener fila (`Frontera.tipo_frontera` no alcanza para eso: una
+    frontera `consumo_propio` nunca va a tener fila en generación, y no es un
+    error). Se decide por CONTINUIDAD: si tuvo fila en la ventana anterior y
+    CERO en la actual, dejó de aparecer -- el mismo patrón que
+    `_fronteras_registradas_por_dia` ya usa para detectar fronteras que se
+    borraron sin que nadie lo notara. Una fila sin historial en NINGUNA de las
+    dos ventanas simplemente no aparece en el resultado: no es un dato nuestro.
+    """
+    previo_desde, previo_hasta = _ventana_anterior(desde, hasta)
+    rango_desde, rango_hasta = previo_desde, hasta
+
+    clasificadas, por_mitad, con_cgm, _nombres = _clasificadas_y_cgm_por_dia(rango_desde, rango_hasta)
+    motivos = _motivos_del_rango(rango_desde, rango_hasta, clasificadas, por_mitad, con_cgm)
+
+    solo_una = {"frontera_id": frontera_id} if frontera_id is not None else {}
+    acumulado: dict[tuple[int, str], dict] = {}
+
+    for modelo, campo, tipo, mapa_fuente in (
+        (ReporteEnergiaGeneracion, "medidor_usado", "generacion", _GRUPO_FUENTE_GENERACION),
+        (ReporteEnergiaConsumo, "caso", "consumo", _GRUPO_FUENTE_CONSUMO),
+    ):
+        filas = (
+            modelo.objects.filter(fecha__range=(rango_desde, rango_hasta), **solo_una)
+            .values("frontera_id", "frontera__nombre_frontera", "frontera__proyecto_id", "fecha", campo)
+        )
+        for f in filas:
+            fid = f["frontera_id"]
+            clave = (fid, tipo)
+            info = acumulado.setdefault(clave, {
+                "nombre_proyecto": _NOMBRES_CORREGIDOS.get(fid, f["frontera__nombre_frontera"]),
+                "proyecto_id": f["frontera__proyecto_id"],
+                "actual": _ventana_vacia(), "previo": _ventana_vacia(),
+            })
+            v = info["actual"] if f["fecha"] >= desde else info["previo"]
+
+            crudo = (f[campo] or "").strip().lower()
+            # "excluida" es la exclusión A MANO de esta fila puntual (una
+            # `ReporteEnergiaExclusion` resuelta) -- distinta del motivo de
+            # `_motivos_del_rango`, que es la corrida ENTERA fallando. Las dos
+            # cuentan como excluido, igual que ya hacía `_distribucion_y_detalle`.
+            excluido = motivos[f["fecha"]] is not None or crudo == "excluida"
+            if excluido:
+                if v is info["actual"]:
+                    v["fechas_excluidas"].append(f["fecha"])
+                v["dias"].append({
+                    "fecha": f["fecha"], "automatico": False, "excluido": True,
+                    "grupo_fuente": None, "etiqueta_fuente": None,
+                })
+                continue
+
+            es_automatico = crudo == "cgm"
+            grupo = etiqueta = None
+            if es_automatico:
+                v["automaticos"] += 1
+            else:
+                grupo = mapa_fuente.get(crudo, "otro") if crudo else "sin_fuente"
+                etiqueta = _ETIQUETA_GRUPO_FUENTE.get(grupo, "Otro")
+                v["no_automaticos"] += 1
+                v["fuentes"][grupo] = v["fuentes"].get(grupo, 0) + 1
+            v["dias"].append({
+                "fecha": f["fecha"], "automatico": es_automatico, "excluido": False,
+                "grupo_fuente": grupo, "etiqueta_fuente": etiqueta,
+            })
+
+    filas_resultado = []
+    for (fid, tipo), info in acumulado.items():
+        act, prev = info["actual"], info["previo"]
+        total_act = act["automaticos"] + act["no_automaticos"]
+        total_prev = prev["automaticos"] + prev["no_automaticos"]
+        nunca_clasificado = not act["dias"] and bool(prev["dias"])
+        tasa = round(act["automaticos"] / total_act * 100, 1) if total_act else 0.0
+
+        dominante = dominante_etiqueta = None
+        desglose = []
+        if act["fuentes"]:
+            orden = sorted(
+                act["fuentes"].items(),
+                key=lambda kv: (-kv[1], _ORDEN_GRUPO_FUENTE.index(kv[0]) if kv[0] in _ORDEN_GRUPO_FUENTE else 99),
+            )
+            dominante = orden[0][0]
+            dominante_etiqueta = _ETIQUETA_GRUPO_FUENTE.get(dominante, "Otro")
+            desglose = [
+                {"grupo": g, "etiqueta": _ETIQUETA_GRUPO_FUENTE.get(g, "Otro"), "dias": n}
+                for g, n in orden
+            ]
+
+        filas_resultado.append({
+            "frontera_id": fid, "proyecto_id": info["proyecto_id"], "tipo": tipo,
+            "nombre_proyecto": info["nombre_proyecto"],
+            "dias_automaticos": act["automaticos"], "dias_no_automaticos": act["no_automaticos"],
+            "tasa": tasa, "nunca_clasificado": nunca_clasificado,
+            "fuente_dominante": dominante, "fuente_dominante_etiqueta": dominante_etiqueta,
+            "desglose_fuente": desglose,
+            "fechas_excluidas": [d.isoformat() for d in sorted(act["fechas_excluidas"])],
+            "dias": [
+                {**d, "fecha": d["fecha"].isoformat()}
+                for d in sorted(act["dias"], key=lambda d: d["fecha"])
+            ],
+            # Privados: solo para que `resumen_ventana` calcule mejoró/empeoró;
+            # no van en la respuesta final.
+            "_dias_automaticos_previo": prev["automaticos"],
+            "_dias_totales_previo": total_prev,
+        })
+    return filas_resultado
+
+
+# Más de esta cantidad de días de diferencia contra el período anterior cuenta
+# como "cambió" -- en DÍAS, no en puntos porcentuales: un mismo umbral en % no
+# significa lo mismo en una semana (1 día ya son ~14 pts) que en un mes (1 día
+# son ~3 pts), así que un umbral en días es lo único comparable entre las dos
+# ventanas (decidido con la usuaria, maqueta del Resumen).
+UMBRAL_DIAS_CAMBIO = 2
+
+
+def resumen_ventana(desde: date, hasta: date, frontera_id: int | None = None) -> dict:
+    """La tabla unificada del Resumen: una fila por frontera+tipo con su tasa
+    de automático, la fuente dominante cuando no lo fue, y cómo cambió contra
+    el período inmediatamente anterior de igual duración -- reemplaza a los
+    tres gráficos separados que mostraba `resumen_historico` (fuente de
+    generación, fuente de consumo, automático-vs-otra-fuente): la maqueta que
+    aprobó la usuaria fusiona esas tres preguntas en una sola fila por
+    frontera, más 5 tarjetas KPI.
     """
     if hasta < desde:
         raise NoProcesable("'hasta' no puede ser anterior a 'desde'")
 
-    # `frontera_id` recorta las dos distribuciones de fuente directo en la
-    # consulta -- son conteos puros, no tienen reglas que dependan del resto
-    # del día. La tasa de automático es otra historia: ahí el filtro NO puede
-    # tocar la decisión de qué días cuentan, ver `serie_automatico`.
-    solo_una = {"frontera_id": frontera_id} if frontera_id is not None else {}
+    filas = _agregar_ventana_por_frontera(desde, hasta, frontera_id)
 
-    # 1) Distribución de fuente -- agrupada en Medidor/Inversor/Estimación/
-    # Sin fuente (decidido con el usuario 2026-08-21: el vocabulario crudo
-    # de medidor_usado/caso tiene demasiadas variantes técnicas para leerse
-    # como KPI). Se trae por frontera (no solo el total) para poder armar
-    # el drill-down al hacer clic en una tarjeta.
-    gen_filas = [
-        (f["frontera_id"], f["frontera__nombre_frontera"], f["medidor_usado"], f["n"])
-        for f in ReporteEnergiaGeneracion.objects
-        .filter(fecha__range=(desde, hasta), **solo_una)
-        .values("frontera_id", "frontera__nombre_frontera", "medidor_usado")
-        .annotate(n=Count("id"))
-    ]
-    con_filas = [
-        (f["frontera_id"], f["frontera__nombre_frontera"], f["caso"], f["n"])
-        for f in ReporteEnergiaConsumo.objects
-        .filter(fecha__range=(desde, hasta), **solo_una)
-        .values("frontera_id", "frontera__nombre_frontera", "caso")
-        .annotate(n=Count("id"))
-    ]
-    dist_gen, detalle_gen = _distribucion_y_detalle(gen_filas, _GRUPO_FUENTE_GENERACION, _ETIQUETA_FUENTE_CRUDA_GENERACION)
-    dist_con, detalle_con = _distribucion_y_detalle(con_filas, _GRUPO_FUENTE_CONSUMO)
-    dist_auto, detalle_auto = _distribucion_automatico(gen_filas, con_filas)
+    dias_automaticos_totales = sum(f["dias_automaticos"] for f in filas)
+    dias_totales = sum(f["dias_automaticos"] + f["dias_no_automaticos"] for f in filas)
+    siempre_automatico = 0
+    nunca_automatico = 0
+    mejoraron = 0
+    empeoraron = 0
+
+    for f in filas:
+        total = f["dias_automaticos"] + f["dias_no_automaticos"]
+        if f["nunca_clasificado"]:
+            nunca_automatico += 1
+        elif total > 0 and f["tasa"] == 100.0:
+            siempre_automatico += 1
+        elif total > 0 and f["tasa"] == 0.0:
+            nunca_automatico += 1
+
+        total_previo = f.pop("_dias_totales_previo")
+        automaticos_previo = f.pop("_dias_automaticos_previo")
+        if total > 0 and total_previo > 0:
+            delta = f["dias_automaticos"] - automaticos_previo
+            if delta > UMBRAL_DIAS_CAMBIO:
+                mejoraron += 1
+            elif delta < -UMBRAL_DIAS_CAMBIO:
+                empeoraron += 1
+
+    # Peor primero: las nunca clasificadas van antes que cualquier tasa, y
+    # entre las demás la más baja primero -- es la cola de trabajo.
+    filas.sort(key=lambda f: (0 if f["nunca_clasificado"] else 1, f["tasa"], f["nombre_proyecto"] or ""))
 
     return {
         "desde": desde, "hasta": hasta,
-        "distribucion_fuente_generacion": dist_gen,
-        "distribucion_fuente_consumo": dist_con,
-        "detalle_fuente_generacion": detalle_gen,
-        "detalle_fuente_consumo": detalle_con,
-        # Cuanto del reporte salio automatico por CGM. Generacion y consumo
-        # juntos: la pregunta es sobre el reporte entero, no sobre una mitad.
-        "distribucion_automatico": dist_auto,
-        "detalle_automatico": detalle_auto,
-        # La tasa dia a dia, con las fronteras VIVAS de denominador. Es la que
-        # deja ver los dias en que el clasificador no corrio (aparecen en 0%
-        # en vez de desaparecer) y la que no hay que limpiar a mano.
-        "serie_automatico": serie_automatico(desde, hasta, frontera_id),
+        "filas": filas,
+        "kpis": {
+            "tasa_general": (round(dias_automaticos_totales / dias_totales * 100, 1)
+                              if dias_totales else 0.0),
+            "dias_automaticos_totales": dias_automaticos_totales,
+            "dias_totales": dias_totales,
+            "siempre_automatico": siempre_automatico,
+            "nunca_automatico": nunca_automatico,
+            "mejoraron": mejoraron,
+            "empeoraron": empeoraron,
+        },
         "frontera_id": frontera_id,
     }
 
@@ -696,11 +843,24 @@ def listar_fronteras(fecha: date, tipo: str | None = None,
                 continue
             if q and q.lower() not in (_nombre_frontera(front) or "").lower():
                 continue
+            # `automatico`/`grupo_fuente`/`etiqueta_fuente`: para que el tab Día
+            # del Resumen no reimplemente la agrupación de fuente en el
+            # frontend -- misma regla que `_semaforo`/`resumen` (caso decide
+            # automático) y `_distribucion_y_detalle` (medidor_usado decide la
+            # fuente, solo cuando NO fue automático).
+            automatico = str(rep.caso) in ("1", "CGM")
+            grupo_fuente = etiqueta_fuente = None
+            if not automatico:
+                crudo = (rep.medidor_usado or "").strip().lower()
+                grupo_fuente = _GRUPO_FUENTE_GENERACION.get(crudo, "otro") if crudo else "sin_fuente"
+                etiqueta_fuente = _ETIQUETA_GRUPO_FUENTE.get(grupo_fuente, "Otro")
             items.append({
                 "frontera_id": front.id, "proyecto_id": proyecto_id,
                 "nombre_proyecto": _nombre_frontera(front),
                 "tipo": "generacion", "caso": str(rep.caso),
                 "medidor_usado": rep.medidor_usado,
+                "automatico": automatico, "grupo_fuente": grupo_fuente,
+                "etiqueta_fuente": etiqueta_fuente,
                 "energia_final_kwh": (
                     float(rep.energia_final_kwh)
                     if rep.energia_final_kwh is not None else None
@@ -721,11 +881,21 @@ def listar_fronteras(fecha: date, tipo: str | None = None,
                 continue
             if q and q.lower() not in (_nombre_frontera(front) or "").lower():
                 continue
+            # Ver el comentario del bloque de generación -- acá `caso` decide
+            # las dos cosas (automático Y fuente): en consumo es un solo campo.
+            automatico = str(rep.caso) in ("1", "CGM")
+            grupo_fuente = etiqueta_fuente = None
+            if not automatico:
+                crudo = (rep.caso or "").strip().lower()
+                grupo_fuente = _GRUPO_FUENTE_CONSUMO.get(crudo, "otro") if crudo else "sin_fuente"
+                etiqueta_fuente = _ETIQUETA_GRUPO_FUENTE.get(grupo_fuente, "Otro")
             items.append({
                 "frontera_id": front.id, "proyecto_id": proyecto_id,
                 "nombre_proyecto": _nombre_frontera(front),
                 "tipo": "consumo", "caso": rep.caso,
                 "medidor_usado": rep.medidor_usado,
+                "automatico": automatico, "grupo_fuente": grupo_fuente,
+                "etiqueta_fuente": etiqueta_fuente,
                 "energia_final_kwh": (
                     float(rep.energia_final_kwh)
                     if rep.energia_final_kwh is not None else None
