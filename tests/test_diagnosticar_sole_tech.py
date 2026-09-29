@@ -126,3 +126,44 @@ def test_con_los_dos_ids_no_lee_la_base(monkeypatch):
     assert any("/project/5/inverter/" in u for u in visitadas)
     assert any("/project-detail/12/" in u for u in visitadas)
 
+
+def test_sin_base_toma_las_muestras_de_los_listados(monkeypatch):
+    """Sin base y sin ids, la planta de muestra es el primer proyecto que
+    devuelve cada listado de sole.tech."""
+    from io import StringIO
+
+    from django.core.management import call_command
+
+    from apps.energia.management.commands import diagnosticar_sole_tech as modulo
+    from apps.proyectos.models import Proyecto
+
+    def sin_base(*a, **k):
+        raise AssertionError("no debía leer la base")
+
+    monkeypatch.setattr(Proyecto.objects, "filter", sin_base)
+    monkeypatch.setenv("SOLARVIEW_TOKEN", "tok")
+    visitadas = []
+
+    def falso(http, que, metodo, url, **kwargs):
+        visitadas.append(url)
+        if url.endswith("data.sole.tech/api/project/"):
+            return modulo.Medida(que, url, 200, 1), {"results": [{"id": 41}]}
+        if url.endswith("/company-projects/"):
+            return modulo.Medida(que, url, 200, 1), {"results": [{"id": 12}]}
+        return modulo.Medida(que, url, 200, 1), None
+
+    monkeypatch.setattr(modulo, "medir", falso)
+
+    call_command("diagnosticar_sole_tech", "--sin-base", stdout=StringIO())
+
+    assert any("/project/41/inverter/" in u for u in visitadas)
+    assert any("/project-detail/12/" in u for u in visitadas)
+
+
+def test_primer_id_acepta_las_dos_formas_del_listado():
+    from apps.energia.management.commands.diagnosticar_sole_tech import primer_id
+
+    assert primer_id({"results": [{"id": "7"}]}) == 7
+    assert primer_id([{"name": "sin id"}, {"id": 3}]) == 3
+    assert primer_id(None) is None
+

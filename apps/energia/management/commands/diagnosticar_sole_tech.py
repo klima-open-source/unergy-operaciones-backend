@@ -15,10 +15,10 @@ En el servidor:
 
     docker compose exec operaciones python manage.py diagnosticar_sole_tech
 
-En local hace falta el token en el `.env`, y si la base no está a mano, dar las
-dos plantas de muestra para que no la lea:
+En local hace falta el token en el `.env`. Si la base no está a mano,
+`--sin-base` toma como muestra el primer proyecto de cada listado de sole.tech:
 
-    python manage.py diagnosticar_sole_tech --id-solenium 123 --id-solarview 12
+    python manage.py diagnosticar_sole_tech --sin-base
 
 `--flota` mide además lo que hace `generacion_hoy()`: una llamada a
 `/generation/` por planta, de a 8 en paralelo, como en la petición web. Son unas
@@ -87,6 +87,18 @@ def _ms(inicio: float) -> int:
     return int((time.monotonic() - inicio) * 1000)
 
 
+def primer_id(cuerpo) -> int | None:
+    """El id del primer proyecto de un listado de sole.tech, venga como lista o
+    como `{"results": [...]}`. Es la planta de muestra cuando no hay base."""
+    items = cuerpo.get("results", cuerpo) if isinstance(cuerpo, dict) else cuerpo
+    if not isinstance(items, list):
+        return None
+    for item in items:
+        if isinstance(item, dict) and (ids := ids_enteros([item.get("id")])):
+            return ids[0]
+    return None
+
+
 def ids_enteros(valores) -> list[int]:
     """`project_id_*` son texto en la base, y alguno puede venir vacío o raro."""
     ids = []
@@ -111,12 +123,16 @@ class Command(BaseCommand):
             help=f"Segundos de espera por llamada (por defecto {TIMEOUT_POR_DEFECTO:g}).",
         )
         parser.add_argument(
+            "--sin-base", action="store_true",
+            help="No lee la base: las plantas de muestra salen de los listados de sole.tech.",
+        )
+        parser.add_argument(
             "--id-solenium", type=int,
-            help="Planta de muestra en data.sole.tech. Con este y --id-solarview no se lee la base.",
+            help="Planta de muestra en data.sole.tech (si no, la de la base o la del listado).",
         )
         parser.add_argument(
             "--id-solarview", type=int,
-            help="Planta de muestra en api.sole.tech. Con este y --id-solenium no se lee la base.",
+            help="Planta de muestra en api.sole.tech (si no, la de la base o la del listado).",
         )
 
     def handle(self, *args, **opciones):
@@ -130,10 +146,15 @@ class Command(BaseCommand):
         muestra_solarview = opciones["id_solarview"]
 
         # La base solo hace falta para lo que no vino por argumento: las
-        # plantas de muestra, o la flota entera con --flota. Con los dos ids a
-        # mano el comando corre sin base (en local, por ejemplo).
+        # plantas de muestra, o la flota entera con --flota. Sin ella (en local,
+        # por ejemplo), las muestras salen del primer proyecto de cada listado
+        # de sole.tech.
         ids_solarview: list[int] = []
-        if muestra_solenium is None or muestra_solarview is None or opciones["flota"]:
+        if opciones["sin_base"]:
+            if opciones["flota"]:
+                self.stdout.write(self.style.WARNING("  --flota necesita la base: no se mide"))
+                opciones["flota"] = False
+        elif muestra_solenium is None or muestra_solarview is None or opciones["flota"]:
             en_operacion = Proyecto.objects.filter(estado="en_operacion", deleted_at__isnull=True)
             ids_solenium = ids_enteros(en_operacion.values_list("project_id_solenium", flat=True))
             ids_solarview = ids_enteros(en_operacion.values_list("project_id_solarview", flat=True))
@@ -163,8 +184,12 @@ class Command(BaseCommand):
 
         data = settings.SOLENIUM_DATA_URL.rstrip("/")
         sunfactory = settings.SUNFACTORY_API_URL.rstrip("/")
+        listado, cuerpo = medir(
+            http, "proyectos (inversores de monitoreo)", "GET", f"{data}/project/",
+            headers=sole_tech.cabeceras(), params={"menu": 1},
+        )
+        sol_id = sol_id or primer_id(cuerpo)
         llamadas = [
-            ("proyectos (inversores de monitoreo)", f"{data}/project/", {"menu": 1}),
             ("disponibilidad (alarmas)", f"{data}/project_availability/", None),
             ("resumen de flota (dashboard)", f"{data}/project_summary/", None),
             ("proyectos de Sun Factory (pipeline de obra)", f"{sunfactory}/project/", {"limit": 1}),
@@ -175,7 +200,7 @@ class Command(BaseCommand):
                  f"{data}/project/{sol_id}/inverter/", None),
                 (f"relay de {sol_id} (reconectadores)", f"{data}/project/{sol_id}/relay/", None),
             ]
-        return [
+        return [listado] + [
             medir(http, que, "GET", url, headers=sole_tech.cabeceras(), params=params)[0]
             for que, url, params in llamadas
         ]
@@ -192,9 +217,13 @@ class Command(BaseCommand):
 
         base = settings.SOLARVIEW_BASE_URL.rstrip("/")
         cabeceras = sole_tech.cabeceras()
+        listado, cuerpo = medir(
+            http, "proyectos de la compañía", "GET",
+            f"{base}/solarview/config/company-projects/", headers=cabeceras,
+        )
+        sv_id = sv_id or primer_id(cuerpo)
         llamadas = [
             ("disponibilidad de la flota", f"{base}/solarview/kpis/availability/", None),
-            ("proyectos de la compañía", f"{base}/solarview/config/company-projects/", None),
         ]
         if sv_id:
             llamadas += [
@@ -210,7 +239,7 @@ class Command(BaseCommand):
                  {"recloser": sv_id, "start_date": f"{hoy.isoformat()} 00:00:00",
                   "end_date": f"{hoy.isoformat()} 23:59:59", "vars": "kw"}),
             ]
-        return [
+        return [listado] + [
             medir(http, que, "GET", url, headers=cabeceras, params=params)[0]
             for que, url, params in llamadas
         ]
