@@ -675,7 +675,8 @@ def _agregar_ventana_por_frontera(desde: date, hasta: date, frontera_id: int | N
     ):
         filas = (
             modelo.objects.filter(fecha__range=(rango_desde, rango_hasta), **solo_una)
-            .values("frontera_id", "frontera__nombre_frontera", "frontera__proyecto_id", "fecha", campo)
+            .values("frontera_id", "frontera__nombre_frontera", "frontera__codigo_frontera",
+                    "frontera__proyecto_id", "fecha", campo)
         )
         for f in filas:
             fid = f["frontera_id"]
@@ -683,6 +684,7 @@ def _agregar_ventana_por_frontera(desde: date, hasta: date, frontera_id: int | N
             info = acumulado.setdefault(clave, {
                 "nombre_proyecto": _NOMBRES_CORREGIDOS.get(fid, f["frontera__nombre_frontera"]),
                 "proyecto_id": f["frontera__proyecto_id"],
+                "codigo_frontera": f["frontera__codigo_frontera"],
                 "actual": _ventana_vacia(), "previo": _ventana_vacia(),
             })
             v = info["actual"] if f["fecha"] >= desde else info["previo"]
@@ -740,7 +742,7 @@ def _agregar_ventana_por_frontera(desde: date, hasta: date, frontera_id: int | N
 
         filas_resultado.append({
             "frontera_id": fid, "proyecto_id": info["proyecto_id"], "tipo": tipo,
-            "nombre_proyecto": info["nombre_proyecto"],
+            "nombre_proyecto": info["nombre_proyecto"], "codigo_frontera": info["codigo_frontera"],
             "dias_automaticos": act["automaticos"], "dias_no_automaticos": act["no_automaticos"],
             "tasa": tasa, "nunca_clasificado": nunca_clasificado,
             "fuente_dominante": dominante, "fuente_dominante_etiqueta": dominante_etiqueta,

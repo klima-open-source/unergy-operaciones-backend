@@ -154,3 +154,14 @@ def test_el_empate_lo_desempata_el_orden_de_confianza(base_limpia):
     fila = _fila(f.id)
 
     assert fila["fuente_dominante"] == "medidor"
+
+
+def test_la_fila_trae_el_codigo_de_la_frontera(base_limpia):
+    """La tabla muestra el código ASIC (`Frt0103697`) debajo del proyecto: dos
+    fronteras del mismo proyecto (generación y consumo) solo se distinguen por
+    él."""
+    _ancla()
+    f = _frontera("Garza")
+    _reporte(f, _dia(0), "principal")
+
+    assert _fila(f.id)["codigo_frontera"] == "garza"
