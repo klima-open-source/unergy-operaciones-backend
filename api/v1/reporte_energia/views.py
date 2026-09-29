@@ -39,17 +39,6 @@ def _fecha(request, nombre: str = "fecha") -> date:
         raise NoProcesable(f"'{nombre}' es obligatorio y debe tener formato YYYY-MM-DD")
 
 
-def _frontera_id_opcional(request) -> int | None:
-    """El parámetro `frontera_id`, opcional. Ausente o vacío = sin filtro."""
-    crudo = (request.query_params.get("frontera_id") or "").strip()
-    if not crudo:
-        return None
-    try:
-        return int(crudo)
-    except ValueError:
-        raise NoProcesable("'frontera_id' debe ser un número entero")
-
-
 @class_logger_wrapper(name="Operaciones | Reporte de Energía")
 class ReporteEnergiaViewSet(viewsets.GenericViewSet):
     """Reporte diario de energía al ASIC.
@@ -89,10 +78,7 @@ class ReporteEnergiaViewSet(viewsets.GenericViewSet):
 
     @action(detail=False, methods=["get"], url_path="resumen-historico")
     def resumen_historico(self, request):
-        return Response(vistas.resumen_historico(
-            _fecha(request, "desde"), _fecha(request, "hasta"),
-            frontera_id=_frontera_id_opcional(request),
-        ))
+        return Response(vistas.resumen_ventana(_fecha(request, "desde"), _fecha(request, "hasta")))
 
     @action(detail=False, methods=["get"], url_path="fronteras")
     def fronteras(self, request):
