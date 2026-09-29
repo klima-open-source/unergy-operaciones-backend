@@ -34,9 +34,8 @@ def configurado() -> bool:
     return bool(token())
 
 
-def cabeceras(valor: str | None = None) -> dict[str, str]:
-    """La cabecera con `valor`, o con el token configurado si no se pasa."""
-    return {"Authorization": f"Token {valor or token()}"}
+def cabeceras() -> dict[str, str]:
+    return {"Authorization": f"Token {token()}"}
 
 
 class SoleniumConToken(SoleniumClient):

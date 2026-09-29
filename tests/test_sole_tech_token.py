@@ -137,19 +137,23 @@ def test_sun_factory_manda_el_token_sin_login(con_token, monkeypatch):
     registro = _Registro({"results": [], "next": None})
     monkeypatch.setattr(tsf_sync.httpx, "Client", registro.fabrica())
 
-    token = tsf_sync._sunfactory_token()
-    tsf_sync._sunfactory_all_projects(token)
-    tsf_sync._sunfactory_milestones_raw(token, 7)
+    tsf_sync._sunfactory_all_projects()
+    tsf_sync._sunfactory_milestones_raw(7)
 
-    assert token == TOKEN
     assert len(registro.peticiones) == 2
     assert all(p.headers["Authorization"] == f"Token {TOKEN}" for p in registro.peticiones)
     assert _sin_login(registro.peticiones)
 
 
-def test_sin_token_sun_factory_no_tiene_con_que_entrar(monkeypatch):
+def test_sin_token_sun_factory_avisa_y_no_sale(monkeypatch):
     from apps.proyectos.services import tsf_sync
 
     monkeypatch.setenv("SOLARVIEW_TOKEN", "")
+    registro = _Registro()
+    monkeypatch.setattr(tsf_sync.httpx, "Client", registro.fabrica())
 
-    assert tsf_sync._sunfactory_token() is None
+    proyectos, avisos = tsf_sync.fetch_sunfactory_projects()
+
+    assert proyectos == []
+    assert avisos == ["Token de sole.tech no configurado (SOLARVIEW_TOKEN)."]
+    assert registro.peticiones == []
