@@ -114,9 +114,7 @@ class ReconectadorViewSet(viewsets.GenericViewSet):
         }
 
         try:
-            respuesta = relay_service.enviar_comando(
-                sv_id, datos["accion"], datos["is_interrogating"]
-            )
+            respuesta = relay_service.enviar_comando(sv_id, datos["accion"])
         except relay_service.ComandosDeshabilitados as exc:
             logger.warning("comando de reconectador rechazado: deshabilitado", extra=rastro)
             return Response({"detail": str(exc)}, status=503)

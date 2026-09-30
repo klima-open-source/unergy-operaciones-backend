@@ -30,7 +30,9 @@ logger = logging.getLogger("operaciones.reconectadores")
 # Rutas relativas a `SOLARVIEW_BASE_URL`. La lectura usa `project_id`, no
 # `recloser` como el histórico (la documentación no lo dice).
 RELAY_ACTUAL = "/solarview/config/recloser/"
-RELAY_COMANDO = "/solarview/config/recloser/set-status/"
+# El comando SÍ lleva `/api/` delante: sin él el gateway responde 404 "no Route
+# matched" (verificado el 2026-09-30). Las lecturas funcionan sin ese prefijo.
+RELAY_COMANDO = "/api/solarview/config/recloser/set-status/"
 
 # ~175 ms por planta; 8 en paralelo para que la pantalla cargue rápido.
 HILOS = 8
@@ -163,17 +165,17 @@ def comandos_habilitados() -> bool:
     return settings.RECONECTADORES_COMANDOS_HABILITADOS.strip().lower() == "true"
 
 
-def enviar_comando(sv_id: int, accion: str, interrogar: bool) -> httpx.Response:
+def enviar_comando(sv_id: int, accion: str) -> httpx.Response:
     """Manda el ON/OFF al reconectador por SolarView, con el token del servidor.
 
     Revisa el interruptor ACÁ y no solo en la vista: así ningún camino que
     llame a esta función puede mandar un comando con el interruptor apagado.
 
-    **Dónde va el id de la planta está por confirmar con SolarView.** La ruta
-    nueva no lo lleva (la de Solenium era `/project/{id}/relay/set-status/`), y
-    se manda como `?project_id=` igual que el estado actual del reconectador.
-    Antes de encender el interruptor hay que verificarlo contra el cURL de su
-    documentación.
+    La forma es la que manda la propia plataforma de SolarView al apagar un
+    reconectador, capturada en el navegador el 2026-09-30 sobre Valencia Oriente
+    (108): cuerpo JSON `{"recloser": <id de SolarView>, "command": "OFF"}`. El
+    id NO va en la URL: con `?recloser=&command=OFF` SolarView respondió 500
+    `DoesNotExist`.
     """
     if not comandos_habilitados():
         raise ComandosDeshabilitados(
@@ -188,8 +190,7 @@ def enviar_comando(sv_id: int, accion: str, interrogar: bool) -> httpx.Response:
         with httpx.Client(timeout=30) as http:
             return http.post(
                 f"{c._base_url}{RELAY_COMANDO}",
-                params={"project_id": sv_id},
-                json={"status_to_set": accion, "is_interrogating": interrogar},
+                json={"recloser": sv_id, "command": accion},
                 headers=c._headers(),
             )
     except Exception as exc:

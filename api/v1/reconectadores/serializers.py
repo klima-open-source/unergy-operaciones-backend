@@ -29,4 +29,3 @@ class ComandoSerializer(serializers.Serializer):
     Quién lo mandó queda en el log (usuario de la plataforma)."""
 
     accion = serializers.ChoiceField(choices=["ON", "OFF"])
-    is_interrogating = serializers.BooleanField(default=True)

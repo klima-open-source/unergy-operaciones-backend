@@ -80,7 +80,7 @@ def test_con_el_interruptor_apagado_no_sale_ningun_comando(servicio, capturar, m
         monkeypatch.setenv("RECONECTADORES_COMANDOS_HABILITADOS", valor)
 
     with pytest.raises(servicio.ComandosDeshabilitados):
-        servicio.enviar_comando(17, "OFF", True)
+        servicio.enviar_comando(17, "OFF")
 
     assert capturar == []
 
@@ -90,14 +90,15 @@ def test_encendido_manda_el_comando_a_solarview_con_el_token(servicio, capturar,
 
     monkeypatch.setenv("RECONECTADORES_COMANDOS_HABILITADOS", "true")
 
-    respuesta = servicio.enviar_comando(17, "OFF", True)
+    respuesta = servicio.enviar_comando(17, "OFF")
 
     assert respuesta.status_code == 200
     [peticion] = capturar
     assert peticion.method == "POST"
-    assert str(peticion.url).startswith("https://api.sole.tech/solarview/config/recloser/set-status/")
-    assert peticion.url.params["project_id"] == "17"
-    assert json.loads(peticion.content) == {"status_to_set": "OFF", "is_interrogating": True}
+    # La forma que manda la plataforma de SolarView (capturada el 2026-09-30):
+    # `/api/` delante, y el id en el CUERPO como `recloser`, no en la URL.
+    assert str(peticion.url) == "https://api.sole.tech/api/solarview/config/recloser/set-status/"
+    assert json.loads(peticion.content) == {"recloser": 17, "command": "OFF"}
     assert peticion.headers["Authorization"] == "Token tok-de-prueba"
 
 
@@ -105,7 +106,7 @@ def test_una_accion_que_no_es_on_ni_off_no_sale(servicio, capturar, monkeypatch)
     monkeypatch.setenv("RECONECTADORES_COMANDOS_HABILITADOS", "true")
 
     with pytest.raises(ValueError):
-        servicio.enviar_comando(17, "TOGGLE", True)
+        servicio.enviar_comando(17, "TOGGLE")
 
     assert capturar == []
 
@@ -163,4 +164,4 @@ def test_el_comando_ya_no_pide_credenciales():
     assert "password" not in campos
     entrada = ComandoSerializer(data={"accion": "OFF"})
     assert entrada.is_valid(), entrada.errors
-    assert entrada.validated_data == {"accion": "OFF", "is_interrogating": True}
+    assert entrada.validated_data == {"accion": "OFF"}
