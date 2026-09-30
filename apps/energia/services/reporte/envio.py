@@ -15,14 +15,31 @@ FABRICADA para una frontera que justamente no debe reportar nada.
 `estado_reporte` y el estado de XM son cosas distintas: el primero se llena UNA
 vez al clasificar, ANTES de enviar, y sirve para decidir si el CGM automático es
 válido como fuente.
+
+**El envío corre en un hilo aparte** (`enviar_background`), igual que la
+clasificación. Con ~100 fronteras llamando a Quoia una por una pasa de 2 min, y
+el `--timeout 120` de gunicorn mataba el proceso a media lista: Generación (que
+va primero) llegaba a Quoia, Consumo no, y como el resultado se guardaba todo
+AL FINAL, no quedaba registro de nada (2026-09-29: `estado-quoia` en 0 con las
+de Generación ya enviadas). Con uvicorn, antes del 2026-09-04, no había límite
+y el mismo código terminaba. Ahora además cada fila se guarda apenas se envía:
+si algo corta la corrida, queda escrito lo que sí salió.
 """
 
 from __future__ import annotations
 
+import time
+import traceback
 from datetime import date, datetime, timezone
+
+from django.core.cache import cache
+from django.db import close_old_connections
 
 from apps.energia.models import ReporteEnergiaConsumo, ReporteEnergiaGeneracion
 from apps.energia.services.reporte.borders import resolver_borders
+# Las mismas claves y lecturas "que nunca lanzan" que usa la clasificación
+# para su `en_curso`/`ultima_corrida` -- ver el bloque de caché del orquestador.
+from apps.energia.services.reporte.orquestador import _cache_borrar, _cache_leer, _cache_escribir, _clave
 from apps.energia.services.reporte.utils import curva_respaldo_a_reportar, reporte_ya_valido
 from apps.energia.services.reporte.vistas import _nombre_frontera
 
@@ -98,28 +115,73 @@ def _etiqueta_xm(rep) -> str:
     return "exitoso" if (rep.xm_estado or "").upper() == "OK" else "exitoso_con_alerta"
 
 
-def enviar(fecha: date) -> dict:
-    """Envía el reporte del día a Quoia -- bloqueado si queda alguna
-    frontera con 'Revisar Manualmente' pendiente (huecos sin fuente).
+MOTIVO_BLOQUEO = "Quedan fronteras con horas sin fuente (Revisar Manualmente) sin validar."
 
-    Solo se envían las fronteras donde tuvimos que sustituir el dato de
-    Quoia (medidor_usado != 'cgm' / caso != 'CGM') -- si el CGM de Quoia ya
-    reportó válido por su cuenta, no se toca.
-    """
-    hay_pendientes = (
+CAMPOS_ENVIO = ["enviado_quoia_en", "enviado_quoia_ok", "enviado_quoia_error"]
+
+_TTL_ENVIO_EN_CURSO = 60 * 60       # 1h: un envío tarda minutos; es la red si el proceso muere
+_TTL_ULTIMO_ENVIO = 60 * 60 * 48    # 48h, igual que ultima_corrida de la clasificación
+
+
+def hay_pendientes(fecha: date) -> bool:
+    return (
         ReporteEnergiaGeneracion.objects.filter(
             fecha=fecha, revisar_manualmente=True).exists()
         or ReporteEnergiaConsumo.objects.filter(
             fecha=fecha, revisar_manualmente=True).exists()
     )
-    if hay_pendientes:
+
+
+def enviar(fecha: date) -> dict:
+    """Envía el reporte del día a Quoia -- bloqueado si queda alguna
+    frontera con 'Revisar Manualmente' pendiente (huecos sin fuente).
+
+    Solo se envían las fronteras donde tuvimos que sustituir el dato de
+    Quoia (utils.reporte_ya_valido) -- si el CGM de Quoia ya reportó válido
+    por su cuenta, no se toca.
+
+    Síncrona: la llama `enviar_background`, no el endpoint.
+    """
+    if hay_pendientes(fecha):
         return {
             "fecha": fecha, "enviados": 0, "fallidos": [], "bloqueado": True,
-            "motivo_bloqueo": (
-                "Quedan fronteras con horas sin fuente (Revisar Manualmente) sin validar."
-            ),
+            "motivo_bloqueo": MOTIVO_BLOQUEO,
         }
 
+    gen_filas, con_filas = _filas_del_dia(fecha)
+    gaia = GaiaClient()
+    borders = _borders(gaia, gen_filas + con_filas)
+
+    enviados = 0
+    fallidos: list[str] = []
+
+    def _procesar(rep, front, es_generacion: bool) -> None:
+        nonlocal enviados
+        resultado, motivo = _enviar_a_quoia(rep, front, es_generacion, gaia, borders)
+        if resultado is None:
+            return  # ya era válido en Quoia, no hacía falta nada
+        # Se guarda YA, fila por fila, incluidas las que fallaron
+        # (`enviado_quoia_error` es lo que después explica el fallo). Antes era
+        # un bulk_update al final, y una corrida cortada a la mitad no dejaba
+        # rastro de las que sí habían llegado a Quoia.
+        rep.save(update_fields=CAMPOS_ENVIO)
+        if resultado:
+            enviados += 1
+        else:
+            fallidos.append(f"{_nombre_frontera(front)} — {motivo}")
+
+    for rep, front in gen_filas:
+        _procesar(rep, front, es_generacion=True)
+    for rep, front in con_filas:
+        _procesar(rep, front, es_generacion=False)
+
+    return {
+        "fecha": fecha, "enviados": enviados, "fallidos": fallidos, "bloqueado": False,
+    }
+
+
+def _filas_del_dia(fecha: date) -> tuple[list[tuple], list[tuple]]:
+    """(rep, frontera) de Generación y de Consumo, en el orden en que se envían."""
     gen_filas = [
         (rep, rep.frontera)
         for rep in ReporteEnergiaGeneracion.objects
@@ -130,40 +192,130 @@ def enviar(fecha: date) -> dict:
         for rep in ReporteEnergiaConsumo.objects
         .filter(fecha=fecha).select_related("frontera")
     ]
+    return gen_filas, con_filas
 
-    frt_codes = {f.codigo_frontera for _, f in gen_filas + con_filas if f.codigo_frontera}
-    gaia = GaiaClient()
-    borders = resolver_borders(gaia, frt_codes) if frt_codes else {}
 
-    enviados = 0
-    fallidos: list[str] = []
+def _borders(gaia: GaiaClient, filas: list[tuple]) -> dict:
+    frt_codes = {f.codigo_frontera for _, f in filas if f.codigo_frontera}
+    return resolver_borders(gaia, frt_codes) if frt_codes else {}
 
-    def _procesar(rep, front, es_generacion: bool) -> None:
-        nonlocal enviados
-        resultado, motivo = _enviar_a_quoia(rep, front, es_generacion, gaia, borders)
-        if resultado is True:
-            enviados += 1
-        elif resultado is False:
-            fallidos.append(f"{_nombre_frontera(front)} — {motivo}")
-        # resultado is None: ya era válido en Quoia, no hacía falta nada
 
-    for rep, front in gen_filas:
-        _procesar(rep, front, es_generacion=True)
-    for rep, front in con_filas:
-        _procesar(rep, front, es_generacion=False)
+def simular(fecha: date) -> dict:
+    """El recorrido de `enviar()` con las filas reales, SIN mandar nada.
 
-    # Se guarda el resultado del envío de CADA fila, incluidas las que
-    # fallaron: `enviado_quoia_error` es lo que después explica el fallo.
-    CAMPOS = ["enviado_quoia_en", "enviado_quoia_ok", "enviado_quoia_error"]
-    for filas, Modelo in ((gen_filas, ReporteEnergiaGeneracion),
-                          (con_filas, ReporteEnergiaConsumo)):
-        tocadas = [rep for rep, _ in filas if rep.enviado_quoia_en is not None]
-        if tocadas:
-            Modelo.objects.bulk_update(tocadas, CAMPOS)
+    **No escribe en Quoia ni en la base.** Es una función aparte, y no un
+    `if simulacro` dentro de enviar(), para que eso se vea leyéndola: nunca
+    llama a `_enviar_a_quoia()` -- el único camino a `gaia.post_report()` --
+    ni a `.save()`. Lo vigila tests/test_reporte_energia_envio_background.py.
 
+    Lo que SÍ hace contra Quoia es leer: el login del GaiaClient y la lista de
+    fronteras de `resolver_borders()`, para saber cuáles fallarían por no
+    tener `border_id`.
+
+    A diferencia de enviar(), no se detiene si hay fronteras sin validar: lo
+    informa en `bloqueado` y sigue, porque ver qué saldría es justo lo útil
+    antes de validarlas.
+    """
+    gen_filas, con_filas = _filas_del_dia(fecha)
+    borders = _borders(GaiaClient(), gen_filas + con_filas)
+
+    se_enviarian: list[dict] = []
+    se_saltarian: list[dict] = []
+    fallarian: list[dict] = []
+    for filas, es_generacion in ((gen_filas, True), (con_filas, False)):
+        for rep, front in filas:
+            fila = {
+                "frontera_id": front.id, "nombre": _nombre_frontera(front),
+                "tipo": "generacion" if es_generacion else "consumo",
+            }
+            if reporte_ya_valido(rep, es_generacion):
+                motivo = ("excluida" if rep.medidor_usado == "excluida"
+                          else "Quoia ya tiene el CGM válido")
+                se_saltarian.append({**fila, "motivo": motivo})
+                continue
+            meta = borders.get((front.codigo_frontera or "").strip().lower())
+            if not (meta and meta.get("id")):
+                fallarian.append({**fila, "motivo": "sin border_id en Quoia"})
+                continue
+            energia = rep.energia_final_kwh
+            se_enviarian.append({
+                **fila, "energia_kwh": float(energia) if energia is not None else None,
+            })
+
+    bloqueado = hay_pendientes(fecha)
     return {
-        "fecha": fecha, "enviados": enviados, "fallidos": fallidos, "bloqueado": False,
+        "fecha": fecha, "simulacro": True, "bloqueado": bloqueado,
+        **({"motivo_bloqueo": MOTIVO_BLOQUEO} if bloqueado else {}),
+        "se_enviarian": se_enviarian, "se_saltarian": se_saltarian, "fallarian": fallarian,
+        # Mismas claves que un envío real, para que el front las lea igual.
+        "enviados": 0, "fallidos": [f"{f['nombre']} — {f['motivo']}" for f in fallarian],
     }
+
+
+def tomar_envio(fecha: date) -> bool:
+    """Marca "hay un envío andando" para la fecha; False si ya había otro.
+
+    La marca se toma en el ENDPOINT, antes de lanzar el hilo, y la libera el
+    hilo al terminar: así, en cuanto `envio_en_curso()` vuelve a None, el
+    resultado nuevo ya está escrito, y el front no puede leer el del envío
+    anterior por llegar antes que el hilo. `cache.add` es SETNX: dos clics
+    simultáneos no pasan los dos. Falla hacia "seguir" si Redis no responde,
+    mismo criterio que orquestador._tomar_en_curso.
+    """
+    valor = {"desde": datetime.now(timezone.utc).isoformat()}
+    try:
+        return bool(cache.add(_clave("envio_en_curso", fecha), valor, _TTL_ENVIO_EN_CURSO))
+    except Exception as exc:
+        print(f"[reporte_energia] cache no disponible al marcar envio_en_curso fecha={fecha}: {exc}")
+        return True
+
+
+def envio_en_curso(fecha: date) -> dict | None:
+    return _cache_leer("envio_en_curso", fecha)
+
+
+def ultimo_envio(fecha: date) -> dict | None:
+    return _cache_leer("ultimo_envio", fecha)
+
+
+def enviar_background(fecha: date, simulacro: bool = False) -> None:
+    """`enviar()` -- o `simular()` -- en un hilo aparte, con el resultado a la
+    caché. Quien la llama ya tomó la marca con `tomar_envio()`; acá solo se
+    libera. El simulacro comparte marca y resultado con el envío real: así
+    no corren los dos a la vez, y el front lee los dos con la misma consulta
+    (`simulacro: true` los distingue)."""
+    close_old_connections()
+    inicio = time.monotonic()
+    try:
+        resultado = simular(fecha) if simulacro else enviar(fecha)
+        print(
+            f"[reporte_energia] enviar_background fecha={fecha} simulacro={simulacro} "
+            f"enviados={resultado['enviados']} fallidos={len(resultado['fallidos'])} "
+            f"bloqueado={resultado['bloqueado']}"
+        )
+        _cache_escribir("ultimo_envio", fecha, {
+            **resultado, "fecha": str(fecha), "simulacro": simulacro,
+            "duracion_s": round(time.monotonic() - inicio, 1),
+            "terminado_en": datetime.now(timezone.utc).isoformat(),
+        }, _TTL_ULTIMO_ENVIO)
+    except Exception:
+        print(f"[reporte_energia] enviar_background fecha={fecha} simulacro={simulacro} FALLÓ:")
+        print(traceback.format_exc())
+        _cache_escribir("ultimo_envio", fecha, {
+            "fecha": str(fecha), "simulacro": simulacro,
+            "enviados": 0, "fallidos": [], "bloqueado": False,
+            "duracion_s": round(time.monotonic() - inicio, 1),
+            "terminado_en": datetime.now(timezone.utc).isoformat(),
+            "error_general": (
+                "El simulacro se interrumpió; no se mandó nada a Quoia. Ver logs."
+                if simulacro else
+                "El envío se interrumpió. Lo que alcanzó a salir quedó registrado "
+                "en cada frontera; ver logs."
+            ),
+        }, _TTL_ULTIMO_ENVIO)
+    finally:
+        _cache_borrar("envio_en_curso", fecha)
+        close_old_connections()
 
 
 def _fronteras_enviadas(fecha: date) -> list[tuple]:

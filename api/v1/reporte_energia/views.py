@@ -1,4 +1,4 @@
-"""ViewSet del Reporte de Energía — 24 rutas.
+"""ViewSet del Reporte de Energía — 25 rutas.
 
 El reporte diario al ASIC: clasifica cada frontera contra su medidor, sus
 inversores y su histórico, deja lo dudoso marcado para revisión y, cuando no
@@ -57,7 +57,7 @@ class ReporteEnergiaViewSet(viewsets.GenericViewSet):
     GET  /api/v1/reporte-energia/excel?fecha=
     POST /api/v1/reporte-energia/ejecutar · /ejecutar/cancelar
     GET  /api/v1/reporte-energia/ejecutar/estado
-    POST /api/v1/reporte-energia/enviar?fecha=
+    POST /api/v1/reporte-energia/enviar?fecha= · GET /enviar/estado?fecha=
     GET|POST /api/v1/reporte-energia/estado-quoia?fecha=
 
     **`/enviar` está bloqueado mientras quede una frontera sin validar.** El
@@ -282,7 +282,55 @@ class ReporteEnergiaViewSet(viewsets.GenericViewSet):
 
     @action(detail=False, methods=["post"], url_path="enviar")
     def enviar(self, request):
-        return Response(envio.enviar(_fecha(request)))
+        """Lanza el envío a Quoia en un hilo aparte y responde de inmediato;
+        el resultado se consulta en `/enviar/estado`. Con ~100 fronteras pasa
+        del `--timeout 120` de gunicorn (ver el docstring de envio.py).
+
+        El bloqueo por fronteras sin validar se responde ACÁ, sin hilo: es
+        instantáneo y el front lo muestra como hasta ahora. Tampoco se envía
+        mientras se clasifica la misma fecha: se mandarían filas a medio
+        reescribir.
+
+        `?simulacro=true` hace el mismo recorrido sin mandar nada a Quoia ni
+        escribir en la base (ver envio.simular): dice qué fronteras se
+        enviarían, cuáles se saltarían y cuáles fallarían. No se bloquea por
+        fronteras sin validar -- lo informa y sigue.
+        """
+        fecha = _fecha(request)
+        simulacro = request.query_params.get("simulacro", "").lower() in ("1", "true")
+        if not simulacro and envio.hay_pendientes(fecha):
+            return Response({
+                "fecha": fecha, "status": "bloqueado", "enviados": 0, "fallidos": [],
+                "bloqueado": True, "motivo_bloqueo": envio.MOTIVO_BLOQUEO,
+            })
+        if orquestador.corrida_en_curso(fecha):
+            raise NoProcesable(
+                "Hay una clasificación en curso para esa fecha. Espera a que "
+                "termine antes de enviar."
+            )
+        if not envio.tomar_envio(fecha):
+            raise NoProcesable("Ya hay un envío en curso para esa fecha.")
+        threading.Thread(
+            target=envio.enviar_background, args=(fecha,),
+            kwargs={"simulacro": simulacro}, daemon=True,
+        ).start()
+        return Response({
+            "fecha": fecha, "status": "iniciado", "bloqueado": False, "simulacro": simulacro,
+        })
+
+    @action(detail=False, methods=["get"], url_path="enviar/estado")
+    def enviar_estado(self, request):
+        """`en_curso` mientras el hilo corre; al terminar, el resultado del
+        último envío (`enviados`, `fallidos`, `terminado_en`, y
+        `error_general` si se cayó entero). `fallidos` va siempre, por el
+        mismo motivo que en `/ejecutar/estado`."""
+        fecha = _fecha(request)
+        en_curso = envio.envio_en_curso(fecha)
+        return Response({
+            "fecha": fecha, "fallidos": [], **(envio.ultimo_envio(fecha) or {}),
+            "en_curso": en_curso is not None,
+            "en_curso_desde": (en_curso or {}).get("desde"),
+        })
 
     @action(detail=False, methods=["get", "post"], url_path="estado-quoia")
     def estado_quoia(self, request):

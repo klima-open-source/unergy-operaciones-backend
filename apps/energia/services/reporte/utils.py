@@ -240,6 +240,16 @@ def reporte_ya_valido(rep, es_generacion: bool) -> bool:
     `caso='CGM'`. Mirar el campo equivocado en cada arbol sobreescribiria en
     Quoia su propio reporte con una copia nuestra.
 
+    **En Consumo hacen falta los DOS** (`caso='CGM'` y `medidor_usado='cgm'`),
+    no solo `caso`. editar_curva() cambia `medidor_usado` en toda edicion,
+    pero `caso` solo al confirmar un medidor o el CGM: una fila que el
+    clasificador dejo en 'CGM' y alguien corrigio a mano con 'Historico
+    propio', 'Matriz de ceros' o celda por celda conservaba `caso='CGM'`, y se
+    saltaba en silencio -- ni se enviaba ni aparecia en fallidos, y el Excel
+    tampoco la traia (reportado por Sara 2026-09-30: "solo envia las de
+    generacion"). El clasificador de Consumo y la adopcion manual del CGM
+    siempre fijan los dos juntos, asi que exigirlos no cambia nada mas.
+
     'excluida' -- `curva_final` es None mientras dura la exclusion (ver
     orquestador._exclusion_activa), asi que sin este chequeo se mandaria una
     curva de 0 kWh a una frontera que justamente no debe reportar nada
@@ -247,4 +257,6 @@ def reporte_ya_valido(rep, es_generacion: bool) -> bool:
     """
     if rep.medidor_usado == "excluida":
         return True
-    return rep.medidor_usado == "cgm" if es_generacion else str(rep.caso) == "CGM"
+    if es_generacion:
+        return rep.medidor_usado == "cgm"
+    return str(rep.caso) == "CGM" and rep.medidor_usado == "cgm"

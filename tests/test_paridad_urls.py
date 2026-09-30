@@ -141,7 +141,12 @@ RUTAS_RETIRADAS = {
 #               (`xm_invoice_duplication_to_settlement`) no existia, y sin el
 #               reliquidar era imposible: FTP y Liquidar aceptaban la version
 #               nueva pero Repartir daba 400 por falta de facturas en ella.
+#   2026-09-30  GET /reporte-energia/enviar/estado. El envio a Quoia pasa a
+#               correr en un hilo: con ~100 fronteras superaba el --timeout 120
+#               de gunicorn (uvicorn no tenia limite) y el proceso moria a
+#               media lista. El front consulta aqui como termino.
 RUTAS_NUEVAS = {
+    ("/api/v1/reporte-energia/enviar/estado", "GET"),
     ("/api/v1/liquidaciones-api/ciclo/reliquidar", "POST"),
     ("/api/v1/liquidaciones-api/contratos-energia/{}", "PATCH"),
     ("/api/v1/liquidaciones-api/ipp/sincronizar", "POST"),
