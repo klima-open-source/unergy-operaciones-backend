@@ -184,10 +184,8 @@ def ventana_utc(desde, hasta) -> tuple[str, str]:
 
 # Cuánto vale una corrida de la flota antes de volver a pedirla.
 #
-# 15 minutos: la curva de los últimos días ya no cambia, y la de HOY el
-# frontend la pisa igual con `/generacion-hoy`, que va aparte y tiene su propio
-# TTL más corto. Alargarlo más no ganaría nada visible y retrasaría ver una
-# planta que empezó a reportar.
+# 15 minutos: la curva de los últimos días ya no cambia. Alargarlo más no
+# ganaría nada visible y retrasaría ver una planta que empezó a reportar.
 TTL_FLOTA = 900
 
 _PREFIJO_FLOTA = "generacion_flota:"

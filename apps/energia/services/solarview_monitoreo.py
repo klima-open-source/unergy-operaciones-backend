@@ -61,7 +61,7 @@ _PREFIJO_REDIS = "solar_monitoreo:"
 
 CACHE_TTL_FLOTA = 120    # segundos — monitoreo de flota
 CACHE_TTL_DETALLE = 90   # segundos — detalle por proyecto
-CACHE_TTL_GENHOY = 120   # segundos — generación de hoy
+CACHE_TTL_GENHOY = 120   # segundos — resumen de generación del día
 
 TIPOS_GENERACION = ["generacion", "generacion_consumo"]
 
@@ -297,71 +297,6 @@ def _proyectos_en_operacion() -> list[tuple[Proyecto, int]]:
     logger.info("proyectos con id de solarview: %d / %d",
                 len(emparejados), len(proyectos))
     return emparejados
-
-
-def generacion_hoy() -> dict:
-    """Generación real de HOY por proyecto. Un proyecto sin id no aparece.
-
-    Dos fuentes, en orden: los inversores (`/generation/`) y, si dan cero, el
-    medidor de frontera (`/project_detail/`). El campo `fuente` dice cuál se usó.
-    """
-    clave = f"genhoy:{hoy_col().isoformat()}"
-    if (cacheado := _cache_get(clave)) is not None:
-        return cacheado
-
-    cliente = _get_cliente()
-    emparejados = _proyectos_en_operacion()
-    hoy_str = hoy_col().isoformat()
-    ayer_str = (hoy_col() - timedelta(days=1)).isoformat()
-
-    def _leer(item: tuple) -> tuple:
-        p, sol_id = item
-        kwh = 0.0
-        fuente = "sin_dato"
-
-        # Fuente 1: get_generation(ayer, hoy) → filtramos solo entradas de hoy.
-        # Con un solo día devuelve el acumulado histórico; con rango ayer→hoy
-        # devuelve incrementales por franja horaria.
-        try:
-            gen = cliente.get_generation(sol_id, ayer_str, hoy_str) or {}
-            if "results" in gen:
-                gen = gen["results"]
-            kwh = _suma_kwh_inversor_hoy(
-                gen.get("generation_kwh") or {}, hoy_str, p.potencia_ac_kw)
-            if kwh > 0:
-                fuente = "inversor"
-        except Exception as exc:
-            logger.warning("generation fallo sol_id=%s: %s", sol_id, exc)
-
-        # Fuente 2: el medidor de frontera.
-        if kwh == 0.0:
-            try:
-                kwh_med = _kwh_medidor_de_detalle(cliente.get_project_detail(sol_id))
-                if kwh_med and kwh_med > 0:
-                    kwh, fuente = kwh_med, "medidor"
-            except Exception as exc:
-                logger.warning("project_detail fallo sol_id=%s: %s", sol_id, exc)
-
-        return (p.id, p.nombre_comercial, sol_id, round(kwh, 1), fuente)
-
-    filas = []
-    if emparejados:
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            for pid, nombre, sol_id, kwh_real, fuente in pool.map(_leer, emparejados):
-                filas.append({
-                    "proyecto_id": pid, "nombre": nombre, "sol_id": sol_id,
-                    "kwh_real": kwh_real, "fuente": fuente,
-                })
-        close_old_connections()
-
-    filas.sort(key=lambda x: x["kwh_real"], reverse=True)
-    datos = {
-        "fecha": hoy_str,
-        "total": round(sum(r["kwh_real"] for r in filas), 1),
-        "proyectos": filas,
-    }
-    _cache_set(clave, CACHE_TTL_GENHOY, datos)
-    return datos
 
 
 def resumen_dia() -> dict:

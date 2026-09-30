@@ -101,10 +101,17 @@ PREFIJOS_RETIRADOS = [
 #       (la API Key "Api Fallas", usada el 2026-08-20) solo crea y consulta
 #       fallas. El de impacto ademas ESCRIBIA en un GET, congelando un numero
 #       provisional calculado con `now()` (§5.9 de ARQUITECTURA_MONITOREO.md).
+#
+#   GET /generacion-solar/generacion-hoy
+#       2026-09-30  Ninguna vista del front la llamaba (sus ultimos consumidores
+#       se fueron con ec26398f y 148fdf37); solo la app vieja de Vue (`legacy/`,
+#       en Vercel), que ya no usa nadie. Hacia 40-80 llamadas a SolarView por
+#       carga.
 RUTAS_RETIRADAS = {
     ("/api/v1/fallas/sla-dashboard", "GET"),
     ("/api/v1/fallas/stats/resumen", "GET"),
     ("/api/v1/fallas/{}/impacto", "GET"),
+    ("/api/v1/generacion-solar/generacion-hoy", "GET"),
 }
 
 

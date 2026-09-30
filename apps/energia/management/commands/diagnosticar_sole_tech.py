@@ -20,7 +20,7 @@ En local hace falta el token en el `.env`. Si la base no está a mano,
 
     python manage.py diagnosticar_sole_tech --sin-base
 
-`--flota` mide además lo que hace `generacion_hoy()`: una llamada a
+`--flota` mide además la mitad de lo que hace `resumen_dia()`: una llamada a
 `/generation/` por planta, de a 8 en paralelo, como en la petición web. Son unas
 40 llamadas de lectura.
 """
@@ -116,7 +116,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
             "--flota", action="store_true",
-            help="Mide también /generation/ para todas las plantas, como generacion_hoy().",
+            help="Mide también /generation/ para todas las plantas, como resumen_dia().",
         )
         parser.add_argument(
             "--timeout", type=float, default=TIMEOUT_POR_DEFECTO,
@@ -212,7 +212,7 @@ class Command(BaseCommand):
         ]
         if sv_id:
             llamadas += [
-                (f"generación de {sv_id} (generacion_hoy)",
+                (f"generación de {sv_id} (resumen_dia)",
                  f"{base}/solarview/measurements/generation/",
                  {"project_id": sv_id, "start_date": ayer.isoformat(), "end_date": hoy.isoformat()}),
                 (f"detalle de {sv_id} (medidor)",
@@ -237,10 +237,10 @@ class Command(BaseCommand):
             for que, url, params in llamadas
         ]
 
-    # ── La carga de generacion_hoy(), medida ────────────────────────────────
+    # ── La carga de resumen_dia(), medida ───────────────────────────────────
 
     def _flota(self, http, settings, ids, ayer, hoy):
-        self._titulo(f"generacion_hoy(): /generation/ por planta, de a {HILOS_FLOTA}")
+        self._titulo(f"resumen_dia(): /generation/ por planta, de a {HILOS_FLOTA}")
         from apps.comun import sole_tech
 
         if not sole_tech.configurado():

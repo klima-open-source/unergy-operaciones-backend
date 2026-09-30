@@ -78,10 +78,6 @@ class GeneracionSolarViewSet(viewsets.GenericViewSet):
             granularidad,
         ))
 
-    @action(detail=False, methods=["get"], url_path="generacion-hoy")
-    def generacion_hoy(self, request):
-        return Response(sv.generacion_hoy())
-
     @action(detail=False, methods=["get"], url_path="resumen-dia")
     def resumen_dia(self, request):
         return Response(sv.resumen_dia())
