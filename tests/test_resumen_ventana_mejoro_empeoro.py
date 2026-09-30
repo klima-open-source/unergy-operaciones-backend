@@ -137,6 +137,7 @@ def test_delta_de_exactamente_2_dias_no_cuenta(base_limpia):
     assert fila["dias_automaticos"] == 4
     assert kpis["mejoraron"] == 0
     assert kpis["empeoraron"] == 0
+    assert fila["cambio"] is None
 
 
 def test_delta_de_exactamente_3_dias_si_cuenta_como_mejoro(base_limpia):
@@ -144,10 +145,11 @@ def test_delta_de_exactamente_3_dias_si_cuenta_como_mejoro(base_limpia):
     f = _frontera("Frontera")
     _sembrar(f, dias_automaticos_previo=2, dias_automaticos_actual=5)  # +3
 
-    _, kpis = _fila(f.id)
+    fila, kpis = _fila(f.id)
 
     assert kpis["mejoraron"] == 1
     assert kpis["empeoraron"] == 0
+    assert fila["cambio"] == "mejoro"
 
 
 def test_delta_de_exactamente_menos_3_dias_cuenta_como_empeoro(base_limpia):
@@ -155,10 +157,11 @@ def test_delta_de_exactamente_menos_3_dias_cuenta_como_empeoro(base_limpia):
     f = _frontera("Frontera")
     _sembrar(f, dias_automaticos_previo=5, dias_automaticos_actual=2)  # -3
 
-    _, kpis = _fila(f.id)
+    fila, kpis = _fila(f.id)
 
     assert kpis["empeoraron"] == 1
     assert kpis["mejoraron"] == 0
+    assert fila["cambio"] == "empeoro"
 
 
 def test_delta_de_exactamente_menos_2_dias_no_cuenta(base_limpia):
@@ -185,3 +188,21 @@ def test_sin_historial_previo_no_cuenta_como_empeoro(base_limpia):
 
     assert kpis["mejoraron"] == 0
     assert kpis["empeoraron"] == 0
+
+
+def test_las_filas_marcadas_son_las_que_cuentan_las_tarjetas(base_limpia):
+    """El frontend filtra la tabla por `cambio` al hacer clic en "Mejoraron" o
+    "Empeoraron": las filas que quedan tienen que ser tantas como dice la
+    tarjeta, ni una más."""
+    from apps.energia.services.reporte.vistas import resumen_ventana
+
+    _ancla()
+    _sembrar(_frontera("Sube"), dias_automaticos_previo=1, dias_automaticos_actual=6)
+    _sembrar(_frontera("Baja"), dias_automaticos_previo=6, dias_automaticos_actual=1)
+    _sembrar(_frontera("Quieta"), dias_automaticos_previo=3, dias_automaticos_actual=4)
+
+    r = resumen_ventana(DESDE, HASTA)
+    cambios = [f["cambio"] for f in r["filas"]]
+
+    assert cambios.count("mejoro") == r["kpis"]["mejoraron"] == 1
+    assert cambios.count("empeoro") == r["kpis"]["empeoraron"] == 1

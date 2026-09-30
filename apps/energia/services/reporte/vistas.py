@@ -423,6 +423,11 @@ def _agregar_ventana_por_frontera(desde: date, hasta: date) -> list[dict]:
 # ventanas (decidido con la usuaria, maqueta del Resumen).
 UMBRAL_DIAS_CAMBIO = 2
 
+# `cambio` de cada fila: con qué tarjeta cuenta, para que el frontend pueda
+# filtrar la tabla por "Mejoraron"/"Empeoraron" y le salgan las mismas filas.
+CAMBIO_MEJORO = "mejoro"
+CAMBIO_EMPEORO = "empeoro"
+
 
 def resumen_ventana(desde: date, hasta: date) -> dict:
     """La tabla unificada del Resumen: una fila por frontera+tipo con su tasa
@@ -456,12 +461,15 @@ def resumen_ventana(desde: date, hasta: date) -> dict:
 
         total_previo = f.pop("_dias_totales_previo")
         automaticos_previo = f.pop("_dias_automaticos_previo")
+        f["cambio"] = None
         if total > 0 and total_previo > 0:
             delta = f["dias_automaticos"] - automaticos_previo
             if delta > UMBRAL_DIAS_CAMBIO:
                 mejoraron += 1
+                f["cambio"] = CAMBIO_MEJORO
             elif delta < -UMBRAL_DIAS_CAMBIO:
                 empeoraron += 1
+                f["cambio"] = CAMBIO_EMPEORO
 
     # Peor primero: las nunca clasificadas van antes que cualquier tasa, y
     # entre las demás la más baja primero -- es la cola de trabajo.
