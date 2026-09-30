@@ -52,18 +52,6 @@ def autenticar(email: str, contrasena: str):
     return usuario
 
 
-def confirmar_contrasena(usuario, contrasena: str) -> bool:
-    """Si `contrasena` es la de `usuario`. Para confirmar una acción delicada
-    con la sesión ya abierta (el ON/OFF de un reconectador), no para iniciarla.
-
-    No toca `ultimo_acceso`: no es un inicio de sesión.
-    """
-    return bool(
-        usuario is not None and usuario.password and contrasena
-        and seguridad.verificar_contrasena(contrasena, usuario.password)
-    )
-
-
 def token_de(usuario, movil: bool = False) -> str:
     minutos = seguridad.minutos_movil() if movil else None
     return seguridad.crear_token(seguridad.claims_de(usuario), minutos)

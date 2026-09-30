@@ -155,91 +155,13 @@ def test_leer_el_estado_no_exige_rol():
     assert _puede(["solo_lectura"], "estados", "GET")
 
 
-def test_el_comando_pide_la_contrasena_de_la_plataforma_no_la_de_solenium():
+def test_el_comando_ya_no_pide_credenciales():
     from api.v1.reconectadores.serializers import ComandoSerializer
 
     campos = set(ComandoSerializer().fields)
 
-    assert "username" not in campos, "ya no se piden credenciales de Solenium"
-    assert not ComandoSerializer(data={"accion": "OFF"}).is_valid()
-    entrada = ComandoSerializer(data={"accion": "OFF", "password": "  con espacios  "})
+    assert "username" not in campos
+    assert "password" not in campos
+    entrada = ComandoSerializer(data={"accion": "OFF"})
     assert entrada.is_valid(), entrada.errors
-    assert entrada.validated_data == {"accion": "OFF", "password": "  con espacios  "}
-
-
-# ── La contraseña ───────────────────────────────────────────────────────────
-
-
-def _usuario(clave="correcta", roles=("operaciones",)):
-    from apps.plataforma.services import seguridad
-
-    return SimpleNamespace(
-        id=7, roles=list(roles), is_authenticated=True,
-        password=seguridad.hash_contrasena(clave) if clave else None,
-    )
-
-
-def test_confirmar_contrasena():
-    from apps.plataforma.services.cuentas import confirmar_contrasena
-
-    usuario = _usuario("correcta")
-
-    assert confirmar_contrasena(usuario, "correcta")
-    assert not confirmar_contrasena(usuario, "otra")
-    assert not confirmar_contrasena(usuario, "")
-    assert not confirmar_contrasena(_usuario(None), "correcta"), "sin contraseña guardada, no pasa"
-    assert not confirmar_contrasena(None, "correcta")
-
-
-@pytest.fixture
-def vista(monkeypatch):
-    """La vista del comando sin base: el proyecto y el servicio son falsos."""
-    from api.v1.reconectadores import views
-
-    proyecto = SimpleNamespace(id=1, nombre_comercial="Valencia Oriente", project_id_solarview="108")
-    monkeypatch.setattr(views, "get_object_or_404", lambda modelo, pk: proyecto)
-    enviados: list[tuple] = []
-
-    def enviar(sv_id, accion):
-        enviados.append((sv_id, accion))
-        return httpx.Response(200, json={"success": True})
-
-    monkeypatch.setattr(views.relay_service, "enviar_comando", enviar)
-    return views, enviados
-
-
-def _post(views, usuario, cuerpo):
-    from rest_framework.test import APIRequestFactory, force_authenticate
-
-    request = APIRequestFactory().post("/api/v1/reconectadores/1/comando/", cuerpo, format="json")
-    force_authenticate(request, user=usuario)
-    return views.ReconectadorViewSet.as_view({"post": "comando"})(request, pk=1)
-
-
-def test_con_la_contrasena_equivocada_no_sale_el_comando(vista):
-    views, enviados = vista
-
-    respuesta = _post(views, _usuario("correcta"), {"accion": "OFF", "password": "otra"})
-
-    assert respuesta.status_code == 400, "400 y no 401: un 401 cierra la sesión en el front"
-    assert respuesta.data == {"detail": "Contraseña incorrecta."}
-    assert enviados == []
-
-
-def test_con_la_contrasena_correcta_llega_al_servicio(vista):
-    views, enviados = vista
-
-    respuesta = _post(views, _usuario("correcta"), {"accion": "OFF", "password": "correcta"})
-
-    assert respuesta.status_code == 200
-    assert enviados == [(108, "OFF")]
-
-
-def test_sin_rol_no_llega_ni_a_revisar_la_contrasena(vista):
-    views, enviados = vista
-
-    respuesta = _post(views, _usuario("correcta", roles=("comercial",)),
-                      {"accion": "OFF", "password": "correcta"})
-
-    assert respuesta.status_code == 403
-    assert enviados == []
+    assert entrada.validated_data == {"accion": "OFF"}
