@@ -8,11 +8,14 @@ traduce a HTTP. Leer y mandar un comando van por caminos distintos:
   devuelve la medición más reciente con las mismas claves que traía Solenium
   (`active`, `time`, `i_a`… `pf`). Verificado en vivo el 2026-09-29: 25 de las
   39 plantas de SolarView tienen reconectador; las otras responden 404.
-- **Mandar un ON/OFF** sigue en Solenium (`data.sole.tech`): exige las
-  credenciales del USUARIO en el cuerpo de la petición, se validan en cada
-  llamada y NO se guardan. Abrir o cerrar un relay apaga una planta: tiene que
-  quedar atribuido a una persona. SolarView todavía no tiene un endpoint
-  documentado para el comando; se revisa aparte.
+- **Mandar un ON/OFF** también va a SolarView con el token del servidor
+  (`POST /solarview/config/recloser/set-status/`), ya no a Solenium con las
+  credenciales de la persona. Abrir o cerrar un relay energiza o apaga una
+  planta y puede haber gente en sitio, así que tiene tres candados: el
+  interruptor `RECONECTADORES_COMANDOS_HABILITADOS` (apagado por defecto), el
+  rol (`admin` u `operaciones`, en la vista) y el registro en el log de quién,
+  qué planta y qué acción. Durante el desarrollo ese endpoint NO se llama nunca,
+  ni de prueba.
 """
 
 import logging
@@ -24,19 +27,10 @@ from apps.comun.config import settings
 
 logger = logging.getLogger("operaciones.reconectadores")
 
-# Las URLs del comando salen de la configuracion, no hardcodeadas. Estaban fijas
-# en este archivo y cuando Solenium migro de solenium.co a sole.tech
-# (2026-09-07) el ON/OFF de los relays quedo roto sin que hubiera forma de
-# arreglarlo sin desplegar.
-_AUTH = settings.SOLENIUM_AUTH_URL.rstrip("/").removesuffix("/token")
-_DATA = settings.SOLENIUM_DATA_URL.rstrip("/")
-
-AUTH_URL = f"{_AUTH}/token/"
-RELAY_SET = f"{_DATA}/project/{{sol_id}}/relay/set-status/"
-
-# La lectura: ruta relativa a `SOLARVIEW_BASE_URL`. El parámetro es
-# `project_id`, no `recloser` como en el histórico (la documentación no lo dice).
+# Rutas relativas a `SOLARVIEW_BASE_URL`. La lectura usa `project_id`, no
+# `recloser` como el histórico (la documentación no lo dice).
 RELAY_ACTUAL = "/solarview/config/recloser/"
+RELAY_COMANDO = "/solarview/config/recloser/set-status/"
 
 # ~175 ms por planta; 8 en paralelo para que la pantalla cargue rápido.
 HILOS = 8
@@ -57,15 +51,11 @@ class SolarViewNoConfigurado(RuntimeError):
     pass
 
 
-class CredencialesInvalidas(RuntimeError):
+class SolarViewNoResponde(RuntimeError):
     pass
 
 
-class SoleniumNoResponde(RuntimeError):
-    pass
-
-
-class RespuestaInesperada(RuntimeError):
+class ComandosDeshabilitados(RuntimeError):
     pass
 
 
@@ -162,35 +152,45 @@ def estados_de(proyectos) -> list[dict]:
         return [e for e in pool.map(uno, proyectos) if e is not None]
 
 
-def token_de_usuario(usuario: str, clave: str) -> str:
-    """JWT de Solenium con las credenciales del usuario. No se almacena nada."""
-    try:
-        with httpx.Client(timeout=15) as http:
-            respuesta = http.post(
-                AUTH_URL, json={"username": usuario, "password": clave}
-            )
-    except Exception as exc:
-        raise SoleniumNoResponde(f"No se pudo conectar a Solenium: {exc}") from exc
+def comandos_habilitados() -> bool:
+    """El interruptor del ON/OFF. Apagado salvo `RECONECTADORES_COMANDOS_HABILITADOS=true`.
 
-    if respuesta.status_code == 401:
-        raise CredencialesInvalidas("Credenciales Solenium incorrectas")
-    if respuesta.status_code not in (200, 201):
-        raise RespuestaInesperada(f"Solenium auth → HTTP {respuesta.status_code}")
-
-    token = respuesta.json().get("access")
-    if not token:
-        raise RespuestaInesperada("Solenium no devolvió token")
-    return token
+    Abrir o cerrar un reconectador energiza o apaga una planta, y puede haber
+    gente trabajando en sitio. Se enciende solo en el servidor, coordinado con
+    el equipo de campo; en local no existe, así que desde ahí es imposible
+    mandar un comando.
+    """
+    return settings.RECONECTADORES_COMANDOS_HABILITADOS.strip().lower() == "true"
 
 
-def enviar_comando(sol_id: int, accion: str, interrogar: bool, token: str):
-    """Manda el ON/OFF al relay. Devuelve la respuesta HTTP de Solenium."""
+def enviar_comando(sv_id: int, accion: str, interrogar: bool) -> httpx.Response:
+    """Manda el ON/OFF al reconectador por SolarView, con el token del servidor.
+
+    Revisa el interruptor ACÁ y no solo en la vista: así ningún camino que
+    llame a esta función puede mandar un comando con el interruptor apagado.
+
+    **Dónde va el id de la planta está por confirmar con SolarView.** La ruta
+    nueva no lo lleva (la de Solenium era `/project/{id}/relay/set-status/`), y
+    se manda como `?project_id=` igual que el estado actual del reconectador.
+    Antes de encender el interruptor hay que verificarlo contra el cURL de su
+    documentación.
+    """
+    if not comandos_habilitados():
+        raise ComandosDeshabilitados(
+            "Los comandos ON/OFF están deshabilitados en este servidor "
+            "(RECONECTADORES_COMANDOS_HABILITADOS)."
+        )
+    if accion not in ("ON", "OFF"):
+        raise ValueError(f"acción inválida: {accion!r}")
+
+    c = cliente()
     try:
         with httpx.Client(timeout=30) as http:
             return http.post(
-                RELAY_SET.format(sol_id=sol_id),
+                f"{c._base_url}{RELAY_COMANDO}",
+                params={"project_id": sv_id},
                 json={"status_to_set": accion, "is_interrogating": interrogar},
-                headers={"Authorization": f"Bearer {token}"},
+                headers=c._headers(),
             )
     except Exception as exc:
-        raise SoleniumNoResponde(f"Error de conexión: {exc}") from exc
+        raise SolarViewNoResponde(f"Error de conexión con SolarView: {exc}") from exc

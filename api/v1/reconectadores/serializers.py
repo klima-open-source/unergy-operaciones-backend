@@ -6,7 +6,7 @@ from apps.monitoreo.services import reconectadores as relay_service
 
 
 class RelayEstadoSerializer(serializers.Serializer):
-    """Estado y telemetría de un relay. No hay modelo: el dato vive en Solenium."""
+    """Estado y telemetría de un relay. No hay modelo: el dato vive en SolarView."""
 
     proyecto_id = serializers.IntegerField()
     nombre = serializers.CharField(allow_null=True)
@@ -25,9 +25,8 @@ class RelayEstadoSerializer(serializers.Serializer):
 
 
 class ComandoSerializer(serializers.Serializer):
-    """Las credenciales van en el cuerpo, se validan en Solenium y no se guardan."""
+    """El comando va con el token del servidor: no lleva credenciales de nadie.
+    Quién lo mandó queda en el log (usuario de la plataforma)."""
 
-    username = serializers.CharField()
-    password = serializers.CharField(write_only=True)
     accion = serializers.ChoiceField(choices=["ON", "OFF"])
     is_interrogating = serializers.BooleanField(default=True)

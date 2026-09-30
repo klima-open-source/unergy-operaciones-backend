@@ -1,9 +1,9 @@
-"""El estado de los reconectadores se lee de SolarView; el ON/OFF sigue en Solenium.
+"""El estado de los reconectadores se lee de SolarView.
 
 `GET api.sole.tech/solarview/config/recloser/?project_id=` devuelve la medición
 más reciente con las mismas claves que traía `data.sole.tech` (`active`,
-`time`, `i_a`… `pf`). Verificado en vivo el 2026-09-29. El comando ON/OFF no
-tiene endpoint documentado en SolarView todavía, así que no se mueve.
+`time`, `i_a`… `pf`). Verificado en vivo el 2026-09-29. El comando ON/OFF se
+prueba aparte, en `test_reconectadores_comando.py`.
 """
 from types import SimpleNamespace
 
@@ -92,12 +92,3 @@ def test_el_listado_filtra_por_project_id_solarview():
 
     assert "project_id_solarview" in filtros
     assert "project_id_solenium" not in filtros
-
-
-def test_el_on_off_sigue_en_solenium_con_las_credenciales_del_usuario():
-    """No se mueve hasta que SolarView documente cómo mandar el comando."""
-    from apps.monitoreo.services import reconectadores
-
-    assert reconectadores.RELAY_SET.endswith("/project/{sol_id}/relay/set-status/")
-    assert "data.sole.tech" in reconectadores.RELAY_SET
-    assert reconectadores.AUTH_URL.endswith("/token/")

@@ -3,9 +3,9 @@
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import (
-    AuthenticationFailed, NotFound, ValidationError,
-)
+import logging
+
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 
 from api.logging import class_logger_wrapper, log_endpoint
@@ -17,10 +17,18 @@ from . import queryset as relay_queryset
 from . import serializers as relay_serializers
 
 
-def _sol_id(proyecto) -> int:
-    if not proyecto.project_id_solenium:
-        raise ValidationError("Este proyecto no tiene ID de Solenium configurado")
-    return int(proyecto.project_id_solenium)
+logger = logging.getLogger("operaciones.reconectadores")
+
+# Quién puede abrir o cerrar un reconectador. `admin` pasa siempre (ver
+# `RolePermission`). Leer el estado no exige rol.
+ROLES_COMANDO = ["operaciones"]
+
+
+def _sv_id(proyecto) -> int:
+    try:
+        return int(proyecto.project_id_solarview)
+    except (TypeError, ValueError):
+        raise ValidationError("Este proyecto no tiene ID de SolarView configurado")
 
 
 @class_logger_wrapper(name="Operaciones | Monitoreo | Reconectadores")
@@ -31,16 +39,23 @@ class ReconectadorViewSet(viewsets.GenericViewSet):
     GET  /api/v1/reconectadores/debug-relay/{id}       respuesta cruda de SolarView
     POST /api/v1/reconectadores/{id}/comando           ON/OFF
 
-    Leer va a SolarView con el token del servidor. **Mandar un comando** sigue en
-    Solenium y **exige las credenciales del usuario** en el cuerpo: se validan en
-    cada llamada y no se almacenan. Abrir un relay apaga una planta y tiene que
-    quedar atribuido.
+    Las dos cosas van a SolarView con el token del servidor. **Mandar un
+    comando** exige rol `admin` u `operaciones` y que el interruptor
+    `RECONECTADORES_COMANDOS_HABILITADOS` esté encendido; cada intento queda en
+    el log con el usuario, la planta y la acción. Abrir un relay apaga una
+    planta y puede haber gente en sitio.
     """
 
     permission_classes = [RolePermission]
     pagination_class = None
     http_method_names = ["get", "post", "head", "options"]
     queryset = py_models.Proyecto.objects.none()
+
+    @property
+    def required_role(self):
+        # Solo el comando tiene rol: sin `required_role`, `RolePermission`
+        # deja pasar a cualquier usuario autenticado, incluso `solo_lectura`.
+        return ROLES_COMANDO if self.action == "comando" else []
 
     @action(detail=False, methods=["get"], url_path="estados")
     def estados(self, request):
@@ -92,26 +107,33 @@ class ReconectadorViewSet(viewsets.GenericViewSet):
         entrada = relay_serializers.ComandoSerializer(data=request.data)
         entrada.is_valid(raise_exception=True)
         datos = entrada.validated_data
-        sol_id = _sol_id(proyecto)
+        sv_id = _sv_id(proyecto)
+        rastro = {
+            "usuario_id": getattr(request.user, "id", None),
+            "proyecto_id": proyecto.id, "sv_id": sv_id, "accion": datos["accion"],
+        }
 
         try:
-            token = relay_service.token_de_usuario(
-                datos["username"], datos["password"]
-            )
             respuesta = relay_service.enviar_comando(
-                sol_id, datos["accion"], datos["is_interrogating"], token
+                sv_id, datos["accion"], datos["is_interrogating"]
             )
-        except relay_service.CredencialesInvalidas as exc:
-            raise AuthenticationFailed(str(exc))
-        except relay_service.SoleniumNoResponde as exc:
+        except relay_service.ComandosDeshabilitados as exc:
+            logger.warning("comando de reconectador rechazado: deshabilitado", extra=rastro)
             return Response({"detail": str(exc)}, status=503)
-        except relay_service.RespuestaInesperada as exc:
-            return Response({"detail": str(exc)}, status=502)
+        except relay_service.SolarViewNoConfigurado as exc:
+            return Response({"detail": str(exc)}, status=503)
+        except relay_service.SolarViewNoResponde as exc:
+            logger.error("comando de reconectador sin respuesta: %s", exc, extra=rastro)
+            return Response({"detail": str(exc)}, status=503)
 
+        logger.warning(
+            "comando de reconectador enviado: HTTP %s", respuesta.status_code,
+            extra={**rastro, "respuesta": respuesta.text[:200]},
+        )
         if respuesta.status_code >= 300:
             return Response(
                 {"detail": (
-                    f"Solenium → HTTP {respuesta.status_code}: "
+                    f"SolarView → HTTP {respuesta.status_code}: "
                     f"{respuesta.text[:120]}"
                 )},
                 status=502,
