@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from api.logging import class_logger_wrapper, log_endpoint
 from api.permissions import RolePermission
 from apps.monitoreo.services import reconectadores as relay_service
+from apps.plataforma.services import cuentas
 from apps.proyectos import models as py_models
 
 from . import queryset as relay_queryset
@@ -40,7 +41,8 @@ class ReconectadorViewSet(viewsets.GenericViewSet):
     POST /api/v1/reconectadores/{id}/comando           ON/OFF
 
     Las dos cosas van a SolarView con el token del servidor. **Mandar un
-    comando** exige rol `admin` u `operaciones` y que el interruptor
+    comando** exige rol `admin` u `operaciones`, la contraseña de la cuenta de
+    la plataforma de quien lo manda, y que el interruptor
     `RECONECTADORES_COMANDOS_HABILITADOS` esté encendido; cada intento queda en
     el log con el usuario, la planta y la acción. Abrir un relay apaga una
     planta y puede haber gente en sitio.
@@ -112,6 +114,13 @@ class ReconectadorViewSet(viewsets.GenericViewSet):
             "usuario_id": getattr(request.user, "id", None),
             "proyecto_id": proyecto.id, "sv_id": sv_id, "accion": datos["accion"],
         }
+
+        # 400 y no 401: en el front un 401 cierra la sesión, y acá solo hay que
+        # decirle que la contraseña no es. La contraseña no va al log.
+        if not cuentas.confirmar_contrasena(request.user, datos["password"]):
+            logger.warning("comando de reconectador rechazado: contraseña incorrecta",
+                           extra=rastro)
+            return Response({"detail": "Contraseña incorrecta."}, status=400)
 
         try:
             respuesta = relay_service.enviar_comando(sv_id, datos["accion"])
