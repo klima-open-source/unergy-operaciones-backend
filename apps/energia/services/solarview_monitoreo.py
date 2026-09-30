@@ -189,6 +189,28 @@ def _suma_kwh_inversor_hoy(gen_kwh: dict, hoy_str: str,
     return total
 
 
+def _kwh_medidor_de_detalle(detalle: dict | None) -> float | None:
+    """Energía del día del medidor (frontera) desde /config/project-detail/.
+
+    Reemplaza al `frontier_generation_kwh` del lote de summary de Solenium, que
+    SolarView no tiene. La unidad viene DECLARADA en el propio bloque y puede
+    ser kWh o MWh — verificado en vivo el 2026-09-03. Se lee, nunca se asume.
+    """
+    if not detalle:
+        return None
+    if "results" in detalle:
+        detalle = detalle["results"]
+    gen = (detalle or {}).get("generation") or {}
+    if not gen.get("value"):
+        return None
+    try:
+        val = float(gen["value"])
+    except (ValueError, TypeError):
+        return None
+    unidad = (gen.get("unit") or "kWh").strip().lower()
+    return val * 1000 if unidad == "mwh" else val
+
+
 def _proyecto_o_404(proyecto_id: int) -> Proyecto:
     p = Proyecto.objects.filter(id=proyecto_id).first()
     if not p:
@@ -278,17 +300,18 @@ def _proyectos_en_operacion() -> list[tuple[Proyecto, int]]:
 
 
 def resumen_dia() -> dict:
-    """Top de generación del día por inversores, una llamada por planta.
+    """Top de generación del día, por medidores y por inversores.
 
-    Pide SOLO el día de hoy a `/measurements/generation/`. Antes pedía ayer y
-    hoy, por un comentario que decía que con un solo día SolarView devolvía el
-    acumulado histórico; medido el 2026-09-30 (3 rondas x 39 plantas) ya no es
-    así: con un solo día devuelve los valores por hora, los mismos kWh, y tarda
-    un tercio (1,5 s contra 4,6 s en promedio).
+    Las dos lecturas van en la misma pasada paralela. Antes el medidor salía del
+    lote de summary de Solenium (una llamada para toda la flota); SolarView no
+    tiene ese lote, así que va por project-detail, una por proyecto — pero
+    aprovechando el mismo worker que ya pedía la generación de inversores.
 
-    Hasta el 2026-09-30 traía también un "top por medidor", de
-    `/config/project-detail/`: otra llamada por planta, con un dato poco
-    confiable (11 de 39 plantas en 0 o vacío). Se quitó.
+    Los inversores se piden SOLO para hoy. Antes se pedía ayer y hoy, por un
+    comentario que decía que con un solo día SolarView devolvía el acumulado
+    histórico; medido el 2026-09-30 (3 rondas x 39 plantas) ya no es así: con un
+    solo día devuelve los valores por hora, los mismos kWh, en un tercio del
+    tiempo (1,5 s contra 4,6 s en promedio).
     """
     clave = f"resumendia:{hoy_col().isoformat()}"
     if (cacheado := _cache_get(clave)) is not None:
@@ -309,20 +332,31 @@ def resumen_dia() -> dict:
                 gen.get("generation_kwh") or {}, hoy_str, p.potencia_ac_kw)
         except Exception as exc:
             logger.warning("resumen-dia inversor sol_id=%s: %s", sol_id, exc)
-        return (p.id, p.nombre_comercial, round(kwh_inv, 1))
+        try:
+            kwh_med = _kwh_medidor_de_detalle(cliente.get_project_detail(sol_id))
+        except Exception as exc:
+            logger.warning("resumen-dia medidor sol_id=%s: %s", sol_id, exc)
+            kwh_med = None
+        return (p.id, p.nombre_comercial, round(kwh_inv, 1), kwh_med)
 
+    medidor: list[dict] = []
     inversor: list[dict] = []
     if emparejados:
         with ThreadPoolExecutor(max_workers=8) as pool:
-            for pid, nombre, kwh_inv in pool.map(_leer, emparejados):
+            for pid, nombre, kwh_inv, kwh_med in pool.map(_leer, emparejados):
                 if kwh_inv > 0:
                     inversor.append({"proyecto_id": pid, "nombre": nombre, "kwh": kwh_inv})
+                if kwh_med and kwh_med > 0:
+                    medidor.append({"proyecto_id": pid, "nombre": nombre,
+                                    "kwh": round(kwh_med, 1)})
         close_old_connections()
 
+    medidor.sort(key=lambda x: x["kwh"], reverse=True)
     inversor.sort(key=lambda x: x["kwh"], reverse=True)
 
     datos = {
         "fecha": hoy_str,
+        "medidor": {"total": round(sum(x["kwh"] for x in medidor), 1), "top": medidor},
         "inversor": {"total": round(sum(x["kwh"] for x in inversor), 1), "top": inversor},
     }
     _cache_set(clave, CACHE_TTL_GENHOY, datos)
