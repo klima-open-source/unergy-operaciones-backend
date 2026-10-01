@@ -62,6 +62,8 @@ _PREFIJO_REDIS = "solar_monitoreo:"
 CACHE_TTL_FLOTA = 120    # segundos — monitoreo de flota
 CACHE_TTL_DETALLE = 90   # segundos — detalle por proyecto
 CACHE_TTL_GENHOY = 120   # segundos — resumen de generación del día
+CACHE_TTL_IRRADIANCIA = 300       # segundos — curva POA de hoy
+CACHE_TTL_SIN_IRRADIANCIA = 3600  # sin estación o sin sensor POA: no cambia en el día
 
 TIPOS_GENERACION = ["generacion", "generacion_consumo"]
 
@@ -699,6 +701,48 @@ def monitoreo_detalle(proyecto_id: int, incluir_snapshot: bool = False,
         "gaia_snapshot_respaldo": snap_r,
     }
     _cache_set(clave, CACHE_TTL_DETALLE, datos)
+    return datos
+
+
+def irradiancia_poa(proyecto_id: int) -> dict:
+    """La irradiancia POA de hoy (W/m²), para dibujarla junto a la potencia.
+
+    Solo la POA (sobre el plano de los módulos), que es la que se compara con la
+    potencia; la horizontal no. Hoy (2026-10-01) la tienen 12 de las 39 plantas
+    de SolarView; el resto no tiene estación (404) o no mide POA (-1 en toda la
+    serie). En esos casos `disponible` es False y el front no dibuja nada.
+
+    Los -1 y los negativos se descartan punto por punto: son "sin dato", no cero.
+    """
+    p = _proyecto_o_404(proyecto_id)
+    sol_id = _sv_id(p)
+    vacio = {"disponible": False, "unidad": "W/m²", "puntos": []}
+    if sol_id is None:
+        return vacio
+
+    hoy = hoy_col().isoformat()
+    clave = f"poa:{sol_id}:{hoy}"
+    if (cacheado := _cache_get(clave)) is not None:
+        return cacheado
+
+    crudo = _get_cliente().get_weather(sol_id, f"{hoy}T00:00:00", f"{hoy}T23:59:59") or {}
+    serie = (crudo.get("results") or {}).get("irradiation_POA") or {}
+    puntos = []
+    for momento, valor in sorted(serie.items()):
+        try:
+            v = float(valor)
+        except (TypeError, ValueError):
+            continue
+        if v < 0:
+            continue
+        puntos.append({"time": str(momento), "w_m2": round(v, 1)})
+
+    if not any(pt["w_m2"] > 0 for pt in puntos):
+        _cache_set(clave, CACHE_TTL_SIN_IRRADIANCIA, vacio)
+        return vacio
+
+    datos = {"disponible": True, "unidad": "W/m²", "puntos": puntos}
+    _cache_set(clave, CACHE_TTL_IRRADIANCIA, datos)
     return datos
 
 
