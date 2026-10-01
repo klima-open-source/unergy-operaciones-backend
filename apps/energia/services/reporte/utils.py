@@ -13,14 +13,15 @@ HORAS = list(range(24))
 # completos y curva_final del medidor principal, el respaldo o coincide casi
 # exacto (58% de los días con <=0.5% de error total) o está claramente mal
 # (26% con >90% de error, medidor desconectado/descalibrado) -- casi no hay
-# término medio. El criterio es el 1% del TOTAL DIARIO del principal (arriba
-# o abajo, no por hora), igual para Generación y Consumo.
+# término medio. El criterio es el 1.5% del TOTAL DIARIO del principal
+# (arriba o abajo, no por hora), igual para Generación y Consumo.
 #
 # Hasta el 2026-09-30 era un margen FIJO de 1.5 kWh: holgado para Consumo, de
 # totales chicos, pero en Generación (cientos o miles de kWh al día) pedía
 # coincidir dentro del ~0.1%, y el respaldo salía casi siempre "estimado"
 # aunque el medidor real estuviera a menos del 1% (reportado por Sara).
-TOLERANCIA_RESPALDO_REAL_PCT = 0.01
+# El 2026-09-30 pasó al 1% del total; el 2026-10-01 Sara lo subió al 1.5%.
+TOLERANCIA_RESPALDO_REAL_PCT = 0.015
 
 # Ventanas horarias para el relleno horario centralizado (ver
 # reconectador.rellenar_horas_faltantes) -- fuera de estas horas la
@@ -151,15 +152,15 @@ def curva_respaldo_a_reportar(rep, curva_medidor_respaldo: list | None = None) -
        por consistencia visual: el medidor de nodo se sigue leyendo en
        pasivo incluso en Caso 1, así que hay el mismo dato con qué
        comparar), y el TOTAL DIARIO del respaldo está a
-       TOLERANCIA_RESPALDO_REAL_PCT (1%) o menos de diferencia (arriba o
+       TOLERANCIA_RESPALDO_REAL_PCT (1.5%) o menos de diferencia (arriba o
        abajo) del que se va a reportar como Principal/CGM. Si se aleja más, no se
        usa -- no es dato confiable (medidor descalibrado o desconectado),
        se cae al paso 3 igual que siempre. No se exige que el respaldo
        esté 100% completo (decidido 2026-08-26, ver MGS 0025 El Copey
        Occidente: respaldo con huecos en horas nocturnas de generación
        ~0, descartado igual aunque coincidía casi exacto con el
-       principal) -- la tolerancia del 1% en el TOTAL ya protege sola: un
-       hueco en una hora con generación real se lleva bastante más del 1%
+       principal) -- la tolerancia del 1.5% en el TOTAL ya protege sola: un
+       hueco en una hora con generación real se lleva bastante más del 1.5%
        del día (las horas sin dato cuentan como 0 en la suma), así que solo
        pasan huecos fisicamente irrelevantes (de noche).
     3. Estimación ±1% sobre curva_final (comportamiento de siempre).

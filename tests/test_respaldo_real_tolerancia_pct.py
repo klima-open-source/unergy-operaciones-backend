@@ -1,9 +1,10 @@
-"""El respaldo real del medidor se reporta si su total diario está a 1% o
+"""El respaldo real del medidor se reporta si su total diario está a 1.5% o
 menos del principal, arriba o abajo -- igual en Generación y en Consumo.
 
 Antes era un margen fijo de 1.5 kWh: en Generación, con totales de cientos o
 miles de kWh, el respaldo salía casi siempre "estimado" aunque el medidor
-estuviera a menos del 1% (reportado por Sara 2026-09-30).
+estuviera a menos del 1% (reportado por Sara 2026-09-30). El 2026-09-30 pasó
+al 1% del total y el 2026-10-01 Sara lo subió al 1.5%.
 
 `tests/test_curva_respaldo_a_reportar.py` prueba la copia de `app/` (apagada);
 este archivo prueba la que corre, en `apps/`.
@@ -33,28 +34,31 @@ def _con_total(total):
     return [0.0] * 6 + [total / 12] * 12 + [0.0] * 6
 
 
-def test_la_tolerancia_es_el_uno_por_ciento():
-    assert TOLERANCIA_RESPALDO_REAL_PCT == 0.01
+def test_la_tolerancia_es_el_uno_y_medio_por_ciento():
+    assert TOLERANCIA_RESPALDO_REAL_PCT == 0.015
 
 
-@pytest.mark.parametrize("factor", [1.009, 0.991, 1.01, 0.99])
-def test_generacion_grande_dentro_del_1_por_ciento_usa_el_medidor(factor):
-    # 2000 kWh: con el margen viejo de 1.5 kWh, 0.9% (18 kWh) caía a estimado.
+@pytest.mark.parametrize("factor", [1.014, 0.986, 1.015, 0.985, 1.012, 0.988])
+def test_generacion_grande_dentro_del_1_5_por_ciento_usa_el_medidor(factor):
+    # 2000 kWh: margen de 30 kWh. Con el 1% (20 kWh), 1.2% caía a estimado;
+    # con el margen fijo de 1.5 kWh, casi todo.
     respaldo = _con_total(2000 * factor)
     curva, origen = curva_respaldo_a_reportar(_rep(_con_total(2000), respaldo))
     assert origen == "medidor"
     assert curva == respaldo
 
 
-@pytest.mark.parametrize("factor", [1.0102, 0.9898])
-def test_generacion_grande_fuera_del_1_por_ciento_es_estimado(factor):
+@pytest.mark.parametrize("factor", [1.0152, 0.9848])
+def test_generacion_grande_fuera_del_1_5_por_ciento_es_estimado(factor):
     rep = _rep(_con_total(2000), _con_total(2000 * factor))
     assert curva_respaldo_a_reportar(rep)[1] == "estimado"
 
 
 def test_consumo_chico_usa_la_misma_regla():
-    # 48 kWh: 1% son 0.48 kWh. Con el margen viejo, 1.2 kWh (2.5%) pasaba.
+    # 48 kWh: 1.5% son 0.72 kWh. Con el margen fijo viejo, 1.2 kWh (2.5%) pasaba.
     assert curva_respaldo_a_reportar(_rep([2.0] * 24, [2.0] * 23 + [2.4]))[1] == "medidor"
+    assert curva_respaldo_a_reportar(_rep([2.0] * 24, [2.0] * 23 + [2.7]))[1] == "medidor"
+    assert curva_respaldo_a_reportar(_rep([2.0] * 24, [2.0] * 23 + [2.8]))[1] == "estimado"
     assert curva_respaldo_a_reportar(_rep([2.0] * 24, [2.0] * 23 + [3.2]))[1] == "estimado"
 
 
