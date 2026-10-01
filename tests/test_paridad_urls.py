@@ -145,7 +145,12 @@ RUTAS_RETIRADAS = {
 #               correr en un hilo: con ~100 fronteras superaba el --timeout 120
 #               de gunicorn (uvicorn no tenia limite) y el proceso moria a
 #               media lista. El front consulta aqui como termino.
+#   2026-10-01  GET|POST /reconectadores/interruptor. El interruptor del ON/OFF
+#               solo vivia en el .env (que se reescribe desde un secret); ahora
+#               un admin lo enciende desde la plataforma. No existia en FastAPI.
 RUTAS_NUEVAS = {
+    ("/api/v1/reconectadores/interruptor", "GET"),
+    ("/api/v1/reconectadores/interruptor", "POST"),
     ("/api/v1/reporte-energia/enviar/estado", "GET"),
     ("/api/v1/liquidaciones-api/ciclo/reliquidar", "POST"),
     ("/api/v1/liquidaciones-api/contratos-energia/{}", "PATCH"),

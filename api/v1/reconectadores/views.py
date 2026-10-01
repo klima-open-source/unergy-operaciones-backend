@@ -22,6 +22,9 @@ logger = logging.getLogger("operaciones.reconectadores")
 # Quién puede abrir o cerrar un reconectador. `admin` pasa siempre (ver
 # `RolePermission`). Leer el estado no exige rol.
 ROLES_COMANDO = ["operaciones"]
+# Quién enciende o apaga el interruptor general. `RolePermission` deja pasar a
+# `admin` siempre, así que esta lista basta para que SOLO admin pueda.
+ROLES_INTERRUPTOR = ["admin"]
 
 
 def _sv_id(proyecto) -> int:
@@ -36,6 +39,8 @@ class ReconectadorViewSet(viewsets.GenericViewSet):
     """Estado y comandos ON/OFF de los relays.
 
     GET  /api/v1/reconectadores/estados                estado y telemetría de todos
+    GET  /api/v1/reconectadores/interruptor            si los comandos están encendidos
+    POST /api/v1/reconectadores/interruptor            encenderlos o apagarlos (admin)
     GET  /api/v1/reconectadores/debug-relay/{id}       respuesta cruda de SolarView
     POST /api/v1/reconectadores/{id}/comando           ON/OFF
 
@@ -56,7 +61,30 @@ class ReconectadorViewSet(viewsets.GenericViewSet):
     def required_role(self):
         # Solo el comando tiene rol: sin `required_role`, `RolePermission`
         # deja pasar a cualquier usuario autenticado, incluso `solo_lectura`.
-        return ROLES_COMANDO if self.action == "comando" else []
+        if self.action == "comando":
+            return ROLES_COMANDO
+        if self.action == "interruptor" and self.request.method == "POST":
+            return ROLES_INTERRUPTOR
+        return []
+
+    @action(detail=False, methods=["get", "post"], url_path="interruptor")
+    def interruptor(self, request):
+        if request.method == "GET":
+            return Response(
+                relay_serializers.InterruptorSerializer(relay_service.estado_interruptor()).data
+            )
+
+        entrada = relay_serializers.InterruptorSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        habilitado = entrada.validated_data["habilitado"]
+        quien = str(request.user)
+        estado = relay_service.cambiar_interruptor(habilitado, quien)
+        logger.warning(
+            "interruptor de reconectadores %s",
+            "ENCENDIDO" if habilitado else "apagado",
+            extra={"usuario_id": getattr(request.user, "id", None), "usuario": quien},
+        )
+        return Response(relay_serializers.InterruptorSerializer(estado).data)
 
     @action(detail=False, methods=["get"], url_path="estados")
     def estados(self, request):
@@ -121,7 +149,7 @@ class ReconectadorViewSet(viewsets.GenericViewSet):
             logger.warning("comando de reconectador rechazado: deshabilitado", extra=rastro)
             return Response({"detail": (
                 "Los comandos ON/OFF están deshabilitados en este servidor "
-                "(RECONECTADORES_COMANDOS_HABILITADOS)."
+                "(un admin los enciende en Generación Solar)."
             )}, status=503)
         try:
             relay_service.verificar_credenciales(datos["username"], datos["password"])
