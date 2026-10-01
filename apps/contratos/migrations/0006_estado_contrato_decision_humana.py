@@ -31,48 +31,50 @@ la revisión 125 de Alembic, que ya hizo esto para quitar `operacion`.
 Django declara la columna como `CharField`, así que no sabe que en Postgres es
 un enum: cambiar `choices` en el modelo no genera DDL. Por eso el tipo se
 cambia con `RunSQL` explícito.
+
+**Solo si el enum existe.** En una base creada desde cero (desarrollo local, las
+pruebas) Django crea la columna como `varchar`: el enum es herencia de
+SQLAlchemy y solo está en producción. Ahí el SQL no tiene nada que convertir y
+el `DO` no hace nada; los valores los valida `choices`. Sin esa guarda,
+`migrate` sobre una base vacía falla con `type "estado_contrato_enum" does not
+exist`.
 """
 
 from django.db import migrations, models
 
-CREAR_NUEVO = """
+SI_HAY_ENUM = """
 DO $$ BEGIN
-    CREATE TYPE estado_contrato_enum_v2 AS ENUM
-        ('firmado', 'en_renovacion', 'terminado');
-EXCEPTION WHEN duplicate_object THEN null;
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'estado_contrato_enum') THEN
+        RETURN;
+    END IF;
+%s
 END $$;
 """
 
 CONVERTIR = """
-ALTER TABLE contratos_servicio
-    ALTER COLUMN estado TYPE estado_contrato_enum_v2
-    USING (CASE estado::text
-               WHEN 'vigente' THEN 'firmado'
-               WHEN 'vencido' THEN 'firmado'
-               ELSE estado::text
-           END)::estado_contrato_enum_v2;
-DROP TYPE estado_contrato_enum;
-ALTER TYPE estado_contrato_enum_v2 RENAME TO estado_contrato_enum;
-"""
-
-CREAR_VIEJO = """
-DO $$ BEGIN
-    CREATE TYPE estado_contrato_enum_v1 AS ENUM
-        ('vigente', 'vencido', 'terminado', 'en_renovacion');
-EXCEPTION WHEN duplicate_object THEN null;
-END $$;
-"""
+    CREATE TYPE estado_contrato_enum_v2 AS ENUM
+        ('firmado', 'en_renovacion', 'terminado');
+    ALTER TABLE contratos_servicio
+        ALTER COLUMN estado TYPE estado_contrato_enum_v2
+        USING (CASE estado::text
+                   WHEN 'vigente' THEN 'firmado'
+                   WHEN 'vencido' THEN 'firmado'
+                   ELSE estado::text
+               END)::estado_contrato_enum_v2;
+    DROP TYPE estado_contrato_enum;
+    ALTER TYPE estado_contrato_enum_v2 RENAME TO estado_contrato_enum;"""
 
 REVERTIR = """
-ALTER TABLE contratos_servicio
-    ALTER COLUMN estado TYPE estado_contrato_enum_v1
-    USING (CASE estado::text
-               WHEN 'firmado' THEN 'vigente'
-               ELSE estado::text
-           END)::estado_contrato_enum_v1;
-DROP TYPE estado_contrato_enum;
-ALTER TYPE estado_contrato_enum_v1 RENAME TO estado_contrato_enum;
-"""
+    CREATE TYPE estado_contrato_enum_v1 AS ENUM
+        ('vigente', 'vencido', 'terminado', 'en_renovacion');
+    ALTER TABLE contratos_servicio
+        ALTER COLUMN estado TYPE estado_contrato_enum_v1
+        USING (CASE estado::text
+                   WHEN 'firmado' THEN 'vigente'
+                   ELSE estado::text
+               END)::estado_contrato_enum_v1;
+    DROP TYPE estado_contrato_enum;
+    ALTER TYPE estado_contrato_enum_v1 RENAME TO estado_contrato_enum;"""
 
 
 class Migration(migrations.Migration):
@@ -81,8 +83,8 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.RunSQL(
-            sql=CREAR_NUEVO + CONVERTIR,
-            reverse_sql=CREAR_VIEJO + REVERTIR,
+            sql=SI_HAY_ENUM % CONVERTIR,
+            reverse_sql=SI_HAY_ENUM % REVERTIR,
         ),
         # Solo validación de Python: `choices` no toca el esquema. Va igual para
         # que el modelo y la base digan lo mismo y el admin ofrezca lo correcto.

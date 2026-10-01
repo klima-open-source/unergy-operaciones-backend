@@ -47,15 +47,6 @@ class Migration(migrations.Migration):
             },
         ),
         migrations.CreateModel(
-            name='OportunidadOfertaProyecto',
-            fields=[
-                ('pk', models.CompositePrimaryKey('oferta_id', 'proyecto_id', blank=True, editable=False, primary_key=True, serialize=False)),
-            ],
-            options={
-                'db_table': 'oportunidad_oferta_proyectos',
-            },
-        ),
-        migrations.CreateModel(
             name='Oportunidad',
             fields=[
                 ('created_at', models.DateTimeField(auto_now_add=True, verbose_name='Fecha de creación')),
