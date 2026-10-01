@@ -290,15 +290,9 @@ class ReporteEnergiaViewSet(viewsets.GenericViewSet):
         instantáneo y el front lo muestra como hasta ahora. Tampoco se envía
         mientras se clasifica la misma fecha: se mandarían filas a medio
         reescribir.
-
-        `?simulacro=true` hace el mismo recorrido sin mandar nada a Quoia ni
-        escribir en la base (ver envio.simular): dice qué fronteras se
-        enviarían, cuáles se saltarían y cuáles fallarían. No se bloquea por
-        fronteras sin validar -- lo informa y sigue.
         """
         fecha = _fecha(request)
-        simulacro = request.query_params.get("simulacro", "").lower() in ("1", "true")
-        if not simulacro and envio.hay_pendientes(fecha):
+        if envio.hay_pendientes(fecha):
             return Response({
                 "fecha": fecha, "status": "bloqueado", "enviados": 0, "fallidos": [],
                 "bloqueado": True, "motivo_bloqueo": envio.MOTIVO_BLOQUEO,
@@ -311,12 +305,9 @@ class ReporteEnergiaViewSet(viewsets.GenericViewSet):
         if not envio.tomar_envio(fecha):
             raise NoProcesable("Ya hay un envío en curso para esa fecha.")
         threading.Thread(
-            target=envio.enviar_background, args=(fecha,),
-            kwargs={"simulacro": simulacro}, daemon=True,
+            target=envio.enviar_background, args=(fecha,), daemon=True,
         ).start()
-        return Response({
-            "fecha": fecha, "status": "iniciado", "bloqueado": False, "simulacro": simulacro,
-        })
+        return Response({"fecha": fecha, "status": "iniciado", "bloqueado": False})
 
     @action(detail=False, methods=["get"], url_path="enviar/estado")
     def enviar_estado(self, request):

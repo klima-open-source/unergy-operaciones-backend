@@ -200,58 +200,6 @@ def _borders(gaia: GaiaClient, filas: list[tuple]) -> dict:
     return resolver_borders(gaia, frt_codes) if frt_codes else {}
 
 
-def simular(fecha: date) -> dict:
-    """El recorrido de `enviar()` con las filas reales, SIN mandar nada.
-
-    **No escribe en Quoia ni en la base.** Es una función aparte, y no un
-    `if simulacro` dentro de enviar(), para que eso se vea leyéndola: nunca
-    llama a `_enviar_a_quoia()` -- el único camino a `gaia.post_report()` --
-    ni a `.save()`. Lo vigila tests/test_reporte_energia_envio_background.py.
-
-    Lo que SÍ hace contra Quoia es leer: el login del GaiaClient y la lista de
-    fronteras de `resolver_borders()`, para saber cuáles fallarían por no
-    tener `border_id`.
-
-    A diferencia de enviar(), no se detiene si hay fronteras sin validar: lo
-    informa en `bloqueado` y sigue, porque ver qué saldría es justo lo útil
-    antes de validarlas.
-    """
-    gen_filas, con_filas = _filas_del_dia(fecha)
-    borders = _borders(GaiaClient(), gen_filas + con_filas)
-
-    se_enviarian: list[dict] = []
-    se_saltarian: list[dict] = []
-    fallarian: list[dict] = []
-    for filas, es_generacion in ((gen_filas, True), (con_filas, False)):
-        for rep, front in filas:
-            fila = {
-                "frontera_id": front.id, "nombre": _nombre_frontera(front),
-                "tipo": "generacion" if es_generacion else "consumo",
-            }
-            if reporte_ya_valido(rep, es_generacion):
-                motivo = ("excluida" if rep.medidor_usado == "excluida"
-                          else "Quoia ya tiene el CGM válido")
-                se_saltarian.append({**fila, "motivo": motivo})
-                continue
-            meta = borders.get((front.codigo_frontera or "").strip().lower())
-            if not (meta and meta.get("id")):
-                fallarian.append({**fila, "motivo": "sin border_id en Quoia"})
-                continue
-            energia = rep.energia_final_kwh
-            se_enviarian.append({
-                **fila, "energia_kwh": float(energia) if energia is not None else None,
-            })
-
-    bloqueado = hay_pendientes(fecha)
-    return {
-        "fecha": fecha, "simulacro": True, "bloqueado": bloqueado,
-        **({"motivo_bloqueo": MOTIVO_BLOQUEO} if bloqueado else {}),
-        "se_enviarian": se_enviarian, "se_saltarian": se_saltarian, "fallarian": fallarian,
-        # Mismas claves que un envío real, para que el front las lea igual.
-        "enviados": 0, "fallidos": [f"{f['nombre']} — {f['motivo']}" for f in fallarian],
-    }
-
-
 def tomar_envio(fecha: date) -> bool:
     """Marca "hay un envío andando" para la fecha; False si ya había otro.
 
@@ -278,37 +226,32 @@ def ultimo_envio(fecha: date) -> dict | None:
     return _cache_leer("ultimo_envio", fecha)
 
 
-def enviar_background(fecha: date, simulacro: bool = False) -> None:
-    """`enviar()` -- o `simular()` -- en un hilo aparte, con el resultado a la
-    caché. Quien la llama ya tomó la marca con `tomar_envio()`; acá solo se
-    libera. El simulacro comparte marca y resultado con el envío real: así
-    no corren los dos a la vez, y el front lee los dos con la misma consulta
-    (`simulacro: true` los distingue)."""
+def enviar_background(fecha: date) -> None:
+    """`enviar()` en un hilo aparte, con el resultado a la caché. Quien la
+    llama ya tomó la marca con `tomar_envio()`; acá solo se libera."""
     close_old_connections()
     inicio = time.monotonic()
     try:
-        resultado = simular(fecha) if simulacro else enviar(fecha)
+        resultado = enviar(fecha)
         print(
-            f"[reporte_energia] enviar_background fecha={fecha} simulacro={simulacro} "
+            f"[reporte_energia] enviar_background fecha={fecha} "
             f"enviados={resultado['enviados']} fallidos={len(resultado['fallidos'])} "
             f"bloqueado={resultado['bloqueado']}"
         )
         _cache_escribir("ultimo_envio", fecha, {
-            **resultado, "fecha": str(fecha), "simulacro": simulacro,
+            **resultado, "fecha": str(fecha),
             "duracion_s": round(time.monotonic() - inicio, 1),
             "terminado_en": datetime.now(timezone.utc).isoformat(),
         }, _TTL_ULTIMO_ENVIO)
     except Exception:
-        print(f"[reporte_energia] enviar_background fecha={fecha} simulacro={simulacro} FALLÓ:")
+        print(f"[reporte_energia] enviar_background fecha={fecha} FALLÓ:")
         print(traceback.format_exc())
         _cache_escribir("ultimo_envio", fecha, {
-            "fecha": str(fecha), "simulacro": simulacro,
+            "fecha": str(fecha),
             "enviados": 0, "fallidos": [], "bloqueado": False,
             "duracion_s": round(time.monotonic() - inicio, 1),
             "terminado_en": datetime.now(timezone.utc).isoformat(),
             "error_general": (
-                "El simulacro se interrumpió; no se mandó nada a Quoia. Ver logs."
-                if simulacro else
                 "El envío se interrumpió. Lo que alcanzó a salir quedó registrado "
                 "en cada frontera; ver logs."
             ),
