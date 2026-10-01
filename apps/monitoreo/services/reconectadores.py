@@ -13,7 +13,9 @@ traduce a HTTP. Leer y mandar un comando van por caminos distintos:
   credenciales de la persona. Abrir o cerrar un relay energiza o apaga una
   planta y puede haber gente en sitio, así que tiene tres candados: el
   interruptor `RECONECTADORES_COMANDOS_HABILITADOS` (apagado por defecto), el
-  rol (`admin` u `operaciones`, en la vista) y el registro en el log de quién,
+  rol (`admin` u `operaciones`, en la vista), el usuario y la contraseña de
+  sole.tech de quien lo manda (verificados contra `auth.sole.tech`, como pide
+  SolarView antes de abrir o cerrar un relay) y el registro en el log de quién,
   qué planta y qué acción. Durante el desarrollo ese endpoint NO se llama nunca,
   ni de prueba.
 """
@@ -58,6 +60,10 @@ class SolarViewNoResponde(RuntimeError):
 
 
 class ComandosDeshabilitados(RuntimeError):
+    pass
+
+
+class CredencialesInvalidas(ValueError):
     pass
 
 
@@ -163,6 +169,27 @@ def comandos_habilitados() -> bool:
     mandar un comando.
     """
     return settings.RECONECTADORES_COMANDOS_HABILITADOS.strip().lower() == "true"
+
+
+def verificar_credenciales(usuario: str, contrasena: str) -> None:
+    """Confirma el usuario y la contraseña de sole.tech de quien manda el comando.
+
+    Es el mismo login que usa SolarView (`auth.sole.tech/api/token/`). El token
+    que devuelve no se usa ni se guarda: el comando sigue saliendo con el token
+    del servidor. Lo que se busca es que el ON/OFF lo confirme una persona con
+    cuenta en SolarView, y que su usuario quede en el log.
+    """
+    url = f"{settings.SOLENIUM_AUTH_URL.rstrip('/')}/token/"
+    try:
+        with httpx.Client(timeout=15) as http:
+            respuesta = http.post(url, json={"username": usuario, "password": contrasena})
+    except Exception as exc:
+        raise SolarViewNoResponde(f"No se pudo conectar con sole.tech: {exc}") from exc
+
+    if respuesta.status_code in (400, 401):
+        raise CredencialesInvalidas("Usuario o contraseña de SolarView incorrectos.")
+    if respuesta.status_code not in (200, 201) or "access" not in (respuesta.json() or {}):
+        raise SolarViewNoResponde(f"sole.tech respondió HTTP {respuesta.status_code} al login.")
 
 
 def enviar_comando(sv_id: int, accion: str) -> httpx.Response:
