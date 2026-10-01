@@ -361,40 +361,60 @@ def estado_quoia_actual(fecha: date) -> dict:
     return {"fecha": fecha, "total": len(filas), "fallidas": fallidas, **conteos}
 
 
-def estado_quoia_revisar(fecha: date) -> dict:
+CAMPOS_XM = ["xm_verificado_en", "xm_process_id", "xm_estado", "xm_exitoso"]
+
+# Lo que una revisión puede gastar consultando Quoia antes de cortar y
+# responder. Sale del `--timeout 120` de gunicorn menos el TIMEOUT de 30 s de
+# una sola llamada del GaiaClient, con margen: si la última consulta arranca
+# justo antes del corte y agota su timeout, la petición igual termina a tiempo.
+_PRESUPUESTO_REVISION_S = 75
+
+
+def estado_quoia_revisar(fecha: date, presupuesto_s: float = _PRESUPUESTO_REVISION_S) -> dict:
     """Consulta Quoia para las filas enviadas que aún no tienen respuesta.
 
     Solo vuelve a golpear Quoia para las que están en espera (`xm_exitoso is
     None`): está pensado para dispararse justo después de `/enviar` y llamarse
     cada tanto hasta que nadie quede en espera.
+
+    **Revisa por tandas.** Es una llamada a Quoia por frontera, y con ~100
+    pasaba del `--timeout 120` de gunicorn: el proceso moría, el bulk_update
+    del final no corría y el front -- que ignora ese error en silencio -- nunca
+    mostraba el panel (2026-09-30, el mismo modo de fallo que el envío del
+    29-sep). Ahora cada fila se guarda apenas Quoia responde, y al pasar
+    `presupuesto_s` se corta y se responde con lo que hay; `sin_revisar` dice
+    cuántas quedaron para la próxima llamada del polling. Van primero las que
+    nunca se miraron y después las que hace más tiempo no se miran, para que
+    una tanda no repita siempre las mismas.
     """
     filas = _fronteras_enviadas(fecha)
     pendientes = [f for f in filas if f[0].xm_exitoso is None]
+    pendientes.sort(key=lambda f: (
+        f[0].xm_verificado_en is not None,
+        f[0].xm_verificado_en or datetime.min.replace(tzinfo=timezone.utc),
+    ))
 
+    sin_revisar = 0
     if pendientes:
+        inicio = time.monotonic()
         gaia = GaiaClient()
-        frt_codes = {f.codigo_frontera for _, f, _ in pendientes if f.codigo_frontera}
-        borders = resolver_borders(gaia, frt_codes) if frt_codes else {}
-        ahora = datetime.now(timezone.utc)
-        por_modelo: dict = {}
-        for rep, front, tipo in pendientes:
+        borders = _borders(gaia, [(rep, front) for rep, front, _ in pendientes])
+        for i, (rep, front, _tipo) in enumerate(pendientes):
+            if time.monotonic() - inicio > presupuesto_s:
+                sin_revisar = len(pendientes) - i
+                break
             meta = borders.get((front.codigo_frontera or "").strip().lower())
             border_id = meta.get("id") if meta else None
             estado = gaia.get_border_report_status(border_id, str(fecha)) if border_id else None
-            rep.xm_verificado_en = ahora
+            rep.xm_verificado_en = datetime.now(timezone.utc)
             if estado:
                 rep.xm_process_id = estado.get("xm_process_id")
                 rep.xm_estado = estado.get("status")
                 rep.xm_exitoso = estado.get("success")
-            Modelo = (
-                ReporteEnergiaGeneracion if tipo == "generacion"
-                else ReporteEnergiaConsumo
-            )
-            por_modelo.setdefault(Modelo, []).append(rep)
-
-        campos = ["xm_verificado_en", "xm_process_id", "xm_estado", "xm_exitoso"]
-        for Modelo, reps in por_modelo.items():
-            Modelo.objects.bulk_update(reps, campos)
+            rep.save(update_fields=CAMPOS_XM)
 
     conteos, fallidas = _conteos(filas)
-    return {"fecha": fecha, "total": len(filas), "fallidas": fallidas, **conteos}
+    return {
+        "fecha": fecha, "total": len(filas), "fallidas": fallidas,
+        "sin_revisar": sin_revisar, **conteos,
+    }
