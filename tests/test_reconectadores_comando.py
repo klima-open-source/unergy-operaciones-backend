@@ -5,7 +5,8 @@ gente trabajando en sitio. Por eso:
 
   - el interruptor `RECONECTADORES_COMANDOS_HABILITADOS` está apagado por
     defecto, y se revisa dentro del servicio, no solo en la vista;
-  - solo `admin` y `operaciones` pueden mandar el comando;
+  - solo `admin` y `operaciones` pueden mandar el comando, y con el usuario y
+    la contraseña de SolarView de quien lo manda;
   - y NINGÚN test sale a la red: el transporte de httpx está bloqueado en todo
     el archivo. `recloser/set-status/` no se llama nunca durante el desarrollo.
 """
@@ -155,13 +156,114 @@ def test_leer_el_estado_no_exige_rol():
     assert _puede(["solo_lectura"], "estados", "GET")
 
 
-def test_el_comando_ya_no_pide_credenciales():
+def test_el_comando_pide_usuario_y_contrasena_de_solarview():
     from api.v1.reconectadores.serializers import ComandoSerializer
 
-    campos = set(ComandoSerializer().fields)
+    assert not ComandoSerializer(data={"accion": "OFF"}).is_valid()
 
-    assert "username" not in campos
-    assert "password" not in campos
-    entrada = ComandoSerializer(data={"accion": "OFF"})
+    entrada = ComandoSerializer(data={"accion": "OFF", "username": "ana", "password": " c l "})
     assert entrada.is_valid(), entrada.errors
-    assert entrada.validated_data == {"accion": "OFF"}
+    # Los espacios son parte de la contraseña: no se recortan.
+    assert entrada.validated_data == {"accion": "OFF", "username": "ana", "password": " c l "}
+    # Y nunca vuelve en una respuesta.
+    assert "password" not in entrada.data
+
+
+# ── Las credenciales ────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def login(monkeypatch, servicio):
+    """Reemplaza el httpx del servicio por un login de sole.tech con la respuesta dada."""
+    peticiones: list[httpx.Request] = []
+    original = httpx.Client
+    estado = {"code": 200, "json": {"access": "jwt", "refresh": "r"}}
+
+    def cliente(*args, **kwargs):
+        def contestar(request):
+            peticiones.append(request)
+            return httpx.Response(estado["code"], json=estado["json"])
+
+        return original(*args, transport=httpx.MockTransport(contestar), **kwargs)
+
+    monkeypatch.setattr(servicio.httpx, "Client", cliente)
+    return peticiones, estado
+
+
+def test_credenciales_correctas_pasan_por_el_login_de_sole_tech(servicio, login):
+    import json
+
+    peticiones, _ = login
+
+    servicio.verificar_credenciales("ana", "clave")
+
+    [peticion] = peticiones
+    assert str(peticion.url) == "https://auth.sole.tech/api/token/"
+    assert json.loads(peticion.content) == {"username": "ana", "password": "clave"}
+
+
+@pytest.mark.parametrize("code", [400, 401])
+def test_credenciales_incorrectas_se_rechazan(servicio, login, code):
+    _, estado = login
+    estado.update(code=code, json={"detail": "No active account"})
+
+    with pytest.raises(servicio.CredencialesInvalidas):
+        servicio.verificar_credenciales("ana", "mala")
+
+
+def test_un_login_que_no_devuelve_token_no_cuenta_como_valido(servicio, login):
+    _, estado = login
+    estado.update(code=500, json={})
+
+    with pytest.raises(servicio.SolarViewNoResponde):
+        servicio.verificar_credenciales("ana", "clave")
+
+
+def _post_comando(monkeypatch, cuerpo):
+    from rest_framework.test import APIRequestFactory, force_authenticate
+
+    from api.v1.reconectadores import views
+
+    proyecto = SimpleNamespace(id=5, nombre_comercial="Planta", project_id_solarview="17")
+    monkeypatch.setattr(views, "get_object_or_404", lambda *a, **k: proyecto)
+    request = APIRequestFactory().post("/api/v1/reconectadores/5/comando", cuerpo, format="json")
+    force_authenticate(request, user=SimpleNamespace(id=1, roles=["operaciones"], is_authenticated=True))
+    return views.ReconectadorViewSet.as_view({"post": "comando"})(request, pk=5)
+
+
+def test_con_el_interruptor_apagado_no_se_prueban_las_credenciales(monkeypatch, servicio):
+    monkeypatch.delenv("RECONECTADORES_COMANDOS_HABILITADOS", raising=False)
+    monkeypatch.setattr(servicio, "verificar_credenciales",
+                        lambda *a: pytest.fail("no debía ir a sole.tech"))
+
+    respuesta = _post_comando(monkeypatch, {"accion": "OFF", "username": "ana", "password": "x"})
+
+    assert respuesta.status_code == 503
+
+
+def test_con_credenciales_incorrectas_no_sale_el_comando(monkeypatch, servicio):
+    monkeypatch.setenv("RECONECTADORES_COMANDOS_HABILITADOS", "true")
+
+    def rechazar(*a):
+        raise servicio.CredencialesInvalidas("Usuario o contraseña de SolarView incorrectos.")
+
+    monkeypatch.setattr(servicio, "verificar_credenciales", rechazar)
+    monkeypatch.setattr(servicio, "enviar_comando", lambda *a: pytest.fail("no debía salir"))
+
+    respuesta = _post_comando(monkeypatch, {"accion": "OFF", "username": "ana", "password": "x"})
+
+    assert respuesta.status_code == 400
+    assert "incorrectos" in respuesta.data["detail"]
+
+
+def test_con_credenciales_correctas_sale_el_comando(monkeypatch, servicio):
+    monkeypatch.setenv("RECONECTADORES_COMANDOS_HABILITADOS", "true")
+    enviados = []
+    monkeypatch.setattr(servicio, "verificar_credenciales", lambda u, c: None)
+    monkeypatch.setattr(servicio, "enviar_comando",
+                        lambda sv, acc: enviados.append((sv, acc)) or httpx.Response(200, text="ok"))
+
+    respuesta = _post_comando(monkeypatch, {"accion": "ON", "username": "ana", "password": "x"})
+
+    assert respuesta.status_code == 200
+    assert enviados == [(17, "ON")]

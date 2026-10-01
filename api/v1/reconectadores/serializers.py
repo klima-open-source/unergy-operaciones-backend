@@ -25,7 +25,10 @@ class RelayEstadoSerializer(serializers.Serializer):
 
 
 class ComandoSerializer(serializers.Serializer):
-    """El comando va con el token del servidor: no lleva credenciales de nadie.
-    Quién lo mandó queda en el log (usuario de la plataforma)."""
+    """El comando sale con el token del servidor, pero lo confirma una persona
+    con su usuario y contraseña de SolarView. Se verifican contra sole.tech y
+    no se guardan; el usuario queda en el log."""
 
     accion = serializers.ChoiceField(choices=["ON", "OFF"])
+    username = serializers.CharField()
+    password = serializers.CharField(write_only=True, trim_whitespace=False)

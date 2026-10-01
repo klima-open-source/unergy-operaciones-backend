@@ -40,9 +40,10 @@ class ReconectadorViewSet(viewsets.GenericViewSet):
     POST /api/v1/reconectadores/{id}/comando           ON/OFF
 
     Las dos cosas van a SolarView con el token del servidor. **Mandar un
-    comando** exige rol `admin` u `operaciones` y que el interruptor
-    `RECONECTADORES_COMANDOS_HABILITADOS` esté encendido; cada intento queda en
-    el log con el usuario, la planta y la acción. Abrir un relay apaga una
+    comando** exige rol `admin` u `operaciones`, que el interruptor
+    `RECONECTADORES_COMANDOS_HABILITADOS` esté encendido y el usuario y la
+    contraseña de SolarView de quien lo manda; cada intento queda en el log con
+    el usuario, la planta y la acción. Abrir un relay apaga una
     planta y puede haber gente en sitio.
     """
 
@@ -110,8 +111,25 @@ class ReconectadorViewSet(viewsets.GenericViewSet):
         sv_id = _sv_id(proyecto)
         rastro = {
             "usuario_id": getattr(request.user, "id", None),
+            "usuario_solarview": datos["username"],
             "proyecto_id": proyecto.id, "sv_id": sv_id, "accion": datos["accion"],
         }
+
+        # El interruptor antes que las credenciales: con los comandos apagados
+        # no tiene sentido mandarle la contraseña de nadie a sole.tech.
+        if not relay_service.comandos_habilitados():
+            logger.warning("comando de reconectador rechazado: deshabilitado", extra=rastro)
+            return Response({"detail": (
+                "Los comandos ON/OFF están deshabilitados en este servidor "
+                "(RECONECTADORES_COMANDOS_HABILITADOS)."
+            )}, status=503)
+        try:
+            relay_service.verificar_credenciales(datos["username"], datos["password"])
+        except relay_service.CredencialesInvalidas as exc:
+            logger.warning("comando de reconectador rechazado: credenciales", extra=rastro)
+            return Response({"detail": str(exc)}, status=400)
+        except relay_service.SolarViewNoResponde as exc:
+            return Response({"detail": str(exc)}, status=503)
 
         try:
             respuesta = relay_service.enviar_comando(sv_id, datos["accion"])
