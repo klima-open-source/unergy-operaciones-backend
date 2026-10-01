@@ -75,6 +75,7 @@ def capturar(monkeypatch, servicio):
 @pytest.mark.parametrize("valor", [None, "", "false", "0", "si", "yes", "1"])
 def test_con_el_interruptor_apagado_no_sale_ningun_comando(servicio, capturar, monkeypatch, valor):
     """Solo la palabra `true` lo enciende; ausente o cualquier otra cosa, apagado."""
+    monkeypatch.setattr(servicio, "_fila_interruptor", lambda: None)
     if valor is None:
         monkeypatch.delenv("RECONECTADORES_COMANDOS_HABILITADOS", raising=False)
     else:
@@ -137,7 +138,9 @@ def _puede(roles, accion, metodo):
     from api.permissions import RolePermission
 
     request = SimpleNamespace(user=SimpleNamespace(roles=roles), method=metodo)
-    return RolePermission().has_permission(request, _vista(accion))
+    vista = _vista(accion)
+    vista.request = request
+    return RolePermission().has_permission(request, vista)
 
 
 @pytest.mark.parametrize("roles, puede", [
@@ -233,6 +236,7 @@ def _post_comando(monkeypatch, cuerpo):
 
 def test_con_el_interruptor_apagado_no_se_prueban_las_credenciales(monkeypatch, servicio):
     monkeypatch.delenv("RECONECTADORES_COMANDOS_HABILITADOS", raising=False)
+    monkeypatch.setattr(servicio, "_fila_interruptor", lambda: None)
     monkeypatch.setattr(servicio, "verificar_credenciales",
                         lambda *a: pytest.fail("no debía ir a sole.tech"))
 
@@ -267,3 +271,54 @@ def test_con_credenciales_correctas_sale_el_comando(monkeypatch, servicio):
 
     assert respuesta.status_code == 200
     assert enviados == [(17, "ON")]
+
+
+# ── El interruptor desde la plataforma ──────────────────────────────────────
+
+
+def test_la_fila_encendida_habilita_los_comandos(monkeypatch, servicio):
+    monkeypatch.delenv("RECONECTADORES_COMANDOS_HABILITADOS", raising=False)
+    monkeypatch.setattr(servicio, "_fila_interruptor", lambda: SimpleNamespace(habilitado=True))
+
+    assert servicio.comandos_habilitados() is True
+
+
+@pytest.mark.parametrize("fila", [None, SimpleNamespace(habilitado=False)])
+def test_sin_fila_o_con_la_fila_apagada_no_hay_comandos(monkeypatch, servicio, fila):
+    monkeypatch.delenv("RECONECTADORES_COMANDOS_HABILITADOS", raising=False)
+    monkeypatch.setattr(servicio, "_fila_interruptor", lambda: fila)
+
+    assert servicio.comandos_habilitados() is False
+
+
+def test_si_la_base_no_responde_el_interruptor_cuenta_como_apagado(monkeypatch, servicio):
+    monkeypatch.delenv("RECONECTADORES_COMANDOS_HABILITADOS", raising=False)
+
+    def caida():
+        raise RuntimeError("sin base")
+
+    monkeypatch.setattr(servicio, "_fila_interruptor", caida)
+
+    assert servicio.comandos_habilitados() is False
+
+
+def test_el_env_sigue_encendiendo_aunque_la_fila_diga_apagado(monkeypatch, servicio):
+    monkeypatch.setenv("RECONECTADORES_COMANDOS_HABILITADOS", "true")
+    monkeypatch.setattr(servicio, "_fila_interruptor", lambda: SimpleNamespace(habilitado=False))
+
+    assert servicio.comandos_habilitados() is True
+
+
+@pytest.mark.parametrize("roles, puede", [
+    (["admin"], True),
+    (["operaciones"], False),
+    (["monitoreo"], False),
+    (["solo_lectura"], False),
+])
+def test_solo_admin_cambia_el_interruptor(roles, puede):
+    assert _puede(roles, "interruptor", "POST") is puede
+
+
+def test_cualquiera_ve_el_estado_del_interruptor():
+    assert _puede(["operaciones"], "interruptor", "GET")
+    assert _puede(["solo_lectura"], "interruptor", "GET")

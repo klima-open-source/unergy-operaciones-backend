@@ -24,6 +24,13 @@ class RelayEstadoSerializer(serializers.Serializer):
         return campos
 
 
+class InterruptorSerializer(serializers.Serializer):
+    habilitado = serializers.BooleanField()
+    forzado_por_servidor = serializers.BooleanField(read_only=True)
+    actualizado_por = serializers.CharField(read_only=True, allow_null=True)
+    actualizado_en = serializers.DateTimeField(read_only=True, allow_null=True)
+
+
 class ComandoSerializer(serializers.Serializer):
     """El comando sale con el token del servidor, pero lo confirma una persona
     con su usuario y contraseña de SolarView. Se verifican contra sole.tech y

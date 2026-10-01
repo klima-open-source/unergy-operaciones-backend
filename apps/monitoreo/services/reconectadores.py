@@ -160,15 +160,66 @@ def estados_de(proyectos) -> list[dict]:
         return [e for e in pool.map(uno, proyectos) if e is not None]
 
 
+def _env_habilitado() -> bool:
+    return settings.RECONECTADORES_COMANDOS_HABILITADOS.strip().lower() == "true"
+
+
+def _fila_interruptor():
+    from apps.monitoreo.models import InterruptorReconectadores
+
+    return InterruptorReconectadores.objects.filter(pk=1).first()
+
+
 def comandos_habilitados() -> bool:
-    """El interruptor del ON/OFF. Apagado salvo `RECONECTADORES_COMANDOS_HABILITADOS=true`.
+    """El interruptor del ON/OFF. Apagado salvo que lo enciendan.
 
     Abrir o cerrar un reconectador energiza o apaga una planta, y puede haber
-    gente trabajando en sitio. Se enciende solo en el servidor, coordinado con
-    el equipo de campo; en local no existe, así que desde ahí es imposible
-    mandar un comando.
+    gente trabajando en sitio. Se enciende de dos formas, coordinado con el
+    equipo de campo:
+
+    - `RECONECTADORES_COMANDOS_HABILITADOS=true` en el `.env` del servidor;
+    - o un `admin` desde la plataforma (`POST /reconectadores/interruptor`),
+      que queda en la tabla `interruptor_reconectadores` con quién y cuándo.
+
+    Sin la fila, o si la base no responde, cuenta como apagado: ante la duda,
+    no sale ningún comando.
     """
-    return settings.RECONECTADORES_COMANDOS_HABILITADOS.strip().lower() == "true"
+    if _env_habilitado():
+        return True
+    try:
+        fila = _fila_interruptor()
+    except Exception as exc:
+        logger.warning("no se pudo leer el interruptor de reconectadores: %s", exc)
+        return False
+    return bool(fila and fila.habilitado)
+
+
+def estado_interruptor() -> dict:
+    """Lo que muestra la plataforma: si está encendido y por qué."""
+    fila = _fila_interruptor()
+    return {
+        "habilitado": _env_habilitado() or bool(fila and fila.habilitado),
+        # Encendido por el `.env`: desde la plataforma no se puede apagar.
+        "forzado_por_servidor": _env_habilitado(),
+        "actualizado_por": fila.actualizado_por if fila else None,
+        "actualizado_en": fila.actualizado_en if fila else None,
+    }
+
+
+def cambiar_interruptor(habilitado: bool, quien: str) -> dict:
+    from django.utils import timezone
+
+    from apps.monitoreo.models import InterruptorReconectadores
+
+    InterruptorReconectadores.objects.update_or_create(
+        pk=1,
+        defaults={
+            "habilitado": habilitado,
+            "actualizado_por": quien,
+            "actualizado_en": timezone.now(),
+        },
+    )
+    return estado_interruptor()
 
 
 def verificar_credenciales(usuario: str, contrasena: str) -> None:
@@ -207,7 +258,7 @@ def enviar_comando(sv_id: int, accion: str) -> httpx.Response:
     if not comandos_habilitados():
         raise ComandosDeshabilitados(
             "Los comandos ON/OFF están deshabilitados en este servidor "
-            "(RECONECTADORES_COMANDOS_HABILITADOS)."
+            "(un admin los enciende en Generación Solar)."
         )
     if accion not in ("ON", "OFF"):
         raise ValueError(f"acción inválida: {accion!r}")
