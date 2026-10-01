@@ -292,6 +292,20 @@ class SolarViewClient:
         _avisar_si_la_forma_no_es_la_esperada(data, total_power, project_id)
         return data
 
+    def get_weather(self, project_id: int, date_from: str, date_to: str) -> dict | None:
+        """Estación meteorológica -- GET /solarview/measurements/weather/.
+
+        `results` trae una serie {timestamp: valor} por variable
+        (`irradiation`, `irradiation_POA`, `temperature`, `temperature_POA`,
+        `wind_speed`, `wind_direction`) y sus unidades en `unit`. Una variable
+        que la estación no mide llega en -1 en todos los puntos, no ausente
+        (verificado el 2026-10-01: Valencia Oriente no tiene POA). Sin
+        estación: 404 -> None.
+        """
+        url = f"{self._base_url}/solarview/measurements/weather/"
+        return self._get(url, params={"project_id": project_id,
+                                      "date_from": date_from, "date_to": date_to})
+
     def get_relay_historical(self, project_id: int, start_date: str, end_date: str,
                               variables: str = "kw") -> dict | None:
         """Histórico del reconectador de un proyecto en un rango de fechas.

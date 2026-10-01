@@ -148,7 +148,11 @@ RUTAS_RETIRADAS = {
 #   2026-10-01  GET|POST /reconectadores/interruptor. El interruptor del ON/OFF
 #               solo vivia en el .env (que se reescribe desde un secret); ahora
 #               un admin lo enciende desde la plataforma. No existia en FastAPI.
+#   2026-10-01  GET /generacion-solar/monitoring/{id}/irradiancia. Irradiancia
+#               POA de la estacion de SolarView para la grafica de potencia. No
+#               existia en FastAPI.
 RUTAS_NUEVAS = {
+    ("/api/v1/generacion-solar/monitoring/{}/irradiancia", "GET"),
     ("/api/v1/reconectadores/interruptor", "GET"),
     ("/api/v1/reconectadores/interruptor", "POST"),
     ("/api/v1/reporte-energia/enviar/estado", "GET"),

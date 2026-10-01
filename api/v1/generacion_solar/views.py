@@ -107,6 +107,15 @@ class GeneracionSolarViewSet(viewsets.GenericViewSet):
 
     @action(
         detail=False, methods=["get"],
+        url_path=r"monitoring/(?P<proyecto_id>[0-9]+)/irradiancia",
+    )
+    def monitoring_irradiancia(self, request, proyecto_id=None):
+        # Aparte del detalle a proposito: solo 12 de 39 plantas tienen POA, y
+        # asi una estacion lenta o caida no demora ni tumba la tarjeta.
+        return Response(sv.irradiancia_poa(int(proyecto_id)))
+
+    @action(
+        detail=False, methods=["get"],
         url_path=r"monitoring/(?P<proyecto_id>[0-9]+)/inverters-power",
     )
     def monitoring_inverters_power(self, request, proyecto_id=None):
