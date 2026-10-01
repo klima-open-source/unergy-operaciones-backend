@@ -71,8 +71,8 @@ def test_toda_tarea_registrada_tiene_su_franja(celery_listo, horarios):
 
 
 def test_el_horario_corre_en_hora_de_bogota(celery_listo):
-    """UTC−5 sin horario de verano. En UTC, la corrida de las 3:30am se iría a
-    las 10:30pm del día anterior — otro día calendario, y estas tareas trabajan
+    """UTC−5 sin horario de verano. En UTC, la corrida de las 3:00am se iría a
+    las 10:00pm del día anterior — otro día calendario, y estas tareas trabajan
     sobre 'ayer'."""
     from django.conf import settings
 

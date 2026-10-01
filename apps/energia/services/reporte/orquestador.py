@@ -61,7 +61,7 @@ TIPOS_CONSUMO = {"consumo", "consumo_auxiliar", "consumo_propio"}
 # settings.py). Tres claves, todas por fecha:
 #
 #   · ultima_corrida -- cómo terminó. La ESCRIBEN las dos corridas (la manual
-#     y la de Celery de las 3:30) y la lee GET /reporte-energia/ejecutar/estado.
+#     y la de Celery de las 3:00) y la lee GET /reporte-energia/ejecutar/estado.
 #     Antes, la de Celery guardaba su resultado en la memoria de OTRO
 #     contenedor, así que ese endpoint no podía saber nada de ella ni por
 #     casualidad: si la corrida automática terminaba con fronteras fallidas,
@@ -332,7 +332,7 @@ def ejecutar_dia(fecha: date, cancelable: bool = False) -> dict:
     por caso, para log/depuración -- el detalle real vive en la BD.
 
     `cancelable`: si "Detener" puede pararla. True solo para las corridas que
-    lanza una persona desde POST /ejecutar. La de Celery de las 3:30 usa el
+    lanza una persona desde POST /ejecutar. La de Celery de las 3:00 usa el
     default y **no consulta la bandera en ninguna iteración** -- ni gasta
     ~100 lecturas de Redis por corrida, ni le da a un clic la posibilidad de
     matar la clasificación de la madrugada. Para pararla sigue estando
@@ -462,7 +462,7 @@ def _tomar_en_curso(fecha: date, origen: str, exclusivo: bool) -> bool:
     niega si ya había otra. Retorna si se puede seguir.
 
     `exclusivo` es True solo para las corridas manuales: **la automática nunca
-    cede el paso**, es la que tiene el horario. Si a las 3:30 había una manual
+    cede el paso**, es la que tiene el horario. Si a las 3:00 había una manual
     en curso, la automática pisa la marca y arranca igual (que es lo que pasa
     hoy, sin marca de ninguna clase).
 

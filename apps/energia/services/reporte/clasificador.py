@@ -656,7 +656,7 @@ def clasificar_generacion(
     # decidir -- pero SÍ se sigue trayendo la lectura PASIVA (recuperar=False),
     # porque el histórico de Factor de Pérdida necesita medidor de TODOS los
     # días con dato, sin importar qué Caso ganó (ver historial.py). Motivado
-    # por Bongos/Paso Norte: la recuperación activa a las 3:30am no siempre
+    # por Bongos/Paso Norte: la recuperación activa de la madrugada no siempre
     # alcanza a estabilizar el dato de todas formas (ver conversación de
     # sesión), así que gastarla en fronteras que ni la necesitan es puro
     # costo sin beneficio.
