@@ -11,7 +11,8 @@ Lo que este archivo vigila:
   1. una fila enviada queda guardada aunque la corrida se caiga después,
   2. el hilo siempre deja un resultado y siempre libera la marca de "en curso",
   3. dos clics no lanzan dos envíos, y una caché caída no impide enviar,
-  4. el contrato de `/enviar/estado` que el front consulta.
+  4. el contrato de `/enviar/estado` que el front consulta,
+  5. el resumen del envío: cada frontera en una sola casilla, y en vivo.
 
 Sin base de datos (el repo no tiene `pytest-django`): los modelos, Quoia y la
 caché se reemplazan por dobles.
@@ -179,31 +180,95 @@ def test_con_la_cache_caida_se_puede_enviar_igual(monkeypatch):
 
 # ── 4. El contrato de /enviar/estado ─────────────────────────────────────────
 
-def _estado():
+def _estado(monkeypatch):
     from rest_framework.request import Request
     from rest_framework.test import APIRequestFactory
 
     from api.v1.reporte_energia.views import ReporteEnergiaViewSet
 
+    from apps.energia.services.reporte import envio
+
+    # El resumen lee las filas del día; acá solo importa que viaje.
+    monkeypatch.setattr(envio, "resumen_envio", lambda fecha: {"total": 0})
     peticion = Request(APIRequestFactory().get(f"/?fecha={FECHA}"))
     return ReporteEnergiaViewSet().enviar_estado(peticion).data
 
 
-def test_estado_sin_envio_trae_fallidos_y_no_en_curso(cache_local):
+def test_estado_sin_envio_trae_fallidos_y_no_en_curso(cache_local, monkeypatch):
     """El front hace `data.fallidos.length` sin preguntar, igual que en
     /ejecutar/estado."""
-    data = _estado()
+    data = _estado(monkeypatch)
 
     assert data["fallidos"] == []
     assert data["en_curso"] is False
+    assert data["resumen"] == {"total": 0}
 
 
-def test_estado_mientras_corre_dice_en_curso(cache_local):
+def test_estado_mientras_corre_dice_en_curso(cache_local, monkeypatch):
     from apps.energia.services.reporte import envio
 
     envio.tomar_envio(FECHA)
 
-    data = _estado()
+    data = _estado(monkeypatch)
 
     assert data["en_curso"] is True
     assert data["en_curso_desde"]
+
+
+# ── 5. El resumen del envío ──────────────────────────────────────────────────
+
+def _fila_resumen(nombre, medidor_usado="principal", caso=2, enviado_en=None, ok=None, error=None):
+    return SimpleNamespace(
+        frontera=SimpleNamespace(id=hash(nombre) % 1000, nombre=nombre),
+        medidor_usado=medidor_usado, caso=caso,
+        enviado_quoia_en=enviado_en, enviado_quoia_ok=ok, enviado_quoia_error=error,
+    )
+
+
+def _resumen(monkeypatch, gen, con=()):
+    from apps.energia.services.reporte import envio
+
+    monkeypatch.setattr(envio, "ReporteEnergiaGeneracion", _modelo(list(gen)))
+    monkeypatch.setattr(envio, "ReporteEnergiaConsumo", _modelo(list(con)))
+    monkeypatch.setattr(envio, "_nombre_frontera", lambda front: front.nombre)
+    return envio.resumen_envio(FECHA)
+
+
+def test_resumen_pone_cada_frontera_en_una_sola_casilla(cache_local, monkeypatch):
+    from datetime import datetime, timezone
+
+    ayer = datetime(2026, 9, 30, tzinfo=timezone.utc)
+    data = _resumen(monkeypatch, gen=[
+        _fila_resumen("enviada", enviado_en=ayer, ok=True),
+        _fila_resumen("fallida", enviado_en=ayer, ok=False, error="Quoia rechazó el envío"),
+        _fila_resumen("sin enviar"),
+        _fila_resumen("cgm gen", medidor_usado="cgm", caso=1),
+        _fila_resumen("excluida", medidor_usado="excluida"),
+    ], con=[
+        _fila_resumen("cgm con", medidor_usado="cgm", caso="CGM"),
+    ])
+
+    assert data["total"] == 6
+    assert (data["enviadas"], data["fallidas"], data["por_enviar"]) == (1, 1, 1)
+    assert (data["automaticas"], data["excluidas"]) == (2, 1)
+    assert data["fallidas_detalle"] == [{
+        "frontera_id": hash("fallida") % 1000, "nombre_proyecto": "fallida",
+        "tipo": "generacion", "motivo": "Quoia rechazó el envío",
+    }]
+
+
+def test_resumen_en_vivo_lo_de_un_envio_anterior_cuenta_como_por_enviar(cache_local, monkeypatch):
+    """Mientras corre un reenvío, una fila enviada AYER todavía no salió en
+    esta corrida: contarla como enviada adelantaría el avance."""
+    from datetime import datetime, timedelta, timezone
+
+    from apps.energia.services.reporte import envio
+
+    envio.tomar_envio(FECHA)
+    inicio = datetime.fromisoformat(envio.envio_en_curso(FECHA)["desde"])
+    data = _resumen(monkeypatch, gen=[
+        _fila_resumen("de ayer", enviado_en=inicio - timedelta(days=1), ok=True),
+        _fila_resumen("de ahora", enviado_en=inicio + timedelta(seconds=5), ok=True),
+    ])
+
+    assert (data["enviadas"], data["por_enviar"]) == (1, 1)

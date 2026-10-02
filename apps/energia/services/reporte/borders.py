@@ -1,7 +1,7 @@
 """Resolución de `frt_code` → border de Quoia.
 
 Puerto de `resolver_borders` de `app/services/reporte_cgm.py`. Vive acá porque
-lo consumen tanto el reporte de energía (`/enviar`, `/estado-quoia`) como el
+lo consumen tanto el reporte de energía (`/enviar`) como el
 reporte CGM, y las dos versiones tienen que leer el MISMO catálogo.
 
 Usa `curvas.obtener_borders_crudos`, cacheado 30 min: antes cada consumidor

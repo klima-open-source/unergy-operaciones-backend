@@ -58,7 +58,6 @@ class ReporteEnergiaViewSet(viewsets.GenericViewSet):
     POST /api/v1/reporte-energia/ejecutar · /ejecutar/cancelar
     GET  /api/v1/reporte-energia/ejecutar/estado
     POST /api/v1/reporte-energia/enviar?fecha= · GET /enviar/estado?fecha=
-    GET|POST /api/v1/reporte-energia/estado-quoia?fecha=
 
     **`/enviar` está bloqueado mientras quede una frontera sin validar.** El
     reporte es del día completo.
@@ -314,20 +313,16 @@ class ReporteEnergiaViewSet(viewsets.GenericViewSet):
         """`en_curso` mientras el hilo corre; al terminar, el resultado del
         último envío (`enviados`, `fallidos`, `terminado_en`, y
         `error_general` si se cayó entero). `fallidos` va siempre, por el
-        mismo motivo que en `/ejecutar/estado`."""
+        mismo motivo que en `/ejecutar/estado`.
+
+        `resumen` cuenta, frontera por frontera, qué pasó en el envío (ver
+        `envio.resumen_envio`): el front lo consulta cada pocos segundos
+        mientras corre, y es lo que muestra el panel del envío."""
         fecha = _fecha(request)
         en_curso = envio.envio_en_curso(fecha)
         return Response({
             "fecha": fecha, "fallidos": [], **(envio.ultimo_envio(fecha) or {}),
             "en_curso": en_curso is not None,
             "en_curso_desde": (en_curso or {}).get("desde"),
+            "resumen": envio.resumen_envio(fecha),
         })
-
-    @action(detail=False, methods=["get", "post"], url_path="estado-quoia")
-    def estado_quoia(self, request):
-        """GET devuelve lo YA guardado; POST fuerza una revisión en vivo contra
-        Quoia, solo para las que siguen en espera."""
-        fecha = _fecha(request)
-        if request.method == "GET":
-            return Response(envio.estado_quoia_actual(fecha))
-        return Response(envio.estado_quoia_revisar(fecha))

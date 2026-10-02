@@ -210,7 +210,6 @@ CASOS = [
     ("/api/v1/reporte-energia/ejecutar/cancelar", "ejecutar_cancelar"),
     ("/api/v1/reporte-energia/enviar", "enviar"),
     ("/api/v1/reporte-energia/enviar/estado", "enviar_estado"),
-    ("/api/v1/reporte-energia/estado-quoia", "estado_quoia"),
     # `panel-contable/{pk}` (PATCH) contra las acciones de lista con nombre
     # literal, y las de detalle con un segmento más.
     ("/api/v1/panel-contable/clasificacion", "clasificacion"),

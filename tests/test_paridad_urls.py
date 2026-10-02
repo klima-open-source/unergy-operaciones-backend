@@ -107,11 +107,18 @@ PREFIJOS_RETIRADOS = [
 #       se fueron con ec26398f y 148fdf37); solo la app vieja de Vue (`legacy/`,
 #       en Vercel), que ya no usa nadie. Hacia 40-80 llamadas a SolarView por
 #       carga.
+#
+#   GET /reporte-energia/estado-quoia, POST /reporte-energia/estado-quoia
+#       2026-10-02  El panel de estados de XM (en espera/exitoso/error) se
+#       cambio por el resumen del envio, que viaja en GET /enviar/estado.
+#       Decision de Sara: quitarlo del todo, back y front.
 RUTAS_RETIRADAS = {
     ("/api/v1/fallas/sla-dashboard", "GET"),
     ("/api/v1/fallas/stats/resumen", "GET"),
     ("/api/v1/fallas/{}/impacto", "GET"),
     ("/api/v1/generacion-solar/generacion-hoy", "GET"),
+    ("/api/v1/reporte-energia/estado-quoia", "GET"),
+    ("/api/v1/reporte-energia/estado-quoia", "POST"),
 }
 
 
