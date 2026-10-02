@@ -110,8 +110,9 @@ class SolarViewClient:
             if not self._token:
                 return "error", None
             try:
-                resp = self._http.get(url, headers=self._headers(), params=params,
-                                      timeout=timeout if timeout is not None else TIMEOUT)
+                # Sin `timeout` explicito, la llamada es identica a la de siempre.
+                extra = {"timeout": timeout} if timeout is not None else {}
+                resp = self._http.get(url, headers=self._headers(), params=params, **extra)
                 if resp.status_code == 404:
                     return "no_existe", None
                 if resp.status_code in (429, 503) and attempt < intentos:
