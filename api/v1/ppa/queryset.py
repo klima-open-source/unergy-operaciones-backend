@@ -24,8 +24,8 @@ def con_relaciones():
         .filter(deleted_at__isnull=True)
         .select_related("responsable", "comprador", "vendedor")
         .prefetch_related(
-            "proyectos_vinculados__proyecto",
-            "tarifas",
+            "proyectos__proyecto",
+            "tarifas_ppa",
             "compromisos",
             "documentos_comerciales",
         )
@@ -38,13 +38,13 @@ def listar(proyecto_id=None, q=None, tipo_contrato=None, limite=LIMITE_MAXIMO):
         consulta = consulta.filter(tipo_contrato=tipo_contrato)
     if proyecto_id is not None:
         consulta = consulta.filter(
-            proyectos_vinculados__proyecto_id=proyecto_id
+            proyectos__proyecto_id=proyecto_id
         )
     if q:
         # La búsqueda cruza el nombre del PROYECTO además de los tres campos del
         # contrato: el usuario busca por planta, no por número de contrato.
         consulta = consulta.filter(
-            Q(proyectos_vinculados__proyecto__nombre_comercial__icontains=q)
+            Q(proyectos__proyecto__nombre_comercial__icontains=q)
             | Q(nombre_interno__icontains=q)
             | Q(numero_codigo_contrato__icontains=q)
             | Q(comprador_nombre__icontains=q)

@@ -29,7 +29,7 @@ class OmIpcTasa(Timer):
 
 class OmSeleccionMensual(Timer):
     id = models.BigAutoField(primary_key=True)
-    contrato = models.ForeignKey("contratos.ContratoServicio", on_delete=models.CASCADE, db_column="contrato_id", related_name="om_seleccion_mensual_por_contrato_id")
+    contrato = models.ForeignKey("contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_id", related_name="om_seleccion_mensual_por_contrato_id")
     periodo = models.CharField(max_length=7, db_index=True)
     incluido = models.BooleanField(default=True)
     facturado = models.BooleanField(default=False)
@@ -66,7 +66,7 @@ class OmPaginaSinMatch(models.Model):
     muestra_texto = models.CharField(max_length=500, null=True, blank=True)
     origen = models.CharField(max_length=20, default="upload")
     resuelto = models.BooleanField(default=False)
-    contrato_id_asignado = models.ForeignKey("contratos.ContratoServicio", on_delete=models.DO_NOTHING, db_column="contrato_id_asignado", null=True, blank=True, related_name="om_pagina_sin_match_por_contrato_id_asignado")
+    contrato_id_asignado = models.ForeignKey("contratos.Contrato", on_delete=models.DO_NOTHING, db_column="contrato_id_asignado", null=True, blank=True, related_name="om_pagina_sin_match_por_contrato_id_asignado")
     asignado_en = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
 
@@ -77,7 +77,7 @@ class OmPaginaSinMatch(models.Model):
 
 class OmDocumentoProyecto(models.Model):
     id = models.BigAutoField(primary_key=True)
-    contrato = models.ForeignKey("contratos.ContratoServicio", on_delete=models.CASCADE, db_column="contrato_id", related_name="om_documento_proyecto_por_contrato_id")
+    contrato = models.ForeignKey("contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_id", related_name="om_documento_proyecto_por_contrato_id")
     periodo = models.CharField(max_length=7, db_index=True)
     nombre_archivo = models.CharField(max_length=500)
     ruta_local = models.CharField(max_length=1000)

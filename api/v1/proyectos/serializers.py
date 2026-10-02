@@ -290,9 +290,12 @@ class ProyectoSerializer(serializers.ModelSerializer):
     def get_ppa_contratos(self, obj) -> list:
         """La relación pasa por la tabla puente y no conoce el borrado lógico de
         `ppa_contratos`: los eliminados se filtran acá para que no reaparezcan."""
+        # `contratos_ppa` ahora es la relación unificada (PPA + servicio); solo los PPA
+        # (servicio_aplica nulo) van acá. Los borrados lógicamente se excluyen.
         contratos = [
             v.contrato for v in obj.contratos_ppa.all()
             if v.contrato and v.contrato.deleted_at is None
+            and v.contrato.servicio_aplica is None
         ]
         return PpaResumenSerializer(contratos, many=True).data
 

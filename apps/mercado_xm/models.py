@@ -89,7 +89,7 @@ class AsicSolicitud(Timer):
     fecha_envio_xm = models.DateField(null=True, blank=True)
     fecha_respuesta_xm = models.DateField(null=True, blank=True)
     numero_radicado = models.CharField(max_length=100, null=True, blank=True)
-    contrato_ppa = models.ForeignKey("ppa.PpaContrato", on_delete=models.DO_NOTHING, db_column="contrato_ppa_id", null=True, blank=True, related_name="asic_solicitudes_por_contrato_ppa_id")
+    contrato_ppa = models.ForeignKey("contratos.Contrato", on_delete=models.DO_NOTHING, db_column="contrato_ppa_id", null=True, blank=True, related_name="asic_solicitudes_por_contrato_ppa_id")
 
     class Meta:
         db_table = "asic_solicitudes"
@@ -127,7 +127,7 @@ class GesconDiccionarioContrato(models.Model):
 
 class CumplimientoMensual(Timer):
     id = models.BigAutoField(primary_key=True)
-    contrato_ppa = models.ForeignKey("ppa.PpaContrato", on_delete=models.CASCADE, db_column="contrato_ppa_id", related_name="cumplimiento_mensual_por_contrato_ppa_id")
+    contrato_ppa = models.ForeignKey("contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_ppa_id", related_name="cumplimiento_mensual_por_contrato_ppa_id")
     proyecto = models.ForeignKey("proyectos.Proyecto", on_delete=models.SET_NULL, db_column="proyecto_id", null=True, blank=True, related_name="cumplimiento_mensual_por_proyecto_id")
     anio = models.IntegerField()
     mes = models.IntegerField()
@@ -154,7 +154,7 @@ class ClasificacionEnergiaMensual(models.Model):
     mes = models.IntegerField()
     categoria = models.CharField(max_length=32)
     proyecto = models.ForeignKey("proyectos.Proyecto", on_delete=models.CASCADE, db_column="proyecto_id", related_name="clasificacion_energia_mensual_por_proyecto_id")
-    contrato_ppa = models.ForeignKey("ppa.PpaContrato", on_delete=models.SET_NULL, db_column="contrato_ppa_id", null=True, blank=True, related_name="clasificacion_energia_mensual_por_contrato_ppa_id")
+    contrato_ppa = models.ForeignKey("contratos.Contrato", on_delete=models.SET_NULL, db_column="contrato_ppa_id", null=True, blank=True, related_name="clasificacion_energia_mensual_por_contrato_ppa_id")
     codigo_sic = models.CharField(max_length=32, null=True, blank=True)
     uso_del_recurso = models.BooleanField(default=False)
     fecha_inicio = models.DateField(null=True, blank=True)

@@ -30,7 +30,7 @@ class ArrProyecto(Timer):
 
 class ArrArrendador(Timer):
     id = models.BigAutoField(primary_key=True)
-    contrato = models.ForeignKey("contratos.ContratoServicio", on_delete=models.CASCADE, db_column="contrato_id", related_name="arr_arrendador_por_contrato_id")
+    contrato = models.ForeignKey("contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_id", related_name="arr_arrendador_por_contrato_id")
     nombre = models.CharField(max_length=255)
     valor_base = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     responsable_iva = models.BooleanField(default=False)

@@ -1090,7 +1090,7 @@ def _comunidad_de(proyecto) -> dict:
 
     ppa = (
         PpaContrato.objects
-        .filter(proyectos_vinculados__proyecto_id=proyecto.id,
+        .filter(proyectos__proyecto_id=proyecto.id,
                 deleted_at__isnull=True, es_comunidad_energetica=True)
         .order_by("-fecha_entrada_comunidad", "-fecha_inicio")
         .first()

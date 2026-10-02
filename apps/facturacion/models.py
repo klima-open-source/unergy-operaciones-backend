@@ -53,7 +53,7 @@ class FacturaEmitida(models.Model):
 
 class ContratoFactura(Timer):
     id = models.BigAutoField(primary_key=True)
-    contrato = models.ForeignKey("contratos.ContratoServicio", on_delete=models.CASCADE, db_column="contrato_id", related_name="contrato_factura_por_contrato_id")
+    contrato = models.ForeignKey("contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_id", related_name="contrato_factura_por_contrato_id")
     tipo = models.CharField(max_length=13, choices=[("solenium", "solenium"), ("inversionista", "inversionista")])
     fecha = models.CharField(max_length=7)
     inversionista = models.CharField(max_length=255, null=True, blank=True)

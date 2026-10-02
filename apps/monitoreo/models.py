@@ -170,7 +170,7 @@ class FallaInversor(models.Model):
 
 class Alerta(Timer):
     id = models.BigAutoField(primary_key=True)
-    ppa = models.ForeignKey("ppa.PpaContrato", on_delete=models.CASCADE, db_column="ppa_id", related_name="alertas_por_ppa_id")
+    ppa = models.ForeignKey("contratos.Contrato", on_delete=models.CASCADE, db_column="ppa_id", related_name="alertas_por_ppa_id")
     project = models.ForeignKey("proyectos.Proyecto", on_delete=models.CASCADE, db_column="project_id", null=True, blank=True, related_name="alertas_por_project_id")
     alert_type = models.CharField(max_length=50)
     description = models.TextField(null=True, blank=True)

@@ -72,7 +72,7 @@ class FronteraQuoiaIgnorada(models.Model):
 
 class ContratoFrontera(Timer):
     id = models.BigAutoField(primary_key=True)
-    contrato_servicio = models.ForeignKey("contratos.ContratoServicio", on_delete=models.CASCADE, db_column="contrato_servicio_id", related_name="contrato_frontera_por_contrato_servicio_id")
+    contrato_servicio = models.ForeignKey("contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_servicio_id", related_name="contrato_frontera_por_contrato_servicio_id")
     frontera = models.ForeignKey("Frontera", on_delete=models.CASCADE, db_column="frontera_id", related_name="contrato_frontera_por_frontera_id")
 
     class Meta:

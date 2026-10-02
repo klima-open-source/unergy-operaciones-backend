@@ -1,9 +1,11 @@
 """Crea (o reactiva) un usuario de la plataforma.
 
-`django.contrib.auth` NO está instalado: los usuarios viven en la tabla propia
-`usuarios` (`apps.plataforma.models.Usuario`), con la contraseña en bcrypt y el
-rol tomado del enum `Rol`. Por eso `createsuperuser` no aplica y hace falta este
-comando.
+Los usuarios viven en la tabla propia `usuarios`
+(`apps.plataforma.models.Usuario`), con la contraseña en bcrypt y el rol tomado
+del enum `Rol`. `django.contrib.auth` sí está instalado y `Usuario` es el
+`AUTH_USER_MODEL`, pero `createsuperuser` no fija el `rol`; por eso hace falta
+este comando. Para solo cambiar una contraseña existente basta el comando
+estándar `changepassword <email>`.
 
 La contraseña se pide de forma interactiva por defecto para que no quede en el
 historial de la shell. Uso:
@@ -66,7 +68,7 @@ class Command(BaseCommand):
         usuario.nombre = nombre
         usuario.rol = rol
         usuario.activo = True
-        usuario.password_hash = seguridad.hash_contrasena(contrasena)
+        usuario.set_password(contrasena)
         usuario.save()
 
         verbo = "creado" if creado else "actualizado (ya existía)"
