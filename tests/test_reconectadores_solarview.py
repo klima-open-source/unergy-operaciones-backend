@@ -37,7 +37,7 @@ class _SolarView:
         medidas = self.con_relay.get((params or {}).get("project_id"))
         return {"results": medidas} if medidas is not None else None
 
-    def _get_con_estado(self, url, params=None):
+    def _get_con_estado(self, url, params=None, **_):
         datos = self._get(url, params)
         return ("ok", datos) if datos is not None else ("no_existe", None)
 
