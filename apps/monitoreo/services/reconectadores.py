@@ -95,23 +95,29 @@ def _numero(valor) -> float | None:
         return None
 
 
-def leer_relay(sv_id: int) -> tuple[bool, dict]:
-    """Devuelve (tiene reconectador, medidas), con el id de SolarView.
+def _leer(sv_id: int) -> tuple[str, dict]:
+    """(`"ok"` | `"sin_relay"` | `"error"`, medidas), con el id de SolarView.
 
-    `False` cubre DOS casos que no se pueden distinguir desde acá: SolarView
-    respondió 404 (la planta no tiene relay físico) o hubo error/timeout (no se
-    pudo confirmar). En ambos el proyecto se omite del listado, porque mostrarlo
-    "sin dato" sugeriría que tiene relay y está caído.
+    `"sin_relay"` es un 404: la planta no tiene reconectador. `"error"` es que
+    no se pudo leer (timeout, 5xx): NO quiere decir que no tenga.
     """
     try:
         c = cliente()
-        datos = c._get(url_relay(c), params={"project_id": sv_id})
-        if not datos:
-            return False, {}
-        return True, (datos.get("results") or {})
+        estado, datos = c._get_con_estado(url_relay(c), params={"project_id": sv_id})
     except Exception as exc:
         logger.warning("relay_get sv_id=%d error=%s", sv_id, exc)
-        return False, {}
+        return "error", {}
+    if estado == "ok" and datos:
+        return "ok", (datos.get("results") or {})
+    if estado == "no_existe":
+        return "sin_relay", {}
+    return "error", {}
+
+
+def leer_relay(sv_id: int) -> tuple[bool, dict]:
+    """Devuelve (tiene reconectador, medidas). `False` si no tiene o si falló."""
+    estado, medidas = _leer(sv_id)
+    return estado == "ok", medidas
 
 
 def build_estado(proyecto_id: int, nombre: str, sol_id: int, medidas: dict) -> dict:
@@ -135,11 +141,43 @@ def build_estado(proyecto_id: int, nombre: str, sol_id: int, medidas: dict) -> d
     return estado
 
 
-def estados_de(proyectos) -> list[dict]:
-    """El estado de cada proyecto, consultados en paralelo.
+# Caché como la de generación (proceso + Redis, ver `solarview_monitoreo`):
+# SolarView se consulta una vez por minuto para todos, no una vez por persona
+# con la página abierta. Sin esto, /estados tardaba ~9 s y ocupaba los procesos
+# web, que dejaban esperando al resto de la pantalla (medido el 2026-10-02).
+CACHE_TTL_ESTADOS = 60
+# Si alguna lectura falló, el listado se guarda menos tiempo: se reintenta antes.
+CACHE_TTL_ESTADOS_CON_ERROR = 15
+# La última lectura buena de cada relay: si una lectura falla, se muestra esa,
+# marcada `lectura_fallida`, en vez de que el reconectador desaparezca.
+CACHE_TTL_ULTIMO = 24 * 3600
+CLAVE_ESTADOS = "relays:estados"
+CLAVE_ULTIMO = "relays:ultimo"
 
-    Los proyectos sin relay o con `project_id_solarview` no numérico se omiten.
+
+def _cache():
+    from apps.energia.services import solarview_monitoreo as sv
+
+    return sv
+
+
+def olvidar_estados() -> None:
+    """Tras un comando: el próximo /estados vuelve a leer SolarView."""
+    _cache()._cache_borrar(CLAVE_ESTADOS)
+
+
+def estados_de(proyectos) -> list[dict]:
+    """El estado de cada proyecto, consultados en paralelo y cacheados.
+
+    Se omiten los proyectos sin relay (404) y los de `project_id_solarview` no
+    numérico. Si la lectura de uno FALLA, se devuelve su última lectura buena
+    con `lectura_fallida: True`; si nunca hubo una, se omite.
     """
+    cache = _cache()
+    if (cacheado := cache._cache_get(CLAVE_ESTADOS)) is not None:
+        return cacheado
+    ultimo: dict = cache._cache_get(CLAVE_ULTIMO) or {}
+
     def uno(proyecto):
         try:
             sv_id = int(proyecto.project_id_solarview)
@@ -148,16 +186,40 @@ def estados_de(proyectos) -> list[dict]:
                 "project_id_solarview inválido proyecto_id=%s valor=%r",
                 proyecto.id, proyecto.project_id_solarview,
             )
-            return None
-        tiene, medidas = leer_relay(sv_id)
-        if not tiene:
-            return None
-        return build_estado(
+            return "invalido", proyecto.id, None
+        estado, medidas = _leer(sv_id)
+        if estado != "ok":
+            return estado, proyecto.id, None
+        return "ok", proyecto.id, build_estado(
             proyecto.id, proyecto.nombre_comercial, sv_id, medidas
         )
 
     with ThreadPoolExecutor(max_workers=HILOS) as pool:
-        return [e for e in pool.map(uno, proyectos) if e is not None]
+        resultados = list(pool.map(uno, proyectos))
+
+    lista: list[dict] = []
+    nuevo_ultimo = dict(ultimo)
+    hubo_error = False
+    for tipo, proyecto_id, estado in resultados:
+        clave = str(proyecto_id)
+        if tipo == "ok":
+            estado["lectura_fallida"] = False
+            lista.append(estado)
+            nuevo_ultimo[clave] = estado
+        elif tipo == "error":
+            hubo_error = True
+            if clave in ultimo:
+                lista.append({**ultimo[clave], "lectura_fallida": True})
+        else:  # sin_relay o id inválido: ya no tiene relay que recordar
+            nuevo_ultimo.pop(clave, None)
+
+    cache._cache_set(CLAVE_ULTIMO, CACHE_TTL_ULTIMO, nuevo_ultimo)
+    cache._cache_set(
+        CLAVE_ESTADOS,
+        CACHE_TTL_ESTADOS_CON_ERROR if hubo_error else CACHE_TTL_ESTADOS,
+        lista,
+    )
+    return lista
 
 
 def _env_habilitado() -> bool:

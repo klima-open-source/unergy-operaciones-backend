@@ -14,6 +14,8 @@ class RelayEstadoSerializer(serializers.Serializer):
     # True=ON, False=OFF, None=sin dato.
     active = serializers.BooleanField(allow_null=True)
     ultima_actualizacion = serializers.CharField(allow_null=True)
+    # True: SolarView no respondió en esta lectura y esto es la última buena.
+    lectura_fallida = serializers.BooleanField(required=False, default=False)
 
     def get_fields(self):
         campos = super().get_fields()

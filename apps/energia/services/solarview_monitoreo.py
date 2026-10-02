@@ -64,6 +64,12 @@ CACHE_TTL_DETALLE = 90   # segundos — detalle por proyecto
 CACHE_TTL_GENHOY = 120   # segundos — resumen de generación del día
 CACHE_TTL_IRRADIANCIA = 300       # segundos — curva POA de hoy
 CACHE_TTL_SIN_IRRADIANCIA = 3600  # sin estación o sin sensor POA: no cambia en el día
+# La estación existe y mide POA, pero todo da 0: es de noche o de madrugada. No
+# se guarda una hora (escondería la POA hasta mucho después del amanecer).
+CACHE_TTL_POA_EN_CERO = 300
+# SolarView falló (timeout, 5xx): se reintenta pronto, pero no en cada request
+# -- con ~38 tarjetas, una estación lenta haría ~38 llamadas de hasta 60 s.
+CACHE_TTL_ERROR = 60
 
 TIPOS_GENERACION = ["generacion", "generacion_consumo"]
 
@@ -104,6 +110,18 @@ def _cache_set(clave: str, ttl: int, datos) -> None:
         )
     except Exception:
         pass  # sin Redis el cache queda por proceso, como antes
+
+
+def _cache_borrar(clave: str) -> None:
+    """Borra una clave del caché (proceso y Redis). Los otros procesos web la
+    conservan hasta su TTL: el caché de proceso no se comparte."""
+    _cache.pop(clave, None)
+    try:
+        from django.core.cache import cache
+
+        cache.delete(_PREFIJO_REDIS + clave)
+    except Exception:
+        pass
 
 
 def _get_cliente():
@@ -725,8 +743,17 @@ def irradiancia_poa(proyecto_id: int) -> dict:
     if (cacheado := _cache_get(clave)) is not None:
         return cacheado
 
-    crudo = _get_cliente().get_weather(sol_id, f"{hoy}T00:00:00", f"{hoy}T23:59:59") or {}
-    serie = (crudo.get("results") or {}).get("irradiation_POA") or {}
+    estado, crudo = _get_cliente().get_weather_con_estado(
+        sol_id, f"{hoy}T00:00:00", f"{hoy}T23:59:59")
+    if estado == "error":
+        # Falla pasajera de SolarView: no es "esta planta no tiene POA".
+        _cache_set(clave, CACHE_TTL_ERROR, vacio)
+        return vacio
+    if estado == "no_existe":
+        _cache_set(clave, CACHE_TTL_SIN_IRRADIANCIA, vacio)
+        return vacio
+
+    serie = ((crudo or {}).get("results") or {}).get("irradiation_POA") or {}
     puntos = []
     for momento, valor in sorted(serie.items()):
         try:
@@ -738,7 +765,10 @@ def irradiancia_poa(proyecto_id: int) -> dict:
         puntos.append({"time": str(momento), "w_m2": round(v, 1)})
 
     if not any(pt["w_m2"] > 0 for pt in puntos):
-        _cache_set(clave, CACHE_TTL_SIN_IRRADIANCIA, vacio)
+        # Sin un solo valor >= 0 la estación no mide POA (llega todo en -1): eso
+        # no cambia en el día. Con ceros, sí la mide y aún no hay sol.
+        ttl = CACHE_TTL_POA_EN_CERO if puntos else CACHE_TTL_SIN_IRRADIANCIA
+        _cache_set(clave, ttl, vacio)
         return vacio
 
     datos = {"disponible": True, "unidad": "W/m²", "puntos": puntos}

@@ -82,13 +82,26 @@ class SolarViewClient:
         return {"Authorization": f"Token {self._token}"}
 
     def _get(self, url: str, params: dict | None = None) -> dict | list | None:
+        return self._get_con_estado(url, params)[1]
+
+    def _get_con_estado(
+        self, url: str, params: dict | None = None,
+    ) -> tuple[str, dict | list | None]:
+        """Como `_get`, pero dice POR QUÉ no hay datos.
+
+        `_get` devuelve None tanto si SolarView respondió 404 (el recurso no
+        existe: la planta no tiene estación o relay) como si la llamada falló
+        (timeout, 5xx). Quien cachea necesita distinguirlos: lo primero no
+        cambia en el día, lo segundo se debe reintentar pronto. Estados:
+        `"ok"`, `"no_existe"` (404) y `"error"` (sin token, timeout o 5xx).
+        """
         for attempt in range(1, RETRY_MAX + 1):
             if not self._token:
-                return None
+                return "error", None
             try:
                 resp = self._http.get(url, headers=self._headers(), params=params)
                 if resp.status_code == 404:
-                    return None
+                    return "no_existe", None
                 if resp.status_code in (429, 503) and attempt < RETRY_MAX:
                     # Reintentar de inmediato ante rate limiting no sirve de
                     # nada -- con ~37 fronteras y hasta 2 llamadas cada una en
@@ -105,12 +118,12 @@ class SolarViewClient:
                     time.sleep(espera)
                     continue
                 resp.raise_for_status()
-                return resp.json()
-            except (httpx.HTTPError, httpx.TimeoutException) as exc:
+                return "ok", resp.json()
+            except (httpx.HTTPError, httpx.TimeoutException, ValueError) as exc:
                 logger.warning("solarview request failed url=%s attempt=%d: %s", url, attempt, exc)
                 if attempt == RETRY_MAX:
-                    return None
-        return None
+                    return "error", None
+        return "error", None
 
     def get_availability(self) -> dict[int, dict]:
         """Disponibilidad de toda la flota en una sola llamada, agrupada por
@@ -302,9 +315,16 @@ class SolarViewClient:
         (verificado el 2026-10-01: Valencia Oriente no tiene POA). Sin
         estación: 404 -> None.
         """
+        return self.get_weather_con_estado(project_id, date_from, date_to)[1]
+
+    def get_weather_con_estado(
+        self, project_id: int, date_from: str, date_to: str,
+    ) -> tuple[str, dict | None]:
+        """`get_weather` diciendo si fue 404 o error (ver `_get_con_estado`)."""
         url = f"{self._base_url}/solarview/measurements/weather/"
-        return self._get(url, params={"project_id": project_id,
-                                      "date_from": date_from, "date_to": date_to})
+        return self._get_con_estado(url, params={"project_id": project_id,
+                                                 "date_from": date_from,
+                                                 "date_to": date_to})
 
     def get_relay_historical(self, project_id: int, start_date: str, end_date: str,
                               variables: str = "kw") -> dict | None:

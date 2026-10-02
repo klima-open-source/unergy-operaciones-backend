@@ -8,7 +8,9 @@ Viene de la estación meteorológica de SolarView. Lo que se fija acá:
     toda en -1 cuenta como "no disponible" (así llega Valencia Oriente);
   · sin estación (404 -> None) o sin `project_id_solarview`, tampoco hay;
   · lo "no disponible" se cachea más tiempo, porque no cambia en el día y son
-    27 de las 39 plantas.
+    27 de las 39 plantas;
+  · pero un ERROR de SolarView (timeout, 5xx) no es "no tiene POA": se guarda
+    poco, y una serie en ceros (de noche) tampoco se guarda una hora.
 
 Ningún test sale a la red: el cliente es de mentira.
 """
@@ -29,13 +31,20 @@ def _base():
 
 
 class _Cliente:
-    def __init__(self, respuesta):
+    """`respuesta` None = 404; `error=True` = SolarView falló."""
+
+    def __init__(self, respuesta, error=False):
         self.respuesta = respuesta
+        self.error = error
         self.llamadas = []
 
-    def get_weather(self, project_id, date_from, date_to):
+    def get_weather_con_estado(self, project_id, date_from, date_to):
         self.llamadas.append((project_id, date_from, date_to))
-        return self.respuesta
+        if self.error:
+            return "error", None
+        if self.respuesta is None:
+            return "no_existe", None
+        return "ok", self.respuesta
 
 
 @pytest.fixture
@@ -59,8 +68,8 @@ def sv(monkeypatch):
     solarview_monitoreo._cache.clear()
 
 
-def _con(monkeypatch, sv, respuesta):
-    cliente = _Cliente(respuesta)
+def _con(monkeypatch, sv, respuesta, error=False):
+    cliente = _Cliente(respuesta, error)
     monkeypatch.setattr(sv, "_get_cliente", lambda: cliente)
     return cliente
 
@@ -128,3 +137,37 @@ def test_la_segunda_consulta_sale_del_cache(monkeypatch, sv):
     sv.irradiancia_poa(5)
 
     assert len(cliente.llamadas) == 1
+
+
+def _ttls(monkeypatch, sv):
+    ttls = []
+    original = sv._cache_set
+    monkeypatch.setattr(sv, "_cache_set", lambda k, ttl, d: ttls.append(ttl) or original(k, ttl, d))
+    return ttls
+
+
+def test_un_error_de_solarview_no_se_guarda_como_sin_poa(monkeypatch, sv):
+    _con(monkeypatch, sv, None, error=True)
+    ttls = _ttls(monkeypatch, sv)
+
+    assert sv.irradiancia_poa(5)["disponible"] is False
+    assert ttls == [sv.CACHE_TTL_ERROR]
+    assert sv.CACHE_TTL_ERROR < sv.CACHE_TTL_IRRADIANCIA
+
+
+def test_de_noche_la_poa_en_cero_se_guarda_poco(monkeypatch, sv):
+    _con(monkeypatch, sv, {"results": {"irradiation_POA": {"t1": 0.0, "t2": 0.0}}})
+    ttls = _ttls(monkeypatch, sv)
+
+    sv.irradiancia_poa(5)
+
+    assert ttls == [sv.CACHE_TTL_POA_EN_CERO]
+
+
+def test_sin_sensor_poa_se_guarda_una_hora(monkeypatch, sv):
+    _con(monkeypatch, sv, {"results": {"irradiation_POA": {"t1": -1.0, "t2": -1.0}}})
+    ttls = _ttls(monkeypatch, sv)
+
+    sv.irradiancia_poa(5)
+
+    assert ttls == [sv.CACHE_TTL_SIN_IRRADIANCIA]
