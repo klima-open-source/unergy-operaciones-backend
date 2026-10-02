@@ -100,11 +100,15 @@ def test_el_default_de_frontend_url_es_produccion_no_localhost():
 
 def test_los_dos_arboles_declaran_el_mismo_default():
     """El correo lo manda código que lee la config de FastAPI; si divergen, el
-    enlace depende de quién lo mande."""
-    from app.core.config import settings as fastapi
+    enlace depende de quién lo mande.
+
+    Se compara el default DECLARADO, no `settings.FRONTEND_URL`: ese ya pasó
+    por el `.env`, y en local trae `http://localhost:3000` -- el test fallaba en
+    cada equipo de desarrollo sin que los defaults hubieran divergido."""
+    from app.core.config import Settings
     from apps.comun.config import DEFECTOS
 
-    assert fastapi.FRONTEND_URL == DEFECTOS["FRONTEND_URL"]
+    assert Settings.model_fields["FRONTEND_URL"].default == DEFECTOS["FRONTEND_URL"]
 
 
 def test_el_correo_de_reset_arma_su_enlace_sobre_la_ruta_que_existe():
