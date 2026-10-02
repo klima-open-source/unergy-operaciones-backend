@@ -60,10 +60,6 @@ class ReporteEnergiaGeneracion(Timer):
     enviado_quoia_en = models.DateTimeField(null=True, blank=True)
     enviado_quoia_ok = models.BooleanField(null=True, blank=True)
     enviado_quoia_error = models.CharField(max_length=500, null=True, blank=True)
-    xm_process_id = models.CharField(max_length=100, null=True, blank=True)
-    xm_estado = models.CharField(max_length=30, null=True, blank=True)
-    xm_exitoso = models.BooleanField(null=True, blank=True)
-    xm_verificado_en = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "reporte_energia_generacion"
@@ -109,10 +105,6 @@ class ReporteEnergiaConsumo(Timer):
     enviado_quoia_en = models.DateTimeField(null=True, blank=True)
     enviado_quoia_ok = models.BooleanField(null=True, blank=True)
     enviado_quoia_error = models.CharField(max_length=500, null=True, blank=True)
-    xm_process_id = models.CharField(max_length=100, null=True, blank=True)
-    xm_estado = models.CharField(max_length=30, null=True, blank=True)
-    xm_exitoso = models.BooleanField(null=True, blank=True)
-    xm_verificado_en = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "reporte_energia_consumo"
