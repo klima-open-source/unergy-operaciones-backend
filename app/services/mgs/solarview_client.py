@@ -36,6 +36,9 @@ logger = logging.getLogger("mgs.solarview")
 
 RETRY_MAX = 2
 TIMEOUT = 30.0
+# Lo que se pide con alguien mirando la pantalla (relays, POA): un intento
+# corto. Si no llega, se muestra lo ultimo conocido. Ver `_get_con_estado`.
+TIMEOUT_EN_PANTALLA = 6.0
 BACKOFF_SECONDS = 2.0
 
 
@@ -85,7 +88,8 @@ class SolarViewClient:
         return self._get_con_estado(url, params)[1]
 
     def _get_con_estado(
-        self, url: str, params: dict | None = None,
+        self, url: str, params: dict | None = None, *,
+        timeout: float | None = None, intentos: int = RETRY_MAX,
     ) -> tuple[str, dict | list | None]:
         """Como `_get`, pero dice POR QUÉ no hay datos.
 
@@ -94,15 +98,23 @@ class SolarViewClient:
         (timeout, 5xx). Quien cachea necesita distinguirlos: lo primero no
         cambia en el día, lo segundo se debe reintentar pronto. Estados:
         `"ok"`, `"no_existe"` (404) y `"error"` (sin token, timeout o 5xx).
+
+        `timeout` e `intentos` acortan la espera para lo que se pide mientras
+        alguien mira la pantalla (reconectadores, POA). Con los valores por
+        defecto (30 s x 2 intentos) un endpoint colgado de SolarView retiene un
+        proceso web ~60 s, y con pocos procesos la plataforma entera queda en
+        fila: el 2026-10-02 SolarView dejo de responder a ratos (40 s sin
+        respuesta en /recloser/ y /weather/) y hasta la campana tardaba 28 s.
         """
-        for attempt in range(1, RETRY_MAX + 1):
+        for attempt in range(1, intentos + 1):
             if not self._token:
                 return "error", None
             try:
-                resp = self._http.get(url, headers=self._headers(), params=params)
+                resp = self._http.get(url, headers=self._headers(), params=params,
+                                      timeout=timeout if timeout is not None else TIMEOUT)
                 if resp.status_code == 404:
                     return "no_existe", None
-                if resp.status_code in (429, 503) and attempt < RETRY_MAX:
+                if resp.status_code in (429, 503) and attempt < intentos:
                     # Reintentar de inmediato ante rate limiting no sirve de
                     # nada -- con ~37 fronteras y hasta 2 llamadas cada una en
                     # la corrida diaria, un 429 sin espera probablemente
@@ -121,7 +133,7 @@ class SolarViewClient:
                 return "ok", resp.json()
             except (httpx.HTTPError, httpx.TimeoutException, ValueError) as exc:
                 logger.warning("solarview request failed url=%s attempt=%d: %s", url, attempt, exc)
-                if attempt == RETRY_MAX:
+                if attempt >= intentos:
                     return "error", None
         return "error", None
 
@@ -324,7 +336,8 @@ class SolarViewClient:
         url = f"{self._base_url}/solarview/measurements/weather/"
         return self._get_con_estado(url, params={"project_id": project_id,
                                                  "date_from": date_from,
-                                                 "date_to": date_to})
+                                                 "date_to": date_to},
+                                    timeout=TIMEOUT_EN_PANTALLA, intentos=1)
 
     def get_relay_historical(self, project_id: int, start_date: str, end_date: str,
                               variables: str = "kw") -> dict | None:

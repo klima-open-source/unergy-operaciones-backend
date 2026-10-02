@@ -109,3 +109,36 @@ def test_olvidar_estados_obliga_a_leer_de_nuevo(monkeypatch, relays):
     relays.estados_de([_p(1, 10)])
 
     assert llamadas == [10, 10]
+
+
+def test_si_otro_proceso_esta_consultando_devuelve_lo_ultimo_al_instante(monkeypatch, relays):
+    _respuestas(monkeypatch, relays, {10: ("ok", {"active": True})})
+    relays.estados_de([_p(1, 10)])
+    relays.olvidar_estados()
+
+    llamadas = _respuestas(monkeypatch, relays, {10: ("ok", {"active": False})})
+    monkeypatch.setattr(relays, "_tomar_candado", lambda: False)
+
+    [estado] = relays.estados_de([_p(1, 10)])
+
+    assert estado["active"] is True  # la última conocida, sin ir a SolarView
+    assert llamadas == []
+
+
+def test_la_lectura_del_relay_es_corta_y_de_un_intento(monkeypatch, relays):
+    from app.services.mgs.solarview_client import TIMEOUT_EN_PANTALLA
+
+    pedidos = []
+
+    class _C:
+        _base_url = "https://api.sole.tech"
+
+        def _get_con_estado(self, url, params=None, **kw):
+            pedidos.append(kw)
+            return "error", None
+
+    monkeypatch.setattr(relays, "cliente", lambda: _C())
+
+    assert relays._leer(17) == ("error", {})
+    assert pedidos == [{"timeout": TIMEOUT_EN_PANTALLA, "intentos": 1}]
+    assert TIMEOUT_EN_PANTALLA <= 10

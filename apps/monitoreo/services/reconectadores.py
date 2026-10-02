@@ -36,8 +36,9 @@ RELAY_ACTUAL = "/solarview/config/recloser/"
 # matched" (verificado el 2026-09-30). Las lecturas funcionan sin ese prefijo.
 RELAY_COMANDO = "/api/solarview/config/recloser/set-status/"
 
-# ~175 ms por planta; 8 en paralelo para que la pantalla cargue rápido.
-HILOS = 8
+# ~175 ms por planta; 16 en paralelo: con lecturas de máx. 6 s (ver `_leer`),
+# ~39 relays tardan en el peor caso ~18 s, no ~30.
+HILOS = 16
 
 # Medida del proveedor -> campo de la respuesta. Son las mismas columnas del
 # panel "Reconectadores", y las mismas claves en Solenium y en SolarView.
@@ -102,8 +103,13 @@ def _leer(sv_id: int) -> tuple[str, dict]:
     no se pudo leer (timeout, 5xx): NO quiere decir que no tenga.
     """
     try:
+        from app.services.mgs.solarview_client import TIMEOUT_EN_PANTALLA
+
         c = cliente()
-        estado, datos = c._get_con_estado(url_relay(c), params={"project_id": sv_id})
+        estado, datos = c._get_con_estado(
+            url_relay(c), params={"project_id": sv_id},
+            timeout=TIMEOUT_EN_PANTALLA, intentos=1,
+        )
     except Exception as exc:
         logger.warning("relay_get sv_id=%d error=%s", sv_id, exc)
         return "error", {}
@@ -146,13 +152,38 @@ def build_estado(proyecto_id: int, nombre: str, sol_id: int, medidas: dict) -> d
 # con la página abierta. Sin esto, /estados tardaba ~9 s y ocupaba los procesos
 # web, que dejaban esperando al resto de la pantalla (medido el 2026-10-02).
 CACHE_TTL_ESTADOS = 60
-# Si alguna lectura falló, el listado se guarda menos tiempo: se reintenta antes.
-CACHE_TTL_ESTADOS_CON_ERROR = 15
+# Si alguna lectura falló también se guarda un minuto: insistirle más seguido a
+# un SolarView que no responde solo suma procesos esperando.
+CACHE_TTL_ESTADOS_CON_ERROR = 60
 # La última lectura buena de cada relay: si una lectura falla, se muestra esa,
 # marcada `lectura_fallida`, en vez de que el reconectador desaparezca.
 CACHE_TTL_ULTIMO = 24 * 3600
 CLAVE_ESTADOS = "relays:estados"
 CLAVE_ULTIMO = "relays:ultimo"
+# Solo un proceso a la vez consulta SolarView; los demas devuelven la ultima
+# lectura conocida al instante en vez de repetir las ~39 llamadas en paralelo.
+CLAVE_CANDADO = "solar_monitoreo:relays:actualizando"
+CANDADO_TTL = 90
+
+
+def _tomar_candado() -> bool:
+    """True si este proceso debe consultar SolarView. Sin Redis, siempre True
+    (cada proceso consulta, como antes)."""
+    try:
+        from django.core.cache import cache
+
+        return bool(cache.add(CLAVE_CANDADO, 1, CANDADO_TTL))
+    except Exception:
+        return True
+
+
+def _soltar_candado() -> None:
+    try:
+        from django.core.cache import cache
+
+        cache.delete(CLAVE_CANDADO)
+    except Exception:
+        pass
 
 
 def _cache():
@@ -177,6 +208,18 @@ def estados_de(proyectos) -> list[dict]:
     if (cacheado := cache._cache_get(CLAVE_ESTADOS)) is not None:
         return cacheado
     ultimo: dict = cache._cache_get(CLAVE_ULTIMO) or {}
+
+    if not _tomar_candado():
+        # Otro proceso ya esta consultando SolarView: lo ultimo conocido, ya.
+        ids = {str(p.id) for p in proyectos}
+        return [e for k, e in ultimo.items() if k in ids]
+    try:
+        return _consultar(proyectos, cache, ultimo)
+    finally:
+        _soltar_candado()
+
+
+def _consultar(proyectos, cache, ultimo: dict) -> list[dict]:
 
     def uno(proyecto):
         try:
