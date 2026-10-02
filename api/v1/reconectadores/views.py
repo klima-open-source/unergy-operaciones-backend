@@ -174,6 +174,8 @@ class ReconectadorViewSet(viewsets.GenericViewSet):
             "comando de reconectador enviado: HTTP %s", respuesta.status_code,
             extra={**rastro, "respuesta": respuesta.text[:200]},
         )
+        # Que la próxima consulta de estados vaya a SolarView y no al caché.
+        relay_service.olvidar_estados()
         if respuesta.status_code >= 300:
             return Response(
                 {"detail": (

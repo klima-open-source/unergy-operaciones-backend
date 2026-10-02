@@ -37,14 +37,30 @@ class _SolarView:
         medidas = self.con_relay.get((params or {}).get("project_id"))
         return {"results": medidas} if medidas is not None else None
 
+    def _get_con_estado(self, url, params=None):
+        datos = self._get(url, params)
+        return ("ok", datos) if datos is not None else ("no_existe", None)
+
 
 @pytest.fixture
 def relay(monkeypatch):
+    from django.test import override_settings
+
+    from apps.energia.services import solarview_monitoreo
     from apps.monitoreo.services import reconectadores
 
     falso = _SolarView({17: {"active": True, "time": "2026-09-29 17:32:18", "kw": 5.0, "i_a": "1.5"}})
     monkeypatch.setattr(reconectadores, "cliente", lambda: falso)
-    return reconectadores, falso
+    # `estados_de` cachea: cada test empieza con el caché vacío.
+    solarview_monitoreo._cache.clear()
+    with override_settings(
+        CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+    ):
+        from django.core.cache import cache
+
+        cache.clear()
+        yield reconectadores, falso
+    solarview_monitoreo._cache.clear()
 
 
 def test_la_lectura_va_a_solarview_con_project_id(relay):
