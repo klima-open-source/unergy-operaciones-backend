@@ -389,7 +389,7 @@ def _subir_si_falta(accion: dict, correo: CorreoCrudo, ya_tenia_pdf: bool,
     contenido = dict(expandir_adjuntos(list(correo.adjuntos))).get(accion["adjunto"])
     if not contenido:
         return None, None
-    from app.services.finanzas_mandatos_drive import subir_pdf
+    from apps.mandatos.services.drive import subir_pdf
 
     sub = f"{periodo.strftime('%Y-%m')}-{accion['tipo']}"
     res = subir_pdf(contenido, accion["adjunto"], sub)

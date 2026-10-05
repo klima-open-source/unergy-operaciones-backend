@@ -79,7 +79,6 @@ PRESTADOS_DE_APP = {
     "app.models.proyectos",           # apps/comercial/services/pipeline.py
     "app.services.costo_regulatorio_drive",
     "app.services.email_service",
-    "app.services.finanzas_mandatos_drive",
     "app.utils.liquidaciones_loader",
 }
 
