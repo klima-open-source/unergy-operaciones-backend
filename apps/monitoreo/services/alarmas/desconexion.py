@@ -119,8 +119,13 @@ def _procesar(cache, pending_writes: list[dict], usuarios,
 
 
 # ── Entrada principal ─────────────────────────────────────────────────────────
-def evaluar_desconexiones():
-    """Evalúa todos los proyectos monitoreados y emite notificaciones. Idempotente."""
+def evaluar_desconexiones(gaia=None):
+    """Evalúa todos los proyectos monitoreados y emite notificaciones. Idempotente.
+
+    `gaia`: el `GaiaClient` del sondeo que la llama, para no iniciar una
+    segunda sesión en Quoia en la misma corrida (96 logins al día menos).
+    Sin él, crea uno propio.
+    """
     from apps.comun.integraciones.solarview_client import SolarViewClient
 
     sv = SolarViewClient()
@@ -153,9 +158,10 @@ def evaluar_desconexiones():
             logger.warning("SolarView devolvió vacío — se omite evaluación (evita falsas alarmas)")
             return
 
-        from apps.comun.integraciones.gaia_client import GaiaClient
+        if gaia is None:
+            from apps.comun.integraciones.gaia_client import GaiaClient
 
-        gaia = GaiaClient()
+            gaia = GaiaClient()
         daylight = _is_daylight()
 
         # Vínculo directo fronteras.proyecto_id -> codigo_frontera (fuente de verdad

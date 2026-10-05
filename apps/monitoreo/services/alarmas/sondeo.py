@@ -111,16 +111,19 @@ def sondear() -> dict:
     """Un ciclo completo de monitoreo. Devuelve el resumen de lo que hizo."""
     from apps.comun.integraciones.gaia_client import GaiaClient
 
+    # Un solo cliente para toda la corrida: las alarmas de desconexión usan el
+    # mismo, así Quoia ve una sesión por sondeo y no dos.
+    gaia = GaiaClient()
+
     # Alarmas de desconexión (inversores contra medidor): aislado, un fallo suyo
     # no puede tumbar el ciclo de MGS.
     try:
         from apps.monitoreo.services.alarmas.desconexion import evaluar_desconexiones
 
-        evaluar_desconexiones()
+        evaluar_desconexiones(gaia)
     except Exception:
         logger.exception("evaluar_desconexiones falló (no afecta a MGS)")
 
-    gaia = GaiaClient()
     if not gaia.enabled:
         logger.warning("GAIA_USER/GAIA_PASS sin configurar — monitoreo desactivado")
         return {"omitido": "gaia_sin_credenciales"}
