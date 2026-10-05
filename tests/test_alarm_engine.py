@@ -1,4 +1,4 @@
-"""Tests de AlarmEngine (app.services.mgs.alarm_engine), sin BD ni red --
+"""Tests de AlarmEngine (apps.monitoreo.services.alarmas.alarm_engine), sin BD ni red --
 todo el motor opera sobre listas de nodos en memoria + los mapas
 node_to_proyecto/proyecto_nombres que en producción arma
 scheduler._resolver_mapa_proyectos() vía fronteras.proyecto_id (FK real).
@@ -10,8 +10,8 @@ from datetime import datetime
 
 import pytz
 
-from app.core.config import settings
-from app.services.mgs.alarm_engine import AlarmEngine, AlarmType, Severity, _group_by_project
+from apps.comun.config import settings
+from apps.monitoreo.services.alarmas.alarm_engine import AlarmEngine, AlarmType, Severity, _group_by_project
 
 TZ = pytz.timezone(settings.TIMEZONE)
 
@@ -29,7 +29,7 @@ class _EngineEnHorarioSolar(AlarmEngine):
     """Fuerza la evaluación a mediodía sin depender del reloj real -- evita
     tests intermitentes si corren de noche."""
     def evaluate(self, nodes, node_to_proyecto, proyecto_nombres):
-        import app.services.mgs.alarm_engine as mod
+        import apps.monitoreo.services.alarmas.alarm_engine as mod
         original = mod.datetime
 
         class _FixedDatetime(original):
@@ -168,7 +168,7 @@ def test_no_recuperacion_sin_planta_caida_confirmada():
 def test_evaluate_de_noche_no_genera_alarmas():
     class _EngineDeNoche(AlarmEngine):
         def evaluate(self, nodes, node_to_proyecto, proyecto_nombres):
-            import app.services.mgs.alarm_engine as mod
+            import apps.monitoreo.services.alarmas.alarm_engine as mod
             original = mod.datetime
 
             class _FixedDatetime(original):

@@ -52,7 +52,7 @@ def _ids_solarview(proyecto_ids) -> dict[int, int]:
 
 def observaciones(proyecto_ids) -> dict[int, str]:
     """`{proyecto_id: nota}` para las plantas pedidas que tengan algo que decir."""
-    from app.services.mgs.solenium_checker import _format_bad, _short_name, _short_state
+    from apps.monitoreo.services.alarmas.solenium_checker import _format_bad, _short_name, _short_state
 
     if not proyecto_ids:
         return {}

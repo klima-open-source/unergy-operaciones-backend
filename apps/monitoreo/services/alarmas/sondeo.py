@@ -1,8 +1,8 @@
 """El ciclo de monitoreo de MGS: evalúa los nodos de Quoia y persiste alarmas.
 
-Puerto de `app/services/mgs/scheduler.py`. El motor (`AlarmEngine`) se
-reusa de `app/services/mgs/` tal cual y `GaiaClient` vive en
-`apps/comun/integraciones/`: no tocan la base y no saben de framework. Lo que
+Puerto de `app/services/mgs/scheduler.py`. El motor (`AlarmEngine`, en
+`alarm_engine.py` al lado) y `GaiaClient` (en `apps/comun/integraciones/`) se
+copiaron tal cual de `app/services/mgs/`: no tocan la base y no saben de framework. Lo que
 vive acá es lo que sí la toca — resolver qué proyecto es cada nodo, guardar las
 alarmas y cerrar las que se superaron.
 
@@ -43,7 +43,7 @@ def _motor_de_alarmas():
     """
     global _motor
     if _motor is None:
-        from app.services.mgs.alarm_engine import AlarmEngine
+        from apps.monitoreo.services.alarmas.alarm_engine import AlarmEngine
 
         _motor = AlarmEngine()
     return _motor
@@ -178,7 +178,7 @@ def guardar_alarmas(alarmas, activas_antes: dict | None = None,
     if not alarmas and not activas_antes:
         return
 
-    from app.services.mgs.alarm_engine import AlarmType
+    from apps.monitoreo.services.alarmas.alarm_engine import AlarmType
 
     try:
         with transaction.atomic():

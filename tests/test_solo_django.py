@@ -80,12 +80,6 @@ PRESTADOS_DE_APP = {
     "app.services.costo_regulatorio_drive",
     "app.services.email_service",
     "app.services.finanzas_mandatos_drive",
-    "app.services.mandatos.diagnostico",
-    "app.services.mandatos.email_parser",
-    "app.services.mandatos.firmas",
-    "app.services.mandatos.imap_client",
-    "app.services.mgs.alarm_engine",
-    "app.services.mgs.solenium_checker",
     "app.utils.liquidaciones_loader",
 }
 

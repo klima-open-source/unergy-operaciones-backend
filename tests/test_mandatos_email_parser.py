@@ -1,5 +1,5 @@
 """Tests del parser de correos de mandatos -- funciones puras, sin red ni BD."""
-from app.services.mandatos.email_parser import (
+from apps.mandatos.services.email_parser import (
     CLASIF_DESCONOCIDO, CLASIF_MOLDE_SIMPLE, CLASIF_SEGUIMIENTO,
     clasificar_correo, cmu_al_inicio_de_nombre, extraer_observaciones,
     es_correo_de_correcciones, extraer_pa_del_cuerpo, html_a_texto,

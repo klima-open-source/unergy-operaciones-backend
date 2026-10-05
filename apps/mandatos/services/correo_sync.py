@@ -12,8 +12,8 @@ inyectado, y devuelve qué habría que hacer. No consulta la base ni escribe
 archivos, para poder probar las reglas sin montar un arnés.
 
 Los cuatro módulos que usa —`adjuntos`, `email_parser`, `firmas`, `imap_client`,
-900 líneas— siguen en `app/services/mandatos/`: no tocan la base ni saben de
-framework, igual que los clientes de MGS.
+900 líneas— viven al lado, en `apps/mandatos/services/`, copiados tal cual de
+`app/services/mandatos/`: no tocan la base ni saben de framework.
 """
 from __future__ import annotations
 
@@ -24,12 +24,12 @@ from apps.mandatos.services.finanzas import (
     extraer_periodo_de_asunto, tipo_de_nombre,
 )
 from apps.mandatos.services.adjuntos import expandir_adjuntos
-from app.services.mandatos.email_parser import (
+from apps.mandatos.services.email_parser import (
     CLASIF_MOLDE_SIMPLE, _sin_cita, clasificar_correo, es_correo_de_correcciones,
     extraer_observaciones, extraer_pa_del_cuerpo, parece_nombre_de_mandato,
 )
-from app.services.mandatos.firmas import verificar_firmas
-from app.services.mandatos.imap_client import CorreoCrudo
+from apps.mandatos.services.firmas import verificar_firmas
+from apps.mandatos.services.imap_client import CorreoCrudo
 from apps.mandatos.services.reglas import extraer_cmus, parsear_nombre_zip
 
 logger = logging.getLogger("operaciones.mandatos.correo")
@@ -440,7 +440,7 @@ def _pasadas() -> list[tuple]:
     import imaplib
     import os
 
-    from app.services.mandatos.imap_client import buzones, carpeta_enviados
+    from apps.mandatos.services.imap_client import buzones, carpeta_enviados
 
     credenciales = buzones()
     if not credenciales:
@@ -493,7 +493,7 @@ def revisar_correos(dias: int = 30) -> dict:
     from django.db import transaction
 
     from apps.mandatos.models import MandatoCorreo
-    from app.services.mandatos.imap_client import buscar_correos
+    from apps.mandatos.services.imap_client import buscar_correos
 
     pasadas = _pasadas()
     if not pasadas:
