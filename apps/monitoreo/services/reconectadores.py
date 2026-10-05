@@ -21,6 +21,7 @@ traduce a HTTP. Leer y mandar un comando van por caminos distintos:
 """
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import httpx
@@ -147,54 +148,96 @@ def build_estado(proyecto_id: int, nombre: str, sol_id: int, medidas: dict) -> d
     return estado
 
 
-# Caché como la de generación (proceso + Redis, ver `solarview_monitoreo`):
+# Caché SOLO en Redis (no en la memoria de cada proceso, como la de generación):
 # SolarView se consulta una vez por minuto para todos, no una vez por persona
 # con la página abierta. Sin esto, /estados tardaba ~9 s y ocupaba los procesos
 # web, que dejaban esperando al resto de la pantalla (medido el 2026-10-02).
+#
+# Por qué sin el nivel de proceso: gunicorn corre varios procesos y cada uno
+# tendría su copia. Una copia vieja de `ultimo` (vive 24 h) se mostraba como
+# lectura actual y, al guardarse, pisaba en Redis las lecturas más nuevas de los
+# otros procesos; y `olvidar_estados` tras un ON/OFF solo limpiaba el proceso
+# que mandó el comando. Para un relay, ver el estado real importa más que el
+# milisegundo que cuesta ir a Redis.
 CACHE_TTL_ESTADOS = 60
 # Si alguna lectura falló también se guarda un minuto: insistirle más seguido a
 # un SolarView que no responde solo suma procesos esperando.
 CACHE_TTL_ESTADOS_CON_ERROR = 60
 # La última lectura buena de cada relay: si una lectura falla, se muestra esa,
-# marcada `lectura_fallida`, en vez de que el reconectador desaparezca.
+# marcada `lectura_fallida`, en vez de que el reconectador desaparezca. Y la
+# última lista completa, para responder mientras otro proceso consulta.
 CACHE_TTL_ULTIMO = 24 * 3600
-CLAVE_ESTADOS = "relays:estados"
-CLAVE_ULTIMO = "relays:ultimo"
+# Claves nuevas a propósito: las de antes (`relays:*`) guardaban otra forma
+# (`{"expira", "datos"}`) y no deben leerse con esta.
+CLAVE_ESTADOS = "reconectadores:estados"
+CLAVE_ULTIMO = "reconectadores:ultimo"
+CLAVE_ULTIMA_LISTA = "reconectadores:ultima_lista"
 # Solo un proceso a la vez consulta SolarView; los demas devuelven la ultima
-# lectura conocida al instante en vez de repetir las ~39 llamadas en paralelo.
+# lista al instante en vez de repetir las ~39 llamadas en paralelo.
 CLAVE_CANDADO = "solar_monitoreo:relays:actualizando"
 CANDADO_TTL = 90
 
 
+def _redis():
+    """El caché de Django: Redis en el servidor. Quien lo usa atrapa el error
+    si Redis no responde."""
+    from django.core.cache import cache
+
+    return cache
+
+
+def _leer_cache(clave: str):
+    try:
+        return _redis().get(clave)
+    except Exception:
+        return None
+
+
+def _guardar_cache(clave: str, ttl: int, datos) -> None:
+    try:
+        _redis().set(clave, datos, ttl)
+    except Exception:
+        pass  # sin Redis no hay caché: cada consulta va a SolarView
+
+
 def _tomar_candado() -> bool:
     """True si este proceso debe consultar SolarView. Sin Redis, siempre True
-    (cada proceso consulta, como antes)."""
+    (cada proceso consulta)."""
     try:
-        from django.core.cache import cache
-
-        return bool(cache.add(CLAVE_CANDADO, 1, CANDADO_TTL))
+        return bool(_redis().add(CLAVE_CANDADO, 1, CANDADO_TTL))
     except Exception:
         return True
 
 
 def _soltar_candado() -> None:
     try:
-        from django.core.cache import cache
-
-        cache.delete(CLAVE_CANDADO)
+        _redis().delete(CLAVE_CANDADO)
     except Exception:
         pass
 
 
-def _cache():
-    from apps.energia.services import solarview_monitoreo as sv
-
-    return sv
-
-
 def olvidar_estados() -> None:
-    """Tras un comando: el próximo /estados vuelve a leer SolarView."""
-    _cache()._cache_borrar(CLAVE_ESTADOS)
+    """Tras un comando: el próximo /estados vuelve a leer SolarView, en
+    cualquier proceso."""
+    try:
+        _redis().delete(CLAVE_ESTADOS)
+    except Exception:
+        pass
+
+
+def _lista_mientras_otro_consulta() -> list[dict]:
+    """Lo que se responde cuando otro proceso tiene el candado.
+
+    La última lista completa, con sus marcas. Si es de hace más de dos ciclos
+    (nadie abrió la pantalla en un rato), cada relay sale `lectura_fallida`: no
+    es una lectura de ahora y no debe verse como tal.
+    """
+    guardada = _leer_cache(CLAVE_ULTIMA_LISTA)
+    if not guardada:
+        return []
+    if time.time() - guardada["guardada_en"] <= 2 * CACHE_TTL_ESTADOS:
+        return guardada["lista"]
+    return [{**e, "lectura_fallida": True} for e in guardada["lista"]]
 
 
 def estados_de(proyectos) -> list[dict]:
@@ -204,22 +247,20 @@ def estados_de(proyectos) -> list[dict]:
     numérico. Si la lectura de uno FALLA, se devuelve su última lectura buena
     con `lectura_fallida: True`; si nunca hubo una, se omite.
     """
-    cache = _cache()
-    if (cacheado := cache._cache_get(CLAVE_ESTADOS)) is not None:
+    if (cacheado := _leer_cache(CLAVE_ESTADOS)) is not None:
         return cacheado
-    ultimo: dict = cache._cache_get(CLAVE_ULTIMO) or {}
 
     if not _tomar_candado():
-        # Otro proceso ya esta consultando SolarView: lo ultimo conocido, ya.
-        ids = {str(p.id) for p in proyectos}
-        return [e for k, e in ultimo.items() if k in ids]
+        return _lista_mientras_otro_consulta()
     try:
-        return _consultar(proyectos, cache, ultimo)
+        # `ultimo` se lee DESPUÉS de tomar el candado: así es el que dejó el
+        # último proceso que consultó, no uno anterior.
+        return _consultar(proyectos, _leer_cache(CLAVE_ULTIMO) or {})
     finally:
         _soltar_candado()
 
 
-def _consultar(proyectos, cache, ultimo: dict) -> list[dict]:
+def _consultar(proyectos, ultimo: dict) -> list[dict]:
 
     def uno(proyecto):
         try:
@@ -256,8 +297,10 @@ def _consultar(proyectos, cache, ultimo: dict) -> list[dict]:
         else:  # sin_relay o id inválido: ya no tiene relay que recordar
             nuevo_ultimo.pop(clave, None)
 
-    cache._cache_set(CLAVE_ULTIMO, CACHE_TTL_ULTIMO, nuevo_ultimo)
-    cache._cache_set(
+    _guardar_cache(CLAVE_ULTIMO, CACHE_TTL_ULTIMO, nuevo_ultimo)
+    _guardar_cache(CLAVE_ULTIMA_LISTA, CACHE_TTL_ULTIMO,
+                   {"guardada_en": time.time(), "lista": lista})
+    _guardar_cache(
         CLAVE_ESTADOS,
         CACHE_TTL_ESTADOS_CON_ERROR if hubo_error else CACHE_TTL_ESTADOS,
         lista,
@@ -348,11 +391,16 @@ def verificar_credenciales(usuario: str, contrasena: str) -> None:
         raise SolarViewNoResponde(f"sole.tech respondió HTTP {respuesta.status_code} al login.")
 
 
-def enviar_comando(sv_id: int, accion: str) -> httpx.Response:
+def enviar_comando(sv_id: int, accion: str, usuario: str, contrasena: str) -> httpx.Response:
     """Manda el ON/OFF al reconectador por SolarView, con el token del servidor.
 
-    Revisa el interruptor ACÁ y no solo en la vista: así ningún camino que
-    llame a esta función puede mandar un comando con el interruptor apagado.
+    Los candados van ACÁ y no en la vista, en este orden, para que ningún
+    camino que llame a esta función se los salte:
+
+    1. el interruptor (una sola revisión, antes de todo: con los comandos
+       apagados la contraseña de nadie sale hacia sole.tech);
+    2. la acción, ON u OFF;
+    3. el usuario y la contraseña de SolarView de quien lo manda.
 
     La forma es la que manda la propia plataforma de SolarView al apagar un
     reconectador, capturada en el navegador el 2026-09-30 sobre Valencia Oriente
@@ -367,6 +415,7 @@ def enviar_comando(sv_id: int, accion: str) -> httpx.Response:
         )
     if accion not in ("ON", "OFF"):
         raise ValueError(f"acción inválida: {accion!r}")
+    verificar_credenciales(usuario, contrasena)
 
     c = cliente()
     try:

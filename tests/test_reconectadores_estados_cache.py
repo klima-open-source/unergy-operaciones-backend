@@ -84,8 +84,8 @@ def test_un_error_muestra_la_ultima_lectura_buena(monkeypatch, relays):
 
     _respuestas(monkeypatch, relays, {10: ("error", {})})
     ttls = []
-    original = relays._cache()._cache_set
-    monkeypatch.setattr(relays._cache(), "_cache_set",
+    original = relays._guardar_cache
+    monkeypatch.setattr(relays, "_guardar_cache",
                         lambda k, ttl, d: ttls.append((k, ttl)) or original(k, ttl, d))
 
     [estado] = relays.estados_de([_p(1, 10)])
@@ -122,7 +122,68 @@ def test_si_otro_proceso_esta_consultando_devuelve_lo_ultimo_al_instante(monkeyp
     [estado] = relays.estados_de([_p(1, 10)])
 
     assert estado["active"] is True  # la última conocida, sin ir a SolarView
+    assert estado["lectura_fallida"] is False  # es de hace segundos
     assert llamadas == []
+
+
+def test_mientras_otro_consulta_una_lista_vieja_sale_marcada(monkeypatch, relays):
+    _respuestas(monkeypatch, relays, {10: ("ok", {"active": True})})
+    relays.estados_de([_p(1, 10)])
+    relays.olvidar_estados()
+
+    llamadas = _respuestas(monkeypatch, relays, {10: ("ok", {"active": False})})
+    monkeypatch.setattr(relays, "_tomar_candado", lambda: False)
+    # Nadie abrió la pantalla en una hora: la última lista ya no es de ahora.
+    ahora = relays.time.time()
+    monkeypatch.setattr(relays.time, "time", lambda: ahora + 3600)
+
+    [estado] = relays.estados_de([_p(1, 10)])
+
+    assert estado["active"] is True and estado["lectura_fallida"] is True
+    assert llamadas == []
+
+
+def test_mientras_otro_consulta_sin_lista_previa_no_inventa_nada(monkeypatch, relays):
+    llamadas = _respuestas(monkeypatch, relays, {10: ("ok", {"active": True})})
+    monkeypatch.setattr(relays, "_tomar_candado", lambda: False)
+
+    assert relays.estados_de([_p(1, 10)]) == []
+    assert llamadas == []
+
+
+def test_nada_queda_en_la_memoria_del_proceso(monkeypatch, relays):
+    """Con varios procesos de gunicorn, una copia por proceso se desactualiza y
+    pisa la de Redis. Todo va al caché compartido."""
+    from django.core.cache import cache
+
+    from apps.energia.services import solarview_monitoreo
+
+    _respuestas(monkeypatch, relays, {10: ("ok", {"active": True})})
+    relays.estados_de([_p(1, 10)])
+
+    assert solarview_monitoreo._cache == {}
+    assert cache.get(relays.CLAVE_ESTADOS) is not None
+    assert cache.get(relays.CLAVE_ULTIMO) is not None
+    assert cache.get(relays.CLAVE_ULTIMA_LISTA) is not None
+
+
+def test_la_ultima_lectura_es_la_del_cache_compartido(monkeypatch, relays):
+    """Si otro proceso dejó en Redis una lectura más nueva, es la que se usa
+    cuando la de ahora falla."""
+    from django.core.cache import cache
+
+    _respuestas(monkeypatch, relays, {10: ("ok", {"active": True})})
+    relays.estados_de([_p(1, 10)])
+    relays.olvidar_estados()
+    # Otro proceso leyó después: el relay quedó en OFF.
+    ultimo = cache.get(relays.CLAVE_ULTIMO)
+    ultimo["1"] = {**ultimo["1"], "active": False}
+    cache.set(relays.CLAVE_ULTIMO, ultimo, relays.CACHE_TTL_ULTIMO)
+
+    _respuestas(monkeypatch, relays, {10: ("error", {})})
+    [estado] = relays.estados_de([_p(1, 10)])
+
+    assert estado["active"] is False and estado["lectura_fallida"] is True
 
 
 def test_la_lectura_del_relay_es_corta_y_de_un_intento(monkeypatch, relays):

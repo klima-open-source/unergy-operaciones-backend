@@ -81,8 +81,11 @@ def test_con_el_interruptor_apagado_no_sale_ningun_comando(servicio, capturar, m
     else:
         monkeypatch.setenv("RECONECTADORES_COMANDOS_HABILITADOS", valor)
 
+    monkeypatch.setattr(servicio, "verificar_credenciales",
+                        lambda *a: pytest.fail("no debía ir a sole.tech"))
+
     with pytest.raises(servicio.ComandosDeshabilitados):
-        servicio.enviar_comando(17, "OFF")
+        servicio.enviar_comando(17, "OFF", "ana", "x")
 
     assert capturar == []
 
@@ -91,8 +94,9 @@ def test_encendido_manda_el_comando_a_solarview_con_el_token(servicio, capturar,
     import json
 
     monkeypatch.setenv("RECONECTADORES_COMANDOS_HABILITADOS", "true")
+    monkeypatch.setattr(servicio, "verificar_credenciales", lambda u, c: None)
 
-    respuesta = servicio.enviar_comando(17, "OFF")
+    respuesta = servicio.enviar_comando(17, "OFF", "ana", "x")
 
     assert respuesta.status_code == 200
     [peticion] = capturar
@@ -107,8 +111,11 @@ def test_encendido_manda_el_comando_a_solarview_con_el_token(servicio, capturar,
 def test_una_accion_que_no_es_on_ni_off_no_sale(servicio, capturar, monkeypatch):
     monkeypatch.setenv("RECONECTADORES_COMANDOS_HABILITADOS", "true")
 
+    monkeypatch.setattr(servicio, "verificar_credenciales",
+                        lambda *a: pytest.fail("no debía ir a sole.tech"))
+
     with pytest.raises(ValueError):
-        servicio.enviar_comando(17, "TOGGLE")
+        servicio.enviar_comando(17, "TOGGLE", "ana", "x")
 
     assert capturar == []
 
@@ -252,7 +259,7 @@ def test_con_credenciales_incorrectas_no_sale_el_comando(monkeypatch, servicio):
         raise servicio.CredencialesInvalidas("Usuario o contraseña de SolarView incorrectos.")
 
     monkeypatch.setattr(servicio, "verificar_credenciales", rechazar)
-    monkeypatch.setattr(servicio, "enviar_comando", lambda *a: pytest.fail("no debía salir"))
+    monkeypatch.setattr(servicio, "cliente", lambda: pytest.fail("no debía salir"))
 
     respuesta = _post_comando(monkeypatch, {"accion": "OFF", "username": "ana", "password": "x"})
 
@@ -265,12 +272,12 @@ def test_con_credenciales_correctas_sale_el_comando(monkeypatch, servicio):
     enviados = []
     monkeypatch.setattr(servicio, "verificar_credenciales", lambda u, c: None)
     monkeypatch.setattr(servicio, "enviar_comando",
-                        lambda sv, acc: enviados.append((sv, acc)) or httpx.Response(200, text="ok"))
+                        lambda sv, acc, u, c: enviados.append((sv, acc, u)) or httpx.Response(200, text="ok"))
 
     respuesta = _post_comando(monkeypatch, {"accion": "ON", "username": "ana", "password": "x"})
 
     assert respuesta.status_code == 200
-    assert enviados == [(17, "ON")]
+    assert enviados == [(17, "ON", "ana")]
 
 
 # ── El interruptor desde la plataforma ──────────────────────────────────────

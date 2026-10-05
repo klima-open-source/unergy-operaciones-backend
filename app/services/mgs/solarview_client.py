@@ -318,7 +318,9 @@ class SolarViewClient:
         _avisar_si_la_forma_no_es_la_esperada(data, total_power, project_id)
         return data
 
-    def get_weather(self, project_id: int, date_from: str, date_to: str) -> dict | None:
+    def get_weather_con_estado(
+        self, project_id: int, date_from: str, date_to: str,
+    ) -> tuple[str, dict | None]:
         """Estación meteorológica -- GET /solarview/measurements/weather/.
 
         `results` trae una serie {timestamp: valor} por variable
@@ -326,14 +328,8 @@ class SolarViewClient:
         `wind_speed`, `wind_direction`) y sus unidades en `unit`. Una variable
         que la estación no mide llega en -1 en todos los puntos, no ausente
         (verificado el 2026-10-01: Valencia Oriente no tiene POA). Sin
-        estación: 404 -> None.
+        estación: 404 -> `("no_existe", None)` (ver `_get_con_estado`).
         """
-        return self.get_weather_con_estado(project_id, date_from, date_to)[1]
-
-    def get_weather_con_estado(
-        self, project_id: int, date_from: str, date_to: str,
-    ) -> tuple[str, dict | None]:
-        """`get_weather` diciendo si fue 404 o error (ver `_get_con_estado`)."""
         url = f"{self._base_url}/solarview/measurements/weather/"
         return self._get_con_estado(url, params={"project_id": project_id,
                                                  "date_from": date_from,
