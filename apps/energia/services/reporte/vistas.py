@@ -34,7 +34,6 @@ from apps.energia.services.reporte.utils import (
     curva_a_lista, curva_cambio, curva_respaldo_a_reportar,
 )
 
-# `ponytail: el cliente de Quoia sigue en app/services/mgs/`.
 from apps.comun.integraciones.gaia_client import GaiaClient
 
 # Las respuestas de este modulo son dicts planos, NO modelos Pydantic.

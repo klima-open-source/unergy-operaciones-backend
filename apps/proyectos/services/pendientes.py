@@ -57,7 +57,6 @@ from apps.proyectos.services.tsf_sync import (
     _parece_codigo, _sunfactory_all_projects, _sunfactory_token,
 )
 
-# `ponytail: el cliente de Quoia sigue en app/services/mgs/gaia_client.py`.
 # Es HTTP puro, sin sesión de base: se mueve cuando se retire FastAPI.
 from apps.comun.integraciones.gaia_client import GaiaClient, _get_dynamic_maps
 

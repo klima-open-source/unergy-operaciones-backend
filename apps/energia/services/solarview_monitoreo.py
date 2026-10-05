@@ -14,8 +14,9 @@ recalcula en cada request y puede cambiar de respuesta si el proveedor renombra
 algo. Mismo criterio que Reporte de Energía: un proyecto sin id reconciliado no
 tiene inversores, y el hueco queda visible para que lo resuelva el backfill.
 
-Los clientes HTTP (`SolarViewClient`, `GaiaClient`, `medidor_tiempo_real`) se
-reusan de `app/services/mgs/` tal cual: no tocan la base ni saben de framework.
+Los clientes HTTP (`SolarViewClient`, `GaiaClient`) viven en
+`apps/comun/integraciones/` y `medidor_tiempo_real` en `apps/energia/services/`:
+no tocan la base ni saben de framework.
 """
 
 from __future__ import annotations

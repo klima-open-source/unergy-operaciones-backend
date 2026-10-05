@@ -55,7 +55,7 @@ _STOPWORDS = {
 }
 
 # El número de la minigranja es un IDENTIFICADOR, no una palabra más.
-# Misma convención que `_mgs_number` en app/services/mgs/gaia_client.py: exige
+# Misma convención que `_mgs_number` en apps/comun/integraciones/gaia_client.py: exige
 # el prefijo explícito, así que no confunde un año ni un número suelto de una
 # razón social.
 _NUMERO_MGS = re.compile(r"\b(?:minigranja|minigranjas|mgs|mgr)\s+0*(\d+)\b")

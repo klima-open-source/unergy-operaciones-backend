@@ -10,7 +10,8 @@ con `diagnosticar_sole_tech`:
   - `sunfactory.sole.tech`: con `Token` no lo lee ("No se han proporcionado
     credenciales"); con `Bearer` espera el JWT del login de `auth.sole.tech`.
 
-La variable es `SOLARVIEW_TOKEN`, la misma que lee `SolarViewClient` (`app/`).
+La variable es `SOLARVIEW_TOKEN`, la misma que lee `SolarViewClient`
+(`apps/comun/integraciones/solarview_client.py`).
 """
 from __future__ import annotations
 

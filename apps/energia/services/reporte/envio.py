@@ -39,7 +39,6 @@ from apps.energia.services.reporte.orquestador import _cache_borrar, _cache_leer
 from apps.energia.services.reporte.utils import curva_respaldo_a_reportar, reporte_ya_valido
 from apps.energia.services.reporte.vistas import _nombre_frontera
 
-# `ponytail: el cliente de Quoia sigue en app/services/mgs/`.
 from apps.comun.integraciones.gaia_client import GaiaClient
 
 

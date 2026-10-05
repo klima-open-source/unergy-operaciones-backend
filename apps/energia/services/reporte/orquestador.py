@@ -48,7 +48,6 @@ from apps.energia.services.reporte import (
 from apps.energia.services.reporte.utils import actualizar_respaldo_final, curva_a_lista
 from apps.fronteras.models import Frontera
 
-# `ponytail: los clientes de Quoia y SolarView siguen en app/services/mgs/`.
 from apps.comun.integraciones.gaia_client import GaiaClient
 from apps.comun.integraciones.solarview_client import SolarViewClient
 

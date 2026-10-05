@@ -1,7 +1,8 @@
 """El ciclo de monitoreo de MGS: evalúa los nodos de Quoia y persiste alarmas.
 
-Puerto de `app/services/mgs/scheduler.py`. El motor (`AlarmEngine`) y
-`GaiaClient` se reusan de `app/services/mgs/` tal cual: no tocan la base y no saben de framework. Lo que
+Puerto de `app/services/mgs/scheduler.py`. El motor (`AlarmEngine`) se
+reusa de `app/services/mgs/` tal cual y `GaiaClient` vive en
+`apps/comun/integraciones/`: no tocan la base y no saben de framework. Lo que
 vive acá es lo que sí la toca — resolver qué proyecto es cada nodo, guardar las
 alarmas y cerrar las que se superaron.
 
