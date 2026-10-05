@@ -187,19 +187,21 @@ def test_la_ultima_lectura_es_la_del_cache_compartido(monkeypatch, relays):
 
 
 def test_la_lectura_del_relay_es_corta_y_de_un_intento(monkeypatch, relays):
-    from apps.comun.integraciones.solarview_client import TIMEOUT_EN_PANTALLA
+    from apps.comun.integraciones import solarview_client
 
     pedidos = []
-
-    class _C:
-        _base_url = "https://api.sole.tech"
-
-        def _get_con_estado(self, url, params=None, **kw):
-            pedidos.append(kw)
-            return "error", None
-
-    monkeypatch.setattr(relays, "cliente", lambda: _C())
+    monkeypatch.setattr(
+        solarview_client.SolarViewClient, "_get_con_estado",
+        lambda self, url, params=None, **kw: pedidos.append((url, params, kw)) or ("error", None),
+    )
+    monkeypatch.setenv("SOLARVIEW_TOKEN", "tok")
+    monkeypatch.setenv("SOLARVIEW_BASE_URL", "https://api.sole.tech")
+    c = solarview_client.SolarViewClient()
+    monkeypatch.setattr(relays, "cliente", lambda: c)
 
     assert relays._leer(17) == ("error", {})
-    assert pedidos == [{"timeout": TIMEOUT_EN_PANTALLA, "intentos": 1}]
-    assert TIMEOUT_EN_PANTALLA <= 10
+    assert pedidos == [(
+        "https://api.sole.tech/solarview/config/recloser/", {"project_id": 17},
+        {"timeout": solarview_client.TIMEOUT_EN_PANTALLA, "intentos": 1},
+    )]
+    assert solarview_client.TIMEOUT_EN_PANTALLA <= 10

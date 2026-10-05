@@ -117,12 +117,11 @@ class ReconectadorViewSet(viewsets.GenericViewSet):
         if sv_id is None:
             raise NotFound("Proyecto sin project_id_solarview")
 
-        url = relay_service.url_relay(cliente)
         tiene, medidas = relay_service.leer_relay(sv_id)
         return Response({
             "sol_id": sv_id,
-            "url": url,
-            "raw": cliente._get(url, params={"project_id": sv_id}),
+            "url": relay_service.url_relay(),
+            "raw": cliente.get_recloser_con_estado(sv_id)[1],
             "tiene_reconectador": tiene,
             "parsed": relay_service.build_estado(
                 proyecto.id, proyecto.nombre_comercial, sv_id, medidas

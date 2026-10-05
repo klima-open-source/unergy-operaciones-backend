@@ -36,19 +36,12 @@ def sin_red(monkeypatch):
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", prohibido)
 
 
-class _SolarView:
-    _base_url = "https://api.sole.tech"
-    enabled = True
-
-    def _headers(self):
-        return {"Authorization": "Token tok-de-prueba"}
-
-
 @pytest.fixture
 def servicio(monkeypatch):
     from apps.monitoreo.services import reconectadores
 
-    monkeypatch.setattr(reconectadores, "cliente", lambda: _SolarView())
+    monkeypatch.setenv("SOLARVIEW_BASE_URL", "https://api.sole.tech")
+    monkeypatch.setenv("SOLARVIEW_TOKEN", "tok-de-prueba")
     return reconectadores
 
 
@@ -106,6 +99,17 @@ def test_encendido_manda_el_comando_a_solarview_con_el_token(servicio, capturar,
     assert str(peticion.url) == "https://api.sole.tech/api/solarview/config/recloser/set-status/"
     assert json.loads(peticion.content) == {"recloser": 17, "command": "OFF"}
     assert peticion.headers["Authorization"] == "Token tok-de-prueba"
+
+
+def test_sin_token_de_solarview_no_sale_el_comando(servicio, capturar, monkeypatch):
+    monkeypatch.setenv("RECONECTADORES_COMANDOS_HABILITADOS", "true")
+    monkeypatch.setenv("SOLARVIEW_TOKEN", "")
+    monkeypatch.setattr(servicio, "verificar_credenciales", lambda u, c: None)
+
+    with pytest.raises(servicio.SolarViewNoConfigurado):
+        servicio.enviar_comando(17, "OFF", "ana", "x")
+
+    assert capturar == []
 
 
 def test_una_accion_que_no_es_on_ni_off_no_sale(servicio, capturar, monkeypatch):

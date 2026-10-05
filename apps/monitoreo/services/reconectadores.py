@@ -26,14 +26,13 @@ from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 
+from apps.comun import sole_tech
 from apps.comun.config import settings
 
 logger = logging.getLogger("operaciones.reconectadores")
 
-# Rutas relativas a `SOLARVIEW_BASE_URL`. La lectura usa `project_id`, no
-# `recloser` como el histórico (la documentación no lo dice).
-RELAY_ACTUAL = "/solarview/config/recloser/"
-# El comando SÍ lleva `/api/` delante: sin él el gateway responde 404 "no Route
+# Ruta relativa a `SOLARVIEW_BASE_URL` (la de lectura vive en el cliente:
+# `RUTA_RECLOSER`). El comando SÍ lleva `/api/` delante: sin él el gateway responde 404 "no Route
 # matched" (verificado el 2026-09-30). Las lecturas funcionan sin ese prefijo.
 RELAY_COMANDO = "/api/solarview/config/recloser/set-status/"
 
@@ -85,8 +84,15 @@ def cliente():
     return _cliente
 
 
-def url_relay(c) -> str:
-    return f"{c._base_url}{RELAY_ACTUAL}"
+def _base_url() -> str:
+    return settings.SOLARVIEW_BASE_URL.rstrip("/")
+
+
+def url_relay() -> str:
+    """La URL de lectura, para mostrarla en el debug."""
+    from apps.comun.integraciones.solarview_client import RUTA_RECLOSER
+
+    return f"{_base_url()}{RUTA_RECLOSER}"
 
 
 def _numero(valor) -> float | None:
@@ -104,13 +110,7 @@ def _leer(sv_id: int) -> tuple[str, dict]:
     no se pudo leer (timeout, 5xx): NO quiere decir que no tenga.
     """
     try:
-        from apps.comun.integraciones.solarview_client import TIMEOUT_EN_PANTALLA
-
-        c = cliente()
-        estado, datos = c._get_con_estado(
-            url_relay(c), params={"project_id": sv_id},
-            timeout=TIMEOUT_EN_PANTALLA, intentos=1,
-        )
+        estado, datos = cliente().get_recloser_con_estado(sv_id)
     except Exception as exc:
         logger.warning("relay_get sv_id=%d error=%s", sv_id, exc)
         return "error", {}
@@ -417,13 +417,15 @@ def enviar_comando(sv_id: int, accion: str, usuario: str, contrasena: str) -> ht
         raise ValueError(f"acción inválida: {accion!r}")
     verificar_credenciales(usuario, contrasena)
 
-    c = cliente()
+    if not sole_tech.configurado():
+        raise SolarViewNoConfigurado(
+            "SolarView no configurado en el servidor (SOLARVIEW_TOKEN)")
     try:
         with httpx.Client(timeout=30) as http:
             return http.post(
-                f"{c._base_url}{RELAY_COMANDO}",
+                f"{_base_url()}{RELAY_COMANDO}",
                 json={"recloser": sv_id, "command": accion},
-                headers=c._headers(),
+                headers=sole_tech.cabeceras(),
             )
     except Exception as exc:
         raise SolarViewNoResponde(f"Error de conexión con SolarView: {exc}") from exc

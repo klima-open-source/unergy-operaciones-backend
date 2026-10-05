@@ -25,21 +25,16 @@ class _SolarView:
     """Contesta como SolarView: medidas para los ids que tienen relay, None
     (el 404 del cliente) para los demás."""
 
-    _base_url = "https://api.sole.tech"
     enabled = True
 
     def __init__(self, con_relay: dict[int, dict]):
         self.con_relay = con_relay
-        self.pedidos: list[tuple[str, dict]] = []
+        self.pedidos: list[int] = []
 
-    def _get(self, url, params=None):
-        self.pedidos.append((url, params))
-        medidas = self.con_relay.get((params or {}).get("project_id"))
-        return {"results": medidas} if medidas is not None else None
-
-    def _get_con_estado(self, url, params=None, **_):
-        datos = self._get(url, params)
-        return ("ok", datos) if datos is not None else ("no_existe", None)
+    def get_recloser_con_estado(self, project_id):
+        self.pedidos.append(project_id)
+        medidas = self.con_relay.get(project_id)
+        return ("ok", {"results": medidas}) if medidas is not None else ("no_existe", None)
 
 
 @pytest.fixture
@@ -70,7 +65,7 @@ def test_la_lectura_va_a_solarview_con_project_id(relay):
 
     assert tiene
     assert medidas["active"] is True
-    assert falso.pedidos == [("https://api.sole.tech/solarview/config/recloser/", {"project_id": 17})]
+    assert falso.pedidos == [17]
 
 
 def test_una_planta_sin_reconectador_se_omite(relay):
@@ -97,7 +92,7 @@ def test_los_estados_usan_project_id_solarview(relay):
     assert estados[0]["active"] is True
     assert estados[0]["potencia_kw"] == 5.0
     assert estados[0]["corriente_a"] == 1.5, "el texto se convierte a número"
-    assert sorted(p[1]["project_id"] for p in falso.pedidos) == [17, 135]
+    assert sorted(falso.pedidos) == [17, 135]
 
 
 def test_el_listado_filtra_por_project_id_solarview():

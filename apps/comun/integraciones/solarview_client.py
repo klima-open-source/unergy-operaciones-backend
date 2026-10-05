@@ -41,6 +41,10 @@ TIMEOUT = 30.0
 TIMEOUT_EN_PANTALLA = 6.0
 BACKOFF_SECONDS = 2.0
 
+# La última medición del reconectador de una planta. Va por `project_id`, no
+# por `recloser` como el histórico (la documentación no lo dice).
+RUTA_RECLOSER = "/solarview/config/recloser/"
+
 
 def _avisar_si_la_forma_no_es_la_esperada(data, total_power: int, project_id: int) -> None:
     """Grita si /power/ devolvio una forma distinta a la que se pidio.
@@ -334,6 +338,22 @@ class SolarViewClient:
         return self._get_con_estado(url, params={"project_id": project_id,
                                                  "date_from": date_from,
                                                  "date_to": date_to},
+                                    timeout=TIMEOUT_EN_PANTALLA, intentos=1)
+
+    def get_recloser_con_estado(self, project_id: int) -> tuple[str, dict | None]:
+        """Última medición del reconectador -- GET /solarview/config/recloser/.
+
+        `results` trae las mismas claves que traía Solenium (`active`, `time`,
+        `i_a`… `pf`). `"no_existe"` (404) es que la planta no tiene
+        reconectador; `"error"`, que no se pudo leer. Un intento corto: se
+        pide con alguien mirando la pantalla (ver `TIMEOUT_EN_PANTALLA`).
+
+        Solo LEE. El ON/OFF no está en este cliente a propósito: vive en
+        `apps/monitoreo/services/reconectadores.py::enviar_comando`, detrás
+        de sus candados, para que no haya otro camino que se los salte.
+        """
+        return self._get_con_estado(f"{self._base_url}{RUTA_RECLOSER}",
+                                    params={"project_id": project_id},
                                     timeout=TIMEOUT_EN_PANTALLA, intentos=1)
 
     def get_relay_historical(self, project_id: int, start_date: str, end_date: str,
