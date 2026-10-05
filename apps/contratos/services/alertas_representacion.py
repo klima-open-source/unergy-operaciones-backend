@@ -299,7 +299,7 @@ def _enviar(contrato: dict, aniversario: date, numero: int, dias: int,
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
 
-    from app.services.email_service import _log_envio, _smtp_send
+    from apps.comun.integraciones.email_service import _log_envio, _smtp_send
 
     destinatarios = correos_de_alerta()
     if not destinatarios:

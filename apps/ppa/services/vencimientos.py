@@ -96,7 +96,7 @@ def _enviar_correo(mensaje: str, dias: int) -> bool:
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
 
-    from app.services.email_service import _log_envio, _smtp_send
+    from apps.comun.integraciones.email_service import _log_envio, _smtp_send
 
     destinatarios = correos_de_alerta()
     if not os.environ.get("SMTP_HOST") or not destinatarios:

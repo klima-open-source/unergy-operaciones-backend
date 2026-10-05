@@ -4,8 +4,7 @@ Puerto de `_enviar_notificacion` de `app/api/v1/fallas.py`. **Nunca lanza**: la
 falla ya está guardada cuando esto corre, y un problema de correo no puede
 deshacerla.
 
-El cliente SMTP y la plantilla siguen en `app/services/email_service.py`: es un
-módulo sin sesión de base que se mueve cuando se retire FastAPI.
+El cliente SMTP y la plantilla viven en `apps/comun/integraciones/email_service.py`.
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ logger = logging.getLogger("operaciones.fallas.notificacion")
 
 def enviar_notificacion(falla, accion: str, usuario_nombre: str) -> dict:
     """`{"ok", "enviados", "errores", "sin_correos"}`."""
-    from app.services.email_service import send_falla_notification_email
+    from apps.comun.integraciones.email_service import send_falla_notification_email
 
     correos = correos_de("operacional", proyecto_id=falla.proyecto_id)
     ts = datetime.now(timezone.utc).isoformat()

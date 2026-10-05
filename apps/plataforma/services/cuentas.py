@@ -77,7 +77,7 @@ def pedir_reset(email: str) -> None:
     )
 
     try:
-        from app.services.email_service import send_reset_password_email
+        from apps.comun.integraciones.email_service import send_reset_password_email
 
         send_reset_password_email(
             to_email=usuario.email, token=usuario.password_reset_token

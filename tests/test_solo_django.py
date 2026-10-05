@@ -77,13 +77,12 @@ def test_arbol_django_no_importa_fastapi_ni_sqlalchemy():
 PRESTADOS_DE_APP = {
     "app.core.database",              # apps/liquidaciones/services/excel.py
     "app.models.proyectos",           # apps/comercial/services/pipeline.py
-    "app.services.email_service",
     "app.utils.liquidaciones_loader",
 }
 
 
 def _modulo_de_app(modulo: str, nombre: str) -> str:
-    """`from app.services import email_service` importa el MODULO
+    """`from apps.comun.integraciones import email_service` importa el MODULO
     `app.services.email_service`, no un nombre de `app.services`."""
     candidato = f"{modulo}.{nombre}"
     ruta = RAIZ.joinpath(*candidato.split("."))

@@ -55,7 +55,7 @@ PLATAFORMA = "https://operaciones.unergy.io"
 def test_el_correo_de_falla_no_lleva_ningun_enlace():
     """Un cliente no puede pasar del login, así que cualquier enlace a la
     plataforma es un botón que no funciona."""
-    from app.services.email_service import send_falla_notification_email
+    from apps.comun.integraciones.email_service import send_falla_notification_email
 
     fuente = inspect.getsource(send_falla_notification_email)
 
@@ -75,7 +75,7 @@ def test_el_correo_de_falla_sigue_registrando_su_proyecto():
     """`proyecto_id` NO era del enlace: va al log de auditoría del envío
     (`_log_envio`). Se quitó por error al sacar el botón y se restituyó -- este
     test es para no repetirlo."""
-    from app.services.email_service import send_falla_notification_email
+    from apps.comun.integraciones.email_service import send_falla_notification_email
 
     firma = inspect.signature(send_falla_notification_email).parameters
 
@@ -115,7 +115,7 @@ def test_el_correo_de_reset_arma_su_enlace_sobre_la_ruta_que_existe():
     """`/reset-password/{token}` es una ruta real del frontend
     (app/pages/reset-password/[token]). Es el ÚNICO correo que debe llevar a la
     plataforma, porque va a alguien que sí tiene cuenta."""
-    from app.services.email_service import send_reset_password_email
+    from apps.comun.integraciones.email_service import send_reset_password_email
 
     fuente = inspect.getsource(send_reset_password_email)
 

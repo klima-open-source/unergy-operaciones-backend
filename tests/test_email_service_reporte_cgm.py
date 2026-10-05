@@ -1,7 +1,6 @@
 import email as email_pkg
 
-from app.core.config import settings
-from app.services import email_service
+from apps.comun.integraciones import email_service
 
 
 def test_adjunto_con_tildes_conserva_nombre_de_archivo(monkeypatch):
@@ -12,7 +11,7 @@ def test_adjunto_con_tildes_conserva_nombre_de_archivo(monkeypatch):
     # serializar el mensaje a bytes (lo que de verdad viaja por SMTP) y
     # volverlo a parsear -- por eso el test hace ese viaje completo, no solo
     # inspecciona el objeto Message en memoria (eso pasaría igual con el bug).
-    monkeypatch.setattr(settings, "SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
 
     capturado = {}
 

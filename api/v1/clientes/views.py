@@ -238,7 +238,7 @@ class ClienteViewSet(viewsets.GenericViewSet):
     def test_correo(self, request, pk=None):
         """Verifica que los correos operacionales del cliente están bien
         configurados. Body: `{"email": "destino@empresa.com"}`."""
-        from app.services.email_service import send_test_email
+        from apps.comun.integraciones.email_service import send_test_email
 
         cliente = self._cliente(pk)
         email = (request.data.get("email") or "").strip()
