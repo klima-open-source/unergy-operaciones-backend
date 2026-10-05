@@ -50,7 +50,8 @@ def _precio_bolsa(hasta: date | None = None) -> float | None:
     """
     from apps.comun.integraciones.simem_bolsa import precio_bolsa_prom_7d
 
-    hasta = hasta or date.today()
+    # Hoy en Bogotá: el contenedor corre en UTC y desde las 19:00 ya es mañana.
+    hasta = hasta or hoy_col()
     inicio = hasta - timedelta(days=DIAS_PRECIO_BOLSA)
     return precio_bolsa_prom_7d(inicio.isoformat(), hasta.isoformat())
 
