@@ -81,6 +81,52 @@ def _latest_inverter_kw(resp: dict | None) -> float | None:
     return abs(float(valor)) if valor is not None else None
 
 
+def _registrar_comunicacion(proyectos, node_pairs, power_map, snap_map, *,
+                            gaia_activo: bool) -> None:
+    """Guarda la comunicación de cada fuente con lo que este ciclo ya pidió.
+
+    No hace llamadas: reusa `power_map` y `snap_map`. Una fuente que falló
+    ("ERROR") o que no se pudo consultar no se incluye, y `comunicacion.registrar`
+    le conserva el estado anterior. Ver `apps/monitoreo/services/comunicacion.py`.
+    """
+    from apps.monitoreo.services import comunicacion
+    from apps.plataforma.services.fechas import ahora_col
+
+    # `ahora_col()` y no `_col_now()`: ese resta 5 h pero deja la zona en UTC, y
+    # comparado contra horas de Bogotá daría 5 h de error.
+    ahora = ahora_col()
+    nuevos: dict[int, dict] = {}
+    for p in proyectos:
+        fila: dict = {}
+        if p.id in power_map and power_map[p.id] != "ERROR":
+            fila["inversores"] = comunicacion.evaluar(
+                comunicacion.ultimo_dato_inversores(power_map[p.id]), ahora)
+        node_p, node_r = node_pairs.get(p.id) or (None, None)
+        if not (node_p or node_r):
+            fila["medidor"] = None  # sin medidor vinculado: no hay fuente que evaluar
+        elif gaia_activo and p.id in snap_map and snap_map[p.id] != "ERROR":
+            fila["medidor"] = comunicacion.evaluar(
+                comunicacion.ultimo_dato_medidor(snap_map[p.id]), ahora)
+        if fila:
+            nuevos[p.id] = fila
+    comunicacion.registrar(nuevos, ahora)
+
+    # El aviso de "no respondió": solo si fallaron TODAS las consultas de la
+    # fuente en esta corrida (un servicio caído), no por una planta suelta.
+    pedidas_sv = list(power_map.values())
+    if pedidas_sv:
+        comunicacion.registrar_consulta(
+            "inversores", fallo=all(r == "ERROR" for r in pedidas_sv), ahora=ahora)
+    # Solo las plantas CON medidor: a las demás no se les preguntó nada.
+    pedidas_gaia = [snap_map[p.id] for p in proyectos
+                    if any(node_pairs.get(p.id) or ()) and p.id in snap_map]
+    if not gaia_activo:
+        comunicacion.registrar_consulta("medidor", fallo=True, ahora=ahora)
+    elif pedidas_gaia:
+        comunicacion.registrar_consulta(
+            "medidor", fallo=all(r == "ERROR" for r in pedidas_gaia), ahora=ahora)
+
+
 _MENSAJES = {
     "fuente_unica": (
         "alerta", "Fuente única de medición",
@@ -156,6 +202,11 @@ def evaluar_desconexiones(gaia=None):
         avail_map = sv.get_availability() or {}
         if not avail_map:
             logger.warning("SolarView devolvió vacío — se omite evaluación (evita falsas alarmas)")
+            if _is_daylight():
+                from apps.monitoreo.services import comunicacion
+                from apps.plataforma.services.fechas import ahora_col
+
+                comunicacion.registrar_consulta("inversores", fallo=True, ahora=ahora_col())
             return
 
         if gaia is None:
@@ -191,38 +242,44 @@ def evaluar_desconexiones(gaia=None):
                 if not node:
                     return p.id, None
                 try:
-                    return p.id, gaia.get_node_electrical_snapshot(node)
+                    snap, fallo = gaia.get_node_electrical_snapshot_con_estado(node)
                 except Exception:
-                    return p.id, "ERROR"  # distinguir fallo de red de "sin medidor"
+                    fallo = True
+                # distinguir fallo de red de "el medidor no mandó datos"
+                return p.id, "ERROR" if fallo else snap
             with ThreadPoolExecutor(max_workers=6) as ex:
                 for pid, snap in ex.map(_snap, proyectos):
                     snap_map[pid] = snap
             close_old_connections()
 
-        # Potencia instantánea de inversores: SolarView solo la expone por
-        # proyecto (GET /solarview/measurements/power/), a diferencia de
+        # Potencia de inversores: SolarView solo la expone por proyecto
+        # (GET /solarview/measurements/power/), a diferencia de
         # get_availability(). Se pide en paralelo (mismo patrón que Gaia
-        # arriba) y solo para los proyectos que de verdad la van a usar
-        # (de día + con medidor vinculado) -- evita llamadas de sobra los
-        # ciclos nocturnos o en proyectos sin medidor que igual seguirían
-        # de largo más abajo.
+        # arriba), solo de día, y para TODAS las plantas con id de SolarView:
+        # la comunicación de inversores (`comunicacion.py`) se evalúa también
+        # en las que no tienen medidor. Un fallo de la llamada es "ERROR", no
+        # una serie vacía: con `get_power` los dos eran None, y una caída de
+        # SolarView se leía como 0 kW.
         power_map: dict[int, dict | None] = {}
         if daylight:
             hoy_str = _col_now().strftime("%Y-%m-%d")
-            proyectos_runtime = [
-                p for p in proyectos
-                if bool(node_pairs[p.id][0] or node_pairs[p.id][1]) and p.project_id_solarview
-            ]
+            proyectos_runtime = [p for p in proyectos if p.project_id_solarview]
 
             def _power(p):
                 try:
-                    return p.id, sv.get_power(int(p.project_id_solarview), hoy_str, hoy_str)
+                    estado, datos = sv.get_power_con_estado(
+                        int(p.project_id_solarview), hoy_str, hoy_str)
                 except Exception:
                     return p.id, "ERROR"
+                return p.id, "ERROR" if estado == "error" else datos
             with ThreadPoolExecutor(max_workers=6) as ex:
                 for pid, resp in ex.map(_power, proyectos_runtime):
                     power_map[pid] = resp
             close_old_connections()
+
+        if daylight:
+            _registrar_comunicacion(proyectos, node_pairs, power_map, snap_map,
+                                    gaia_activo=bool(gaia and gaia.enabled))
 
         for p in proyectos:
             try:

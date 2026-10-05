@@ -420,6 +420,22 @@ class GaiaClient:
         data = self._get(url, params=params)
         return data if isinstance(data, list) else []
 
+    def get_node_measurements_con_estado(
+        self, node_id: int, date_str: str, var_name: str,
+    ) -> tuple[list[dict], bool]:
+        """`get_node_measurements` diciendo si la llamada FALLÓ (`(filas, fallo)`).
+
+        Thread-safe: no toca `ultima_llamada_fallo` (ver `_get_con_estado`), así
+        que sirve para las 8 variables del snapshot pedidas en paralelo.
+        """
+        url = f"{self._base}/api/node/{node_id}/measurements/"
+        data, fallo = self._get_con_estado(url, params={
+            "init_date": f"{date_str}T00:00:00-05:00",
+            "end_date":  f"{date_str}T23:59:59-05:00",
+            "vars":      var_name,
+        })
+        return (data if isinstance(data, list) else []), fallo
+
     def get_border_report_status(self, border_id: int, date_str: str) -> dict | None:
         """Fetch the ASIC report status for a border on a specific date.
 
@@ -548,7 +564,16 @@ class GaiaClient:
         return results
 
     def get_node_electrical_snapshot(self, node_id: int) -> dict | None:
-        """Comprehensive electrical snapshot for a node (today).
+        """Snapshot eléctrico del nodo hoy. Ver `get_node_electrical_snapshot_con_estado`."""
+        return self.get_node_electrical_snapshot_con_estado(node_id)[0]
+
+    def get_node_electrical_snapshot_con_estado(self, node_id: int) -> tuple[dict | None, bool]:
+        """Comprehensive electrical snapshot for a node (today), y si FALLÓ.
+
+        El segundo valor es True solo si las 8 consultas fallaron (red, timeout,
+        sin token): entonces `None` no quiere decir "el medidor no mandó datos"
+        sino "no se pudo preguntar". Con alguna que responda, el snapshot sale
+        con lo que hubo.
 
         Fetches all 8 variable families in parallel and returns:
           - Instantaneous: voltage per phase (vp1/2/3), current (cp1/2/3),
@@ -563,15 +588,19 @@ class GaiaClient:
         VARS = ["v", "c", "ap", "rp", "pf", "eae", "iae", "ere"]
 
         results: dict[str, list] = {}
+        fallos = 0
         # Each variable requires its own request (API restriction)
         with ThreadPoolExecutor(max_workers=len(VARS)) as ex:
-            futs = {v: ex.submit(self.get_node_measurements, node_id, date_str, v)
+            futs = {v: ex.submit(self.get_node_measurements_con_estado, node_id, date_str, v)
                     for v in VARS}
             for var, fut in futs.items():
                 try:
-                    results[var] = fut.result() or []
+                    filas, fallo = fut.result()
                 except Exception:
-                    results[var] = []
+                    filas, fallo = [], True
+                results[var] = filas or []
+                fallos += bool(fallo)
+        todas_fallaron = fallos == len(VARS)
 
         def _last(lst: list) -> dict:
             return lst[-1] if lst else {}
@@ -596,7 +625,7 @@ class GaiaClient:
 
         # Retorna None solo si no hay absolutamente ningún dato útil
         if not lv and not lc and not lap and not eae and not iae:
-            return None
+            return None, todas_fallaron
 
         # Most recent timestamp across all vars
         all_times = [r[-1].get("time") for r in results.values() if r]
@@ -759,7 +788,7 @@ class GaiaClient:
                     if (_eae_raw and node_id in _EAE_WH_NODES)
                     else _eae_raw)
 
-        return {
+        snapshot = {
             # Voltage per phase [V]  — vp1/vp2/vp3 correct
             "vp1": lv.get("vp1"), "vp2": lv.get("vp2"), "vp3": lv.get("vp3"),
             # Current per phase [A] — cp1/cp2/cp3 correct
@@ -793,3 +822,4 @@ class GaiaClient:
                 "energy_imp": _running_sum_series(iae, "iaepd1", "iaepd2", "iaepd3"),
             },
         }
+        return snapshot, False

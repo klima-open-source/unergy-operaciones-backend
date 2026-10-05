@@ -322,6 +322,23 @@ class SolarViewClient:
         _avisar_si_la_forma_no_es_la_esperada(data, total_power, project_id)
         return data
 
+    def get_power_con_estado(self, project_id: int, date_from: str,
+                             date_to: str) -> tuple[str, dict | None]:
+        """`get_power` (potencia ya sumada) diciendo si fue 404 o error.
+
+        `get_power` devuelve None tanto si la planta no tiene datos como si la
+        llamada falló; para decir "sin comunicación" hay que distinguirlos (ver
+        `_get_con_estado` y `apps/monitoreo/services/comunicacion.py`).
+        """
+        url = f"{self._base_url}/solarview/measurements/power/"
+        estado, data = self._get_con_estado(url, params={
+            "project_id": project_id, "power": "active_power", "total_power": 1,
+            "date_from": date_from, "date_to": date_to,
+        })
+        if estado == "ok":
+            _avisar_si_la_forma_no_es_la_esperada(data, 1, project_id)
+        return estado, data
+
     def get_weather_con_estado(
         self, project_id: int, date_from: str, date_to: str,
     ) -> tuple[str, dict | None]:

@@ -384,33 +384,27 @@ def resumen_dia() -> dict:
     return datos
 
 
-ORDEN_ESTADO = {"caido": 0, "sin_comunicacion": 1, "degradado": 2,
-                "online": 3, "sin_datos": 4}
-
-
-def _estado_de(categoria: str | None) -> str:
-    """Categoría de disponibilidad de SolarView → estado de la tarjeta."""
-    if categoria is None:
-        # Ni id ni respuesta del proveedor: no es que la comunicación esté
-        # caída, es que no sabemos. El frontend pinta gris lo que no reconoce.
-        return "sin_datos"
-    if categoria == "disconnect":
-        return "sin_comunicacion"
-    if categoria == "critical":
-        return "caido"
-    if categoria in ("low", "medium"):
-        return "degradado"
-    return "online"
+def _orden_comunicacion(fila: dict) -> int:
+    """Primero las que no comunican por ninguna fuente, luego por una, luego el resto."""
+    com = fila.get("comunicacion") or {}
+    return -sum(bool((com.get(f) or {}).get("sin_comunicacion"))
+                for f in ("inversores", "medidor"))
 
 
 def monitoreo_flota() -> dict:
     """Estado de la flota: minigranjas en operación con servicio de operación.
 
-    Un proyecto SIN `project_id_solarview` igual aparece, con estado
-    "sin_datos": sus medidores no dependen del proveedor y la tarjeta tiene que
-    poder mostrarlos. Antes se lo saltaba y el proyecto desaparecía de la vista.
+    Cada planta lleva su `comunicacion` por fuente (inversores y medidor), que
+    evalúa el sondeo MGS cada 15 min (`apps/monitoreo/services/comunicacion.py`).
+    Ya no consulta la disponibilidad de SolarView (`/kpis/availability/`): medía
+    otra cosa y la pantalla la llamaba "comunicación" (decisión del 2026-10-05).
+    No hace ninguna llamada externa.
+
+    Un proyecto SIN `project_id_solarview` igual aparece: sus medidores no
+    dependen del proveedor y la tarjeta tiene que poder mostrarlos.
     """
-    cliente = _get_cliente()
+    from apps.monitoreo.services import comunicacion
+
     proyectos = list(Proyecto.objects.filter(
         estado="en_operacion", tipo_proyecto="minigranja", srv_operacion=True,
         deleted_at__isnull=True,
@@ -419,8 +413,9 @@ def monitoreo_flota() -> dict:
     if not proyectos:
         return {
             "timestamp": datetime.utcnow().isoformat() + "Z",
-            "fleet": {"total": 0, "online": 0, "caido": 0, "degradado": 0,
-                      "sin_comunicacion": 0, "sin_datos": 0, "total_capacity_kwp": 0},
+            "fleet": {"total": 0, "sin_comunicacion_inversores": 0,
+                      "sin_comunicacion_medidor": 0, "total_capacity_kwp": 0},
+            "consultas": {},
             "projects": [],
         }
 
@@ -429,32 +424,25 @@ def monitoreo_flota() -> dict:
     if cacheado is not None:
         return cacheado
 
-    # Una sola llamada para toda la flota: /kpis/availability/ devuelve el mismo
-    # shape que el de Solenium a propósito, así que el mapeo de estado no cambia.
-    disponibilidad = cliente.get_availability() or {}
-
+    evaluada = comunicacion.leer()
     filas = []
     capacidad_total = 0.0
-    cuenta = {"online": 0, "caido": 0, "degradado": 0, "sin_comunicacion": 0,
-              "sin_datos": 0}
+    cuenta = {"inversores": 0, "medidor": 0}
 
     for p in proyectos:
-        sol_id = _sv_id(p)
-        disp = disponibilidad.get(sol_id, {}) if sol_id else {}
-        categoria = disp.get("category")
         capacidad = float(p.potencia_ac_kw or 0)
-
-        estado = _estado_de(categoria)
-        cuenta[estado] = cuenta.get(estado, 0) + 1
         capacidad_total += capacidad
+        # None = aún no evaluada (el sondeo corre cada 15 min, solo de día).
+        com = evaluada.get(p.id)
+        for fuente in cuenta:
+            if ((com or {}).get(fuente) or {}).get("sin_comunicacion"):
+                cuenta[fuente] += 1
 
         filas.append({
             "proyecto_id": p.id,
             "nombre": p.nombre_comercial,
-            "sol_id": sol_id,
-            "status": estado,
-            "availability_category": categoria,
-            "availability_pct": disp.get("availability"),
+            "sol_id": _sv_id(p),
+            "comunicacion": com,
             "capacity_kwp": round(capacidad, 1),
             # La meta del día según el P90 del mes. Va acá porque el proyecto ya
             # está cargado en este bucle: no cuesta ni una consulta más.
@@ -467,19 +455,19 @@ def monitoreo_flota() -> dict:
             "p90_diario_kwh": _p90_del_dia(p),
         })
 
-    filas.sort(key=lambda x: (ORDEN_ESTADO.get(x["status"], 5), x["nombre"] or ""))
+    filas.sort(key=lambda x: (_orden_comunicacion(x), x["nombre"] or ""))
 
     datos = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "fleet": {
             "total": len(proyectos),
-            "online": cuenta["online"],
-            "caido": cuenta["caido"],
-            "degradado": cuenta["degradado"],
-            "sin_comunicacion": cuenta["sin_comunicacion"],
-            "sin_datos": cuenta.get("sin_datos", 0),
+            "sin_comunicacion_inversores": cuenta["inversores"],
+            "sin_comunicacion_medidor": cuenta["medidor"],
             "total_capacity_kwp": round(capacidad_total, 1),
         },
+        # Si la última consulta a SolarView (inversores) o a Quoia (medidor)
+        # falló entera: la pantalla avisa que los estados pueden estar viejos.
+        "consultas": comunicacion.consultas(),
         "projects": filas,
     }
     _cache_set(clave, CACHE_TTL_FLOTA, datos)
