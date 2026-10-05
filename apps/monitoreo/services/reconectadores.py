@@ -391,11 +391,16 @@ def verificar_credenciales(usuario: str, contrasena: str) -> None:
         raise SolarViewNoResponde(f"sole.tech respondió HTTP {respuesta.status_code} al login.")
 
 
-def enviar_comando(sv_id: int, accion: str) -> httpx.Response:
+def enviar_comando(sv_id: int, accion: str, usuario: str, contrasena: str) -> httpx.Response:
     """Manda el ON/OFF al reconectador por SolarView, con el token del servidor.
 
-    Revisa el interruptor ACÁ y no solo en la vista: así ningún camino que
-    llame a esta función puede mandar un comando con el interruptor apagado.
+    Los candados van ACÁ y no en la vista, en este orden, para que ningún
+    camino que llame a esta función se los salte:
+
+    1. el interruptor (una sola revisión, antes de todo: con los comandos
+       apagados la contraseña de nadie sale hacia sole.tech);
+    2. la acción, ON u OFF;
+    3. el usuario y la contraseña de SolarView de quien lo manda.
 
     La forma es la que manda la propia plataforma de SolarView al apagar un
     reconectador, capturada en el navegador el 2026-09-30 sobre Valencia Oriente
@@ -410,6 +415,7 @@ def enviar_comando(sv_id: int, accion: str) -> httpx.Response:
         )
     if accion not in ("ON", "OFF"):
         raise ValueError(f"acción inválida: {accion!r}")
+    verificar_credenciales(usuario, contrasena)
 
     c = cliente()
     try:

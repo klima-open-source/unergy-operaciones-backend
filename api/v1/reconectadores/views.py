@@ -143,27 +143,18 @@ class ReconectadorViewSet(viewsets.GenericViewSet):
             "proyecto_id": proyecto.id, "sv_id": sv_id, "accion": datos["accion"],
         }
 
-        # El interruptor antes que las credenciales: con los comandos apagados
-        # no tiene sentido mandarle la contraseña de nadie a sole.tech.
-        if not relay_service.comandos_habilitados():
-            logger.warning("comando de reconectador rechazado: deshabilitado", extra=rastro)
-            return Response({"detail": (
-                "Los comandos ON/OFF están deshabilitados en este servidor "
-                "(un admin los enciende en Generación Solar)."
-            )}, status=503)
+        # Los candados (interruptor, credenciales de SolarView) los revisa el
+        # servicio; acá solo se traducen a HTTP.
         try:
-            relay_service.verificar_credenciales(datos["username"], datos["password"])
-        except relay_service.CredencialesInvalidas as exc:
-            logger.warning("comando de reconectador rechazado: credenciales", extra=rastro)
-            return Response({"detail": str(exc)}, status=400)
-        except relay_service.SolarViewNoResponde as exc:
-            return Response({"detail": str(exc)}, status=503)
-
-        try:
-            respuesta = relay_service.enviar_comando(sv_id, datos["accion"])
+            respuesta = relay_service.enviar_comando(
+                sv_id, datos["accion"], datos["username"], datos["password"],
+            )
         except relay_service.ComandosDeshabilitados as exc:
             logger.warning("comando de reconectador rechazado: deshabilitado", extra=rastro)
             return Response({"detail": str(exc)}, status=503)
+        except relay_service.CredencialesInvalidas as exc:
+            logger.warning("comando de reconectador rechazado: credenciales", extra=rastro)
+            return Response({"detail": str(exc)}, status=400)
         except relay_service.SolarViewNoConfigurado as exc:
             return Response({"detail": str(exc)}, status=503)
         except relay_service.SolarViewNoResponde as exc:
