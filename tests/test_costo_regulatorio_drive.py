@@ -1,6 +1,6 @@
 """Ingesta del costo regulatorio desde el Drive de ER. La selección de período/versión
 es pura; la orquestación inyecta las funciones de Drive (sin red)."""
-from app.services.costo_regulatorio_drive import _rank_version, seleccionar_cruce
+from apps.garantias.services.costo_regulatorio_drive import _rank_version, seleccionar_cruce
 
 
 def _cruce(anio, mes, version, fid):
@@ -42,7 +42,7 @@ def test_sin_cruces_devuelve_none():
 
 import io
 import openpyxl
-from app.services.costo_regulatorio_drive import costo_regulatorio_del_mes
+from apps.garantias.services.costo_regulatorio_drive import costo_regulatorio_del_mes
 
 
 def _xlsx_generador_bytes(valor):

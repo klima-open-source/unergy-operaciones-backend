@@ -56,7 +56,7 @@ def _precio_bolsa(hasta: date | None = None) -> float | None:
 
 
 def _regulatorio(anio: int, mes: int) -> dict:
-    from app.services.costo_regulatorio_drive import costo_regulatorio_del_mes
+    from apps.garantias.services.costo_regulatorio_drive import costo_regulatorio_del_mes
 
     return costo_regulatorio_del_mes(anio, mes)
 

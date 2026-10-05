@@ -77,7 +77,6 @@ def test_arbol_django_no_importa_fastapi_ni_sqlalchemy():
 PRESTADOS_DE_APP = {
     "app.core.database",              # apps/liquidaciones/services/excel.py
     "app.models.proyectos",           # apps/comercial/services/pipeline.py
-    "app.services.costo_regulatorio_drive",
     "app.services.email_service",
     "app.utils.liquidaciones_loader",
 }

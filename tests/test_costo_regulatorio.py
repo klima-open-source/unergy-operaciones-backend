@@ -1,6 +1,6 @@
 """Costo regulatorio del mes desde la hoja 'Facturas XM' del Cruce de facturas.
 Cálculo puro: sin BD, sin red, sin reloj."""
-from app.services.costo_regulatorio import (
+from apps.garantias.services.costo_regulatorio import (
     _norm,
     costo_regulatorio_de_facturas,
 )
@@ -68,7 +68,7 @@ def test_total_julio_2026_reproduce_valor_referencia():
 
 
 import openpyxl
-from app.services.costo_regulatorio import extraer_facturas_xm
+from apps.garantias.services.costo_regulatorio import extraer_facturas_xm
 
 
 def _hoja_demo():
@@ -101,13 +101,13 @@ def test_extraer_facturas_separa_encabezado_tipo_y_lineas():
 
 
 def test_extraer_y_calcular_da_solo_generador():
-    from app.services.costo_regulatorio import costo_regulatorio_de_facturas
+    from apps.garantias.services.costo_regulatorio import costo_regulatorio_de_facturas
     assert costo_regulatorio_de_facturas(extraer_facturas_xm(_hoja_demo())) == 999626.0
 
 
 import os
 import pytest
-from app.services.costo_regulatorio import costo_regulatorio_de_archivo
+from apps.garantias.services.costo_regulatorio import costo_regulatorio_de_archivo
 
 _ARCHIVO_JULIO = r"C:\Users\jessi\OneDrive\Documentos\Estado Resultados\2026\07_Julio\Cruce facturas 7 2026 txf.xlsx"
 
@@ -121,7 +121,7 @@ def test_archivo_real_julio_reproduce_55_789_875():
 
 import io
 import openpyxl
-from app.services.costo_regulatorio import costo_regulatorio_de_bytes
+from apps.garantias.services.costo_regulatorio import costo_regulatorio_de_bytes
 
 
 def _xlsx_bytes_demo():
