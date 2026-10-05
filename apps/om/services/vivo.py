@@ -99,7 +99,7 @@ def _instantanea(gaia, nodo_id, capacidad_kwp: float | None = None) -> dict | No
     # en este escalar. Los nodos no coinciden entre sí —unos entregan vatios y
     # otros kilovatios— así que exponerlo directo estaba 1000× alto en la mitad
     # de los medidores. `divisor_a_kw` decide cuál es cuál por la magnitud.
-    from app.services.mgs.medidor_tiempo_real import divisor_a_kw
+    from apps.energia.services.medidor_tiempo_real import divisor_a_kw
 
     potencia_kw = None
     ap_total = medida.get("ap_total")

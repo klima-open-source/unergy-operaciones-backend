@@ -8,7 +8,7 @@ Acá se piden solo `ap` y `eae`.
 """
 import pytest
 
-from app.services.mgs.medidor_tiempo_real import elegir_medidor, snapshot_medidor
+from apps.energia.services.medidor_tiempo_real import elegir_medidor, snapshot_medidor
 
 
 class _GaiaFake:

@@ -3,7 +3,7 @@ import io
 
 import openpyxl
 
-from app.services.balcttos import (
+from apps.garantias.services.balcttos import (
     _norm,
     neto_compras_bolsa,
     neto_compras_bolsa_de_bytes,

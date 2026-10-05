@@ -617,7 +617,7 @@ def monitoreo_detalle(proyecto_id: int, incluir_snapshot: bool = False,
     recibiendo lo de siempre rompe callado al que no se entere; uno que hay que
     pedir para dejar de recibirlo, no rompe a nadie.
     """
-    from app.services.mgs.medidor_tiempo_real import elegir_medidor, snapshot_medidor
+    from apps.energia.services.medidor_tiempo_real import elegir_medidor, snapshot_medidor
 
     p = _proyecto_o_404(proyecto_id)
 

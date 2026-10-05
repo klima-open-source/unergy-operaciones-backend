@@ -48,7 +48,7 @@ def _precio_bolsa(hasta: date | None = None) -> float | None:
     Al replicar un corte pasado se pasa esa fecha y el precio es el de ese
     viernes, no el de hoy.
     """
-    from app.services.simem_bolsa import precio_bolsa_prom_7d
+    from apps.comun.integraciones.simem_bolsa import precio_bolsa_prom_7d
 
     hasta = hasta or date.today()
     inicio = hasta - timedelta(days=DIAS_PRECIO_BOLSA)
@@ -86,7 +86,7 @@ def neto_de_ventana(anio: int, mes: int, dias_objetivo: int) -> float | None:
     `None` si no hay BalCttos del período: entonces manda la proyección del
     balance.
     """
-    from app.services.balcttos import proyectar_neto_mwh
+    from apps.garantias.services.balcttos import proyectar_neto_mwh
 
     dato = balcttos_de(anio, mes)
     if dato is None or not dato["dia_corte"]:
@@ -198,7 +198,7 @@ def en_vivo(hoy: date | None = None, *, plantas_nuevas: int = 0,
 
 def ingerir_balcttos(anio: int, mes: int, contenido: bytes) -> dict:
     """Parsea el archivo BalCttos y guarda el neto real del período."""
-    from app.services.balcttos import neto_compras_bolsa_de_bytes
+    from apps.garantias.services.balcttos import neto_compras_bolsa_de_bytes
 
     parseado = neto_compras_bolsa_de_bytes(contenido)
     dias = sorted(parseado["por_dia"])

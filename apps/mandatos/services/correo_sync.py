@@ -23,7 +23,7 @@ from datetime import date
 from apps.mandatos.services.finanzas import (
     extraer_periodo_de_asunto, tipo_de_nombre,
 )
-from app.services.mandatos.adjuntos import expandir_adjuntos
+from apps.mandatos.services.adjuntos import expandir_adjuntos
 from app.services.mandatos.email_parser import (
     CLASIF_MOLDE_SIMPLE, _sin_cita, clasificar_correo, es_correo_de_correcciones,
     extraer_observaciones, extraer_pa_del_cuerpo, parece_nombre_de_mandato,

@@ -16,7 +16,7 @@ Dos bugs espejo en la misma respuesta, encontrados el 2026-09-03:
 """
 import pytest
 
-from app.services.mgs.medidor_tiempo_real import divisor_a_kw
+from apps.energia.services.medidor_tiempo_real import divisor_a_kw
 
 
 def test_energia_no_se_divide_porque_ya_esta_en_kwh():
