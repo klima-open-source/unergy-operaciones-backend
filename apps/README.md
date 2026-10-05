@@ -388,18 +388,18 @@ vista de función quedaba invisible. Ahora la vista declara sus verbos en
 `metodos_http` y el walker los lee — sin eso, la última ruta faltante aparecía
 como "portada" simplemente porque el test no sabía mirarla.
 
-**Escotillas a SQLAlchemy que quedan bajo `apps/`:** una sola,
-`apps/liquidaciones/services/excel.py` (el cargador de Excel). La de
-`balance_energia` se cerró al portar `cumplimiento`. Los `from app.services…`
-que quedan son clientes HTTP y SMTP puros (Gaia, Solenium, SolarView, SIMEM,
-`email_service`) sin sesión de base: se moverán cuando se retire FastAPI, no
-antes.
+**Escotillas a SQLAlchemy bajo `apps/`: ninguna.** La última,
+`apps/liquidaciones/services/excel.py` (el cargador de Excel de liquidaciones),
+se retiró el 2026-10-05 junto con su endpoint: nadie lo usaba desde julio. La de
+`balance_energia` se cerró al portar `cumplimiento`. Los clientes HTTP, SMTP e
+IMAP se portaron a `apps/`; lo que el árbol Django todavía toma de `app/` está en
+`PRESTADOS_DE_APP` (`tests/test_solo_django.py`).
 
 **Lo que sigue no es portar, es apagar.** FastAPI y Django sirven hoy las mismas
 493 rutas; el corte es una decisión de despliegue (a qué proceso apunta el
-frontend), no de código. Antes de retirar `app/` faltan tres cosas que esta
-migración dejó anotadas y no resolvió: la dueña de las tablas de `django_tracker`,
-las 18 tablas muertas, y mover los clientes HTTP/SMTP a `apps/comun/`.
+frontend), no de código. Antes de retirar `app/` faltan dos cosas que esta
+migración dejó anotadas y no resolvió: la dueña de las tablas de `django_tracker`
+y las 18 tablas muertas.
 
 ## Qué enseñaron los tres primeros recursos
 

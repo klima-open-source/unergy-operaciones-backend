@@ -35,6 +35,6 @@ EXPOSE 8000
 # servicio (web, worker, beat) trae su propio `command`.
 #
 # `config.wsgi` y no `app.main`: Django reemplazo a FastAPI el 2026-09-04. El
-# paquete `app/` sigue en la imagen porque `apps/` le importa clientes puros
-# (MGS, SMTP, los parsers de correo de mandatos), pero ya no se sirve.
+# paquete `app/` sigue en la imagen como copia congelada (ver CLAUDE.md): ya no
+# se sirve, y `apps/` solo le toma un diccionario.
 CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]

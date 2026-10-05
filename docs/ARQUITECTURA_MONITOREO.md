@@ -362,7 +362,9 @@ así que se movieron a ruta propia antes de borrar el contenedor.
 ### 6.3 Lo que NO se borró, y por qué
 
 - **`app/services/mgs/`** — pese al nombre no es el router: son los clientes de
-  Solenium, Gaia y Quoia, importados por 25 módulos.
+  Solenium, Gaia y Quoia, importados por 25 módulos. (Desde el 2026-10-05 esos
+  clientes viven en `apps/comun/integraciones/`; la copia de `app/` ya no la
+  importa nada de `apps/`.)
 - **Modelo y tabla `costos_variables`** — hay datos en producción y el nombre está en
   `_MERGE_SIMPLE` (`proyectos.py:730`), que usa la fusión de proyectos duplicados.
 - **`app/api/v1/inicio_operacion.py`** — `informe_om.py` le importa **siete helpers en
