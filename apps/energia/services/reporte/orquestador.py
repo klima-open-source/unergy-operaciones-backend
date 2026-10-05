@@ -49,8 +49,8 @@ from apps.energia.services.reporte.utils import actualizar_respaldo_final, curva
 from apps.fronteras.models import Frontera
 
 # `ponytail: los clientes de Quoia y SolarView siguen en app/services/mgs/`.
-from app.services.mgs.gaia_client import GaiaClient
-from app.services.mgs.solarview_client import SolarViewClient
+from apps.comun.integraciones.gaia_client import GaiaClient
+from apps.comun.integraciones.solarview_client import SolarViewClient
 
 TIPOS_GENERACION = {"generacion"}
 TIPOS_CONSUMO = {"consumo", "consumo_auxiliar", "consumo_propio"}

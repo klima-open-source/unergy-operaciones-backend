@@ -76,7 +76,7 @@ def cliente():
     """El `SolarViewClient` del servidor, creado una vez."""
     global _cliente
     if _cliente is None:
-        from app.services.mgs.solarview_client import SolarViewClient
+        from apps.comun.integraciones.solarview_client import SolarViewClient
 
         _cliente = SolarViewClient()
     if not _cliente.enabled:
@@ -104,7 +104,7 @@ def _leer(sv_id: int) -> tuple[str, dict]:
     no se pudo leer (timeout, 5xx): NO quiere decir que no tenga.
     """
     try:
-        from app.services.mgs.solarview_client import TIMEOUT_EN_PANTALLA
+        from apps.comun.integraciones.solarview_client import TIMEOUT_EN_PANTALLA
 
         c = cliente()
         estado, datos = c._get_con_estado(

@@ -65,7 +65,7 @@ def _resolver_mapa_proyectos(gaia) -> tuple[dict[int, int], dict[int, str]]:
     frontera de generación vinculada quedan fuera y se reportan aparte — antes
     desaparecían sin ningún aviso.
     """
-    from app.services.mgs.gaia_client import (
+    from apps.comun.integraciones.gaia_client import (
         build_db_proyecto_frt_map, find_gaia_node_pair,
     )
 
@@ -108,7 +108,7 @@ def _resolver_mapa_proyectos(gaia) -> tuple[dict[int, int], dict[int, str]]:
 
 def sondear() -> dict:
     """Un ciclo completo de monitoreo. Devuelve el resumen de lo que hizo."""
-    from app.services.mgs.gaia_client import GaiaClient
+    from apps.comun.integraciones.gaia_client import GaiaClient
 
     # Alarmas de desconexión (inversores contra medidor): aislado, un fallo suyo
     # no puede tumbar el ciclo de MGS.

@@ -127,7 +127,7 @@ def _cache_borrar(clave: str) -> None:
 def _get_cliente():
     global _cliente
     if _cliente is None:
-        from app.services.mgs.solarview_client import SolarViewClient
+        from apps.comun.integraciones.solarview_client import SolarViewClient
 
         _cliente = SolarViewClient()
     if not _cliente.enabled:
@@ -139,7 +139,7 @@ def _get_gaia():
     """El GaiaClient si hay credenciales, si no None (no es fatal)."""
     global _gaia
     if _gaia is None:
-        from app.services.mgs.gaia_client import GaiaClient
+        from apps.comun.integraciones.gaia_client import GaiaClient
 
         _gaia = GaiaClient()
     return _gaia if _gaia.enabled else None
@@ -492,7 +492,7 @@ def _nodos_gaia(gaia, proyecto_id: int) -> tuple:
     proveedor externo — por eso funciona aunque el proyecto no tenga id de
     SolarView.
     """
-    from app.services.mgs.gaia_client import (
+    from apps.comun.integraciones.gaia_client import (
         build_db_proyecto_frt_map, find_gaia_node_pair,
     )
 

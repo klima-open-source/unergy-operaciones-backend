@@ -4,8 +4,8 @@ inversor (con total_power=1 la API ya entrega la potencia sumada, ver
 SolarViewClient.get_power)."""
 import pandas as pd
 
-from app.services.mgs import solarview_client as sv_client_module
-from app.services.mgs.solarview_client import SolarViewClient
+from apps.comun.integraciones import solarview_client as sv_client_module
+from apps.comun.integraciones.solarview_client import SolarViewClient
 from app.services.reporte_energia.solarview import curva_de_power
 
 

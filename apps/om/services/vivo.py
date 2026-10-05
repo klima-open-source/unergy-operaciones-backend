@@ -25,7 +25,7 @@ _gaia = None
 def _cliente_gaia():
     global _gaia
     if _gaia is None:
-        from app.services.mgs.gaia_client import GaiaClient
+        from apps.comun.integraciones.gaia_client import GaiaClient
 
         _gaia = GaiaClient()
     return _gaia if _gaia.enabled else None
@@ -49,7 +49,7 @@ def frontera(proyecto) -> dict:
     if gaia is None:
         return vacio
 
-    from app.services.mgs.gaia_client import (
+    from apps.comun.integraciones.gaia_client import (
         build_db_proyecto_frt_map, find_gaia_node_pair,
     )
     from apps.fronteras import models as fr_models

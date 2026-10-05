@@ -40,7 +40,7 @@ from apps.energia.services.reporte.utils import curva_respaldo_a_reportar, repor
 from apps.energia.services.reporte.vistas import _nombre_frontera
 
 # `ponytail: el cliente de Quoia sigue en app/services/mgs/`.
-from app.services.mgs.gaia_client import GaiaClient
+from apps.comun.integraciones.gaia_client import GaiaClient
 
 
 def _enviar_a_quoia(rep, front, es_generacion: bool, gaia: GaiaClient, borders: dict) -> tuple[bool | None, str | None]:

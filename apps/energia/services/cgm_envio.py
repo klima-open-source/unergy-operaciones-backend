@@ -214,7 +214,7 @@ def _resultado(dest, nombre, correos, fronteras, ok, **extra) -> dict:
 
 def enviar(fecha_inicio, fecha_fin, destinatarios: list[dict]) -> dict:
     """Genera y manda el reporte CGM a cada destinatario."""
-    from app.services.mgs.gaia_client import GaiaClient
+    from apps.comun.integraciones.gaia_client import GaiaClient
 
     if fecha_fin < fecha_inicio:
         fecha_inicio, fecha_fin = fecha_fin, fecha_inicio

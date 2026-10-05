@@ -23,7 +23,7 @@ from apps.energia.services.reporte import curvas
 from apps.energia.services.reporte.utils import curva_a_lista, curva_cambio
 
 # `ponytail: el cliente de Quoia sigue en app/services/mgs/`.
-from app.services.mgs.gaia_client import GaiaClient
+from apps.comun.integraciones.gaia_client import GaiaClient
 
 def _revisar_tabla(
     Modelo, gaia, mapa_nodo, borders, fecha: date, var_name: str, es_generacion: bool,

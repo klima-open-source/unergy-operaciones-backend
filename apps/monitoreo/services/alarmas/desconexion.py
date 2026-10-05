@@ -121,7 +121,7 @@ def _procesar(cache, pending_writes: list[dict], usuarios,
 # ── Entrada principal ─────────────────────────────────────────────────────────
 def evaluar_desconexiones():
     """Evalúa todos los proyectos monitoreados y emite notificaciones. Idempotente."""
-    from app.services.mgs.solarview_client import SolarViewClient
+    from apps.comun.integraciones.solarview_client import SolarViewClient
 
     sv = SolarViewClient()
     if not sv.enabled:
@@ -153,7 +153,7 @@ def evaluar_desconexiones():
             logger.warning("SolarView devolvió vacío — se omite evaluación (evita falsas alarmas)")
             return
 
-        from app.services.mgs.gaia_client import GaiaClient
+        from apps.comun.integraciones.gaia_client import GaiaClient
 
         gaia = GaiaClient()
         daylight = _is_daylight()
@@ -161,7 +161,7 @@ def evaluar_desconexiones():
         # Vínculo directo fronteras.proyecto_id -> codigo_frontera (fuente de verdad
         # reconciliada, ver scripts/etl_fronteras_proyectos.py). Evita adivinar por
         # nombre para la gran mayoría de los proyectos.
-        from app.services.mgs.gaia_client import (
+        from apps.comun.integraciones.gaia_client import (
             build_db_proyecto_frt_map, find_gaia_node_pair,
         )
 

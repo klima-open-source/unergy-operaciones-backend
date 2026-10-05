@@ -187,7 +187,7 @@ def test_la_ultima_lectura_es_la_del_cache_compartido(monkeypatch, relays):
 
 
 def test_la_lectura_del_relay_es_corta_y_de_un_intento(monkeypatch, relays):
-    from app.services.mgs.solarview_client import TIMEOUT_EN_PANTALLA
+    from apps.comun.integraciones.solarview_client import TIMEOUT_EN_PANTALLA
 
     pedidos = []
 

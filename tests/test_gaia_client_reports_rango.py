@@ -6,7 +6,7 @@ get_border_report_status_con_estado() (una sola fecha) ahora es un wrapper
 sobre este método -- se verifica que su comportamiento no cambió."""
 import types
 
-from app.services.mgs.gaia_client import GaiaClient
+from apps.comun.integraciones.gaia_client import GaiaClient
 
 
 def _client_con_http(get_fn):

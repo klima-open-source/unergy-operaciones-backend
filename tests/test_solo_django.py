@@ -85,10 +85,7 @@ PRESTADOS_DE_APP = {
     "app.services.mandatos.firmas",
     "app.services.mandatos.imap_client",
     "app.services.mgs.alarm_engine",
-    "app.services.mgs.gaia_client",
-    "app.services.mgs.solarview_client",
     "app.services.mgs.solenium_checker",
-    "app.services.mgs.solenium_client",
     "app.utils.liquidaciones_loader",
 }
 

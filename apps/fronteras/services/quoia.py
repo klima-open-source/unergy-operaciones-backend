@@ -28,7 +28,7 @@ class QuoiaNoResponde(RuntimeError):
 def cliente():
     global _cliente
     if _cliente is None:
-        from app.services.mgs.gaia_client import GaiaClient
+        from apps.comun.integraciones.gaia_client import GaiaClient
 
         _cliente = GaiaClient()
     if not _cliente.enabled:
@@ -72,7 +72,7 @@ def iterar_frt(lista):
 
 def info_de_medidores(frt_code: str):
     """`(principal, respaldo)` con marca, modelo y serie. Nunca levanta."""
-    from app.services.mgs.gaia_client import get_frt_meter_info
+    from apps.comun.integraciones.gaia_client import get_frt_meter_info
 
     try:
         return get_frt_meter_info(cliente(), frt_code)

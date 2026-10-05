@@ -544,7 +544,7 @@ class ProyectoViewSet(viewsets.GenericViewSet):
                 "detalle": "Este proyecto no tiene frontera de generación registrada.",
             })
 
-        from app.services.mgs.gaia_client import GaiaClient
+        from apps.comun.integraciones.gaia_client import GaiaClient
 
         gaia = GaiaClient()
         if not gaia.enabled:

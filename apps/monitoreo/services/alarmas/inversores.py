@@ -32,7 +32,7 @@ _cliente = None
 def _cliente_solarview():
     global _cliente
     if _cliente is None:
-        from app.services.mgs.solarview_client import SolarViewClient
+        from apps.comun.integraciones.solarview_client import SolarViewClient
 
         _cliente = SolarViewClient()
     return _cliente if _cliente.enabled else None

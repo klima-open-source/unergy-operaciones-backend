@@ -44,8 +44,8 @@ from datetime import date
 
 import pandas as pd
 
-from app.services.mgs.gaia_client import GaiaClient
-from app.services.mgs.solarview_client import SolarViewClient
+from apps.comun.integraciones.gaia_client import GaiaClient
+from apps.comun.integraciones.solarview_client import SolarViewClient
 from apps.energia.services.reporte import curvas, datos_crudos, solarview as solarview_svc, reconectador, historial
 from apps.energia.services.reporte.utils import (
     CURVA_CERO, CURVA_VACIA, HORAS_SOLARES, escalar_curva, escalar_curva_con_huecos, curva_a_lista,
