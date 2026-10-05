@@ -13,12 +13,31 @@ precio promedio del mes, más cara que el PPA. La indemnización es ese sobrecos
 (ver `_valor_indemnizar`).
 """
 
+import unicodedata
+
 from apps.ppa import models as ppa_models
 
 # Orden en que se muestran los estados: primero lo que hay que atender.
 ORDEN_ESTADO = {
     "bajo_minimo": 0, "sobre_maximo": 1, "sin_compromiso": 2, "cumple": 3,
 }
+
+# PPA que quedan bajo el mínimo y a los que el cálculo les sale un número, pero
+# ese número NO se cobra: no tienen indemnización real (Jessica, 2026-10-05).
+# Se siguen mostrando —el incumplimiento existe y hay que verlo— pero no suman al
+# total, que es lo que se reclama.
+#
+# Van por NOMBRE y no por id a propósito: los ids son opacos y no viajan entre
+# entornos; el nombre es el que la usuaria reconoce y el que sale en pantalla.
+# Si la lista crece, esto debería ser una bandera del contrato en la base.
+PPAS_INDEMNIZACION_INFORMATIVA = {"enermas", "terpel cox"}
+
+
+def _clave_ppa(nombre) -> str:
+    """Nombre del PPA normalizado: sin tildes, sin espacios de sobra, minúsculas."""
+    limpio = unicodedata.normalize("NFKD", str(nombre or "")).encode("ascii", "ignore")
+    return " ".join(limpio.decode().lower().split())
+
 
 # Si el despachado y el mínimo difieren en más de este factor, casi seguro que
 # alguien cargó kWh donde iban MWh (o al revés). Se marca en vez de callarlo.
@@ -107,6 +126,12 @@ def build(datos_facturacion: dict, anio: int, mes: int, precio_bolsa: float | No
             _valor_indemnizar(fila_faltante_kwh, precio_bolsa, tarifa_ppa)
             if estado == "bajo_minimo" else (None, None)
         )
+        # Lo informativo es la PLATA, no el incumplimiento: el estado, el
+        # faltante y el conteo de "por debajo" no cambian.
+        informativa = _clave_ppa(grupo["ppa"]) in PPAS_INDEMNIZACION_INFORMATIVA
+        valor_informativo = valor_indemnizar if informativa else None
+        if informativa:
+            valor_indemnizar = None
         if valor_indemnizar:
             indemnizar_total += valor_indemnizar
 
@@ -128,6 +153,10 @@ def build(datos_facturacion: dict, anio: int, mes: int, precio_bolsa: float | No
             "tarifa_ppa_cop_kwh": tarifa_ppa,
             "precio_bolsa_cop_kwh": precio_bolsa,
             "valor_indemnizar_cop": valor_indemnizar,
+            # Este PPA no cobra indemnización: el valor queda aparte, visible
+            # pero fuera del total.
+            "indemnizacion_informativa": informativa,
+            "valor_indemnizar_informativo_cop": valor_informativo,
             "valor_indemnizar_bruto_cop": valor_indemnizar_bruto,
             "unidad_sospechosa": bool(
                 minimo > 0
