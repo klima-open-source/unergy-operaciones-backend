@@ -1,6 +1,6 @@
 """Rutas de liquidaciones.
 
-`resumen-panel`, `resumen-panel-rango`, `catalogos/tipos` y `cargar-excel` son
+`resumen-panel`, `resumen-panel-rango` y `catalogos/tipos` son
 acciones de LISTA, y `DefaultRouter` las registra antes que la ruta de detalle;
 `tests/test_resolucion_rutas.py` lo verifica.
 """

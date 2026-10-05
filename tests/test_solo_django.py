@@ -1,9 +1,7 @@
 """El arbol Django (`apps/`, `api/`, `config/`) no importa FastAPI ni SQLAlchemy.
 
 Django reemplazo a FastAPI el 2026-09-04, pero el paquete `app/` sigue en el
-repo --266 archivos-- porque `apps/` le importa clientes puros (MGS, SMTP, los
-parsers de correo de mandatos, `liquidaciones_loader`). Parece vivo, y ahi esta
-el riesgo: quien entre a iterar puede concluir que ese es el arbol donde se
+repo --266 archivos-- como copia congelada. Parece vivo, y ahi esta el riesgo: quien entre a iterar puede concluir que ese es el arbol donde se
 escribe, o traerse un `Depends`/`Session` a un modulo nuevo bajo `apps/`.
 
 La regla esta escrita en `CLAUDE.md`, pero la prosa se ignora y un test rojo no.
@@ -15,11 +13,10 @@ Se mira el AST y no el texto: hay docstrings que NOMBRAN a las dos librerias a
 proposito (`apps/plataforma/models.py` explica que su tabla no tiene modelo
 SQLAlchemy), y un grep las contaria como violaciones.
 
-La escotilla que existe --`apps/liquidaciones/services/excel.py` importa
-`app.core.database.SessionLocal`-- no la ve el primer test, y es correcto:
-importa `app.*`, no `sqlalchemy`. Los imports de `app.*` son la deuda que se
-paga portando esos modulos; los vigilan los dos tests de `PRESTADOS_DE_APP`,
-mas abajo. Los de `sqlalchemy` serian deuda NUEVA.
+El primer test no ve un import INDIRECTO --`app.core.database` abre una sesion
+de SQLAlchemy sin que el archivo nombre a la libreria--. Por eso los dos tests
+de `PRESTADOS_DE_APP`, mas abajo, vigilan cualquier `from app.`: la lista de lo
+que el arbol Django todavia le toma a `app/`, que solo se achica.
 """
 import ast
 from pathlib import Path
@@ -75,9 +72,7 @@ def test_arbol_django_no_importa_fastapi_ni_sqlalchemy():
 # `app/` no se toca: queda como copia congelada. Cuando la lista este vacia,
 # nada de lo que corre en produccion depende de el.
 PRESTADOS_DE_APP = {
-    "app.core.database",              # apps/liquidaciones/services/excel.py
     "app.models.proyectos",           # apps/comercial/services/pipeline.py
-    "app.utils.liquidaciones_loader",
 }
 
 

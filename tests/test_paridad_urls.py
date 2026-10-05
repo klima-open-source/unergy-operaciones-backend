@@ -112,6 +112,14 @@ PREFIJOS_RETIRADOS = [
 #       2026-10-02  El panel de estados de XM (en espera/exitoso/error) se
 #       cambio por el resumen del envio, que viaja en GET /enviar/estado.
 #       Decision de Sara: quitarlo del todo, back y front.
+#
+#   POST /liquidaciones/cargar-excel
+#       2026-10-05  Jessica quito el boton del front el 2026-07-06 (0e66ffe6,
+#       "quitar carga Excel"); la ultima liquidacion, mandato, linea, costo o
+#       factura que creo el cargador es del 2026-07-02, y en la copia de la base
+#       al 2026-10-01 no hay ninguna posterior. Liquidaciones vive ahora en el
+#       servicio externo (`/liquidaciones-api`). Era la ultima puerta a
+#       SQLAlchemy de la plataforma: el cargador (966 lineas) queda en `app/`.
 RUTAS_RETIRADAS = {
     ("/api/v1/fallas/sla-dashboard", "GET"),
     ("/api/v1/fallas/stats/resumen", "GET"),
@@ -119,6 +127,7 @@ RUTAS_RETIRADAS = {
     ("/api/v1/generacion-solar/generacion-hoy", "GET"),
     ("/api/v1/reporte-energia/estado-quoia", "GET"),
     ("/api/v1/reporte-energia/estado-quoia", "POST"),
+    ("/api/v1/liquidaciones/cargar-excel", "POST"),
 }
 
 

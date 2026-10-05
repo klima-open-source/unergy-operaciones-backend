@@ -82,7 +82,6 @@ CASOS = [
     ("/api/v1/liquidaciones/resumen-panel", "resumen_panel"),
     ("/api/v1/liquidaciones/resumen-panel-rango", "resumen_panel_rango"),
     ("/api/v1/liquidaciones/catalogos/tipos", "catalogos"),
-    ("/api/v1/liquidaciones/cargar-excel", "cargar_excel"),
     ("/api/v1/liquidaciones/7", "partial_update"),
     ("/api/v1/liquidaciones/7/informe", "informe"),
     ("/api/v1/liquidaciones/7/limpiar", "limpiar"),
