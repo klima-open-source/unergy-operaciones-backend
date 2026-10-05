@@ -66,6 +66,14 @@ def build_workbook(periodo, lineas, despacho_dia, compromisos, bolsa, *, techo=N
     techo_cell = wsb.cell(r_techo, 2, techo if techo is not None else "")
     techo_cell.font = _BOLD
     techo_ref = f"$B${r_techo}"
+    # Las horas que XM publica como PTB y no como PB_Nal: el precio superó el de
+    # escasez de activación. Se dice en la hoja porque antes esas horas salían en
+    # blanco y parecían un fallo de la descarga.
+    ptb = int(bolsa.get("horas_ptb") or 0)
+    if ptb:
+        wsb.cell(r_techo, 4,
+                 f"{ptb} hora(s) tomadas del PTB (precio sobre el de escasez)"
+                 ).font = _BOLD
     hdr = 4
     _hcell(wsb, hdr, 1, "Fecha")
     for h in range(24):

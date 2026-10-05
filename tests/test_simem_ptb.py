@@ -84,3 +84,80 @@ def test_bolsa_mensual_tolera_caida_de_simem():
         raise httpx.ConnectError("SIMEM caído")
     out = simem.bolsa_mensual(2026, 8, client=httpx.Client(transport=httpx.MockTransport(_boom)))
     assert out["precio_bolsa"] is None
+
+
+# ── Las horas que XM publica como PTB y no como PB_Nal ──────────────────────
+#
+# El 2026-09 el export salió con 18 huecos, todos en las horas pico (18, 19, 20).
+# No era un fallo de la descarga: para esas horas SIMEM NO publica `PB_Nal`,
+# publica `PTB` — el precio de las transacciones en bolsa, que es lo que aplica
+# cuando el precio de bolsa supera el de escasez de activación. Los 720 registros
+# del mes salían 702 PB_Nal + 18 PTB, y las 18 coincidían una a una con los
+# huecos.
+#
+# Omitirlas no dejaba el número incompleto nada más: sesgaba el PNBA hacia abajo,
+# porque las que faltaban eran justo las caras, y con eso la indemnización
+# —faltante × (bolsa − tarifa PPA)— salía subestimada.
+
+def test_sin_pb_nal_se_usa_el_ptb_de_esa_hora():
+    horas = simem.bolsa_horaria([
+        _rec("2026-09-15 17:00", 500.0),
+        _rec("2026-09-15 18:00", 891.44, variable="PTB"),
+    ])
+    assert horas[("2026-09-15", "17")] == 500.0
+    assert horas[("2026-09-15", "18")] == 891.44
+
+
+def test_el_pb_nal_le_gana_al_ptb_en_la_misma_hora():
+    """Cuando XM publica las dos, la de bolsa es la que manda."""
+    horas = simem.bolsa_horaria([
+        _rec("2026-09-15 18:00", 891.44, variable="PTB"),
+        _rec("2026-09-15 18:00", 700.0),
+    ])
+    assert horas[("2026-09-15", "18")] == 700.0
+
+
+def test_el_orden_de_los_registros_no_cambia_el_resultado():
+    """El PB_Nal gana venga antes o después del PTB en la respuesta."""
+    pb = _rec("2026-09-15 18:00", 700.0)
+    ptb = _rec("2026-09-15 18:00", 891.44, variable="PTB")
+    assert simem.bolsa_horaria([pb, ptb]) == simem.bolsa_horaria([ptb, pb])
+
+
+def test_entre_dos_ptb_sigue_ganando_la_version_mas_nueva():
+    horas = simem.bolsa_horaria([
+        _rec("2026-09-15 18:00", 880.0, version="TX2", variable="PTB"),
+        _rec("2026-09-15 18:00", 891.44, version="TXF", variable="PTB"),
+    ])
+    assert horas[("2026-09-15", "18")] == 891.44
+
+
+def test_las_horas_de_ptb_entran_al_promedio_del_mes():
+    cliente = _cliente([
+        _rec("2026-09-01 00:00", 100.0),
+        _rec("2026-09-01 01:00", 900.0, variable="PTB"),
+    ])
+    r = simem.bolsa_mensual(2026, 9, client=cliente)
+    assert r["horas"] == 2
+    assert r["precio_bolsa"] == 500.0
+
+
+def test_se_reporta_cuantas_horas_vinieron_del_ptb():
+    """Hay que poder decirlo en pantalla: son horas sobre el precio de escasez,
+    no un dato cualquiera."""
+    cliente = _cliente([
+        _rec("2026-09-01 00:00", 100.0),
+        _rec("2026-09-01 01:00", 900.0, variable="PTB"),
+    ])
+    assert simem.bolsa_mensual(2026, 9, client=cliente)["horas_ptb"] == 1
+
+
+def test_un_mes_sin_ptb_lo_reporta_en_cero():
+    cliente = _cliente([_rec("2026-09-01 00:00", 100.0)])
+    assert simem.bolsa_mensual(2026, 9, client=cliente)["horas_ptb"] == 0
+
+
+def test_una_variable_desconocida_se_sigue_ignorando():
+    """El dataset trae dos variables; cualquier otra no es precio de bolsa."""
+    horas = simem.bolsa_horaria([_rec("2026-09-15 18:00", 1.0, variable="OTRA")])
+    assert horas == {}
