@@ -15,8 +15,8 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('arriendos', '0003_initial'),
-        ('contratos', '0009_corte_bd'),
+        ('contratos', '0010_corte_estado'),
+        ('facturacion', '0003_factura_inversionista_vinculado'),
     ]
 
     operations = [
@@ -24,9 +24,9 @@ class Migration(migrations.Migration):
             database_operations=[],
             state_operations=[
                 migrations.AlterField(
-                    model_name='arrarrendador',
+                    model_name='contratofactura',
                     name='contrato',
-                    field=models.ForeignKey(db_column='contrato_id', on_delete=django.db.models.deletion.CASCADE, related_name='arr_arrendador_por_contrato_id', to='contratos.contrato'),
+                    field=models.ForeignKey(db_column='contrato_id', on_delete=django.db.models.deletion.CASCADE, related_name='contrato_factura_por_contrato_id', to='contratos.contrato'),
                 ),
             ],
         ),

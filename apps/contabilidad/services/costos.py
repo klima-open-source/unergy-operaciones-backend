@@ -192,7 +192,8 @@ def elegir_contrato_representacion(contratos):
 
 
 def valores_facturas_modulo(proyecto_id: int, periodo: str,
-                            kwh: float | None, ingreso: float | None = None) -> dict[str, dict]:
+                            kwh: float | None, ingreso: float | None = None,
+                            inversionistas: list[dict] | None = None) -> dict[str, dict]:
     """Servicios del grupo 'facturas' desde las tarifas de la app (no del ER):
     - Representación / CGM = tarifa indexada × energía (kWh) del mes.
     - Administración = tarifa_admin (%) × ingreso del mes.
@@ -202,38 +203,158 @@ def valores_facturas_modulo(proyecto_id: int, periodo: str,
     `servicio_aplica='representacion'` (ahí está también `tarifa_admin`; la admin es
     el fee de operación). Solo se devuelve un concepto si el contrato tiene su tarifa.
     Valores negativos. Los impuestos NO se calculan aquí: el Panel los deriva por
-    cliente al leer."""
+    cliente al leer.
+
+    **UN CONTRATO POR INVERSIONISTA.** En las minigranjas hay un contrato de
+    representación por inversionista y sus tarifas pueden diferir (negocio,
+    2026-09-18). Con `inversionistas` --los del reparto-- cada uno se calcula con
+    SU contrato y el total de la planta es la suma. Antes se tomaba uno solo y se
+    repartía por participación, lo que daba mal el costo de todos: un
+    inversionista con tarifa 7 pagaba como si fuera 3.
+
+    Sin `inversionistas`, o si los nombres no emparejan, se conserva el cálculo
+    anterior. En GD no cambia nada: ahí hay un único contrato."""
     from apps.contratos.models import ContratoServicio
     from apps.proyectos.models import Proyecto
 
     if not Proyecto.objects.filter(pk=proyecto_id).exists():
         return {}
-    c = elegir_contrato_representacion(
-        list(ContratoServicio.objects.filter(
-            servicio_aplica="representacion", proyecto_id=proyecto_id,
-        ))
-    )
+    contratos = list(ContratoServicio.objects.filter(
+        servicio_aplica="representacion", proyecto_id=proyecto_id,
+    ))
+    c = elegir_contrato_representacion(contratos)
     if c is None:
         return {}
 
+    # El contrato de CADA inversionista, cuando la planta tiene varios.
+    por_inv = contratos_por_inversionista(contratos, inversionistas)
+    fracciones = _fracciones(inversionistas)
+
     out: dict[str, dict] = {}
     if kwh:
-        t_rep = _tarifa_indexada_periodo(c.indexacion_representacion, c.tarifa_representacion,
-                                         c.fecha_firma_contrato, periodo)
-        if t_rep:
-            out["Representación"] = {"grupo": "facturas", "valor": -abs(round(t_rep * kwh, 2)),
-                                     "fuente": "servicios"}
-        t_cgm = _tarifa_indexada_periodo(c.indexacion_cgm, c.tarifa_cgm,
-                                         c.fecha_firma_contrato, periodo)
-        if t_cgm:
-            out["CGM"] = {"grupo": "facturas", "valor": -abs(round(t_cgm * kwh, 2)),
-                          "fuente": "servicios"}
+        _agregar(out, "Representación", "servicios", c, por_inv, fracciones, periodo,
+                 kwh, lambda x: (x.indexacion_representacion, x.tarifa_representacion))
+        _agregar(out, "CGM", "servicios", c, por_inv, fracciones, periodo,
+                 kwh, lambda x: (x.indexacion_cgm, x.tarifa_cgm))
     # Administración = fee de operación = tarifa_admin (%) × ingreso del mes.
-    if c.tarifa_admin and ingreso:
-        out["Administración"] = {"grupo": "facturas",
-                                 "valor": -abs(round(float(c.tarifa_admin) * float(ingreso), 2)),
-                                 "fuente": "operacion"}
+    if ingreso:
+        _agregar_admin(out, c, por_inv, fracciones, ingreso)
     return out
+
+
+def _clave_inversionista(nombre) -> str:
+    """Normaliza un nombre para emparejar contrato con inversionista.
+
+    Los contratos guardan `inversionista_nombre` como TEXTO libre y el reparto
+    trae la razón social del cliente: no hay clave foránea que los una, así que
+    se comparan normalizados. Mismo criterio que `representacion_dedup.norm`.
+    """
+    from apps.contratos.services.representacion_dedup import norm
+
+    return norm(nombre or "")
+
+
+def contratos_por_inversionista(contratos, inversionistas) -> dict:
+    """`{id_inversionista: contrato}`, emparejando por CLIENTE y luego por nombre.
+
+    `contratos_servicio.inversionista_id` y `proyecto_inversionista.cliente_id`
+    apuntan los dos a `clientes`, así que cuando el contrato tiene ese FK poblado
+    el cruce es exacto. Esa es la vía principal.
+
+    El nombre es el respaldo, y hace falta: los contratos que creó el wizard no
+    guardan `inversionista_id` --el campo de la pantalla es texto libre-- y los
+    del seed tampoco siempre. Comparar texto es frágil (mayúsculas, puntos,
+    "S.A.S." contra "SAS"), pero es mejor que perder el desglose y volver a
+    cobrarle a todos la misma tarifa.
+
+    Devuelve vacío --y entonces el cálculo es el de siempre, con un solo
+    contrato-- cuando la planta tiene un único contrato, cuando no se sabe
+    quiénes son los inversionistas, o cuando NADA empareja. Ante datos que no
+    cuadran se prefiere el comportamiento anterior a inventar un reparto.
+
+    Un inversionista sin contrato propio queda fuera del desglose: el Panel le
+    aplica la fracción sobre el total, que es lo que se hacía antes para todos.
+    """
+    if not inversionistas or len(contratos) < 2:
+        return {}
+
+    por_cliente = {x.inversionista_id: x for x in contratos if x.inversionista_id}
+    por_nombre = {_clave_inversionista(x.inversionista_nombre): x for x in contratos}
+    por_nombre.pop("", None)
+
+    emparejados = {}
+    for inv in inversionistas:
+        if inv.get("id") is None:
+            continue
+        contrato = por_cliente.get(inv.get("cliente_id"))
+        if contrato is None:
+            contrato = por_nombre.get(_clave_inversionista(inv.get("nombre")))
+        if contrato is not None:
+            emparejados[inv["id"]] = contrato
+    return emparejados
+
+
+def _fracciones(inversionistas) -> dict:
+    """`{id: fraccion}` del reparto, para ponderar la base de cada uno."""
+    return {
+        inv["id"]: (inv.get("fraccion") or 0.0)
+        for inv in (inversionistas or []) if inv.get("id") is not None
+    }
+
+
+def _agregar(out: dict, concepto: str, fuente: str, elegido, por_inv: dict,
+             fracciones: dict, periodo: str, base: float, tarifas_de) -> None:
+    """Arma el concepto, con su desglose por inversionista si lo hay.
+
+    **Cada inversionista paga SU tarifa por SU parte de la energía**:
+
+        valor_i = tarifa_i x base x fraccion_i
+        total   = suma de los valor_i
+
+    Sumar las tarifas sin ponderar daría un total inflado; aplicar una sola
+    tarifa a toda la base --lo que se hacía antes-- se lo cobra a todos por
+    igual. El `valor` que queda en la línea sigue siendo el de la PLANTA, que es
+    lo que se concilia contra el ER, pero ahora sale de la suma.
+    """
+    if not por_inv:
+        indexacion, tarifa = tarifas_de(elegido)
+        t = _tarifa_indexada_periodo(indexacion, tarifa, elegido.fecha_firma_contrato, periodo)
+        if t:
+            out[concepto] = {"grupo": "facturas", "fuente": fuente,
+                             "valor": -abs(round(t * base, 2))}
+        return
+
+    detalle: dict = {}
+    for inv_id, contrato in por_inv.items():
+        indexacion, tarifa = tarifas_de(contrato)
+        t = _tarifa_indexada_periodo(indexacion, tarifa, contrato.fecha_firma_contrato, periodo)
+        if t:
+            detalle[inv_id] = -abs(round(t * base * fracciones.get(inv_id, 0.0), 2))
+    if not detalle:
+        return
+    out[concepto] = {"grupo": "facturas", "fuente": fuente,
+                     "valor": round(sum(detalle.values()), 2),
+                     "valor_por_inversionista": detalle}
+
+
+def _agregar_admin(out: dict, elegido, por_inv: dict, fracciones: dict, ingreso) -> None:
+    """Administración: un porcentaje sobre el ingreso, también por contrato."""
+    if not por_inv:
+        if elegido.tarifa_admin:
+            out["Administración"] = {
+                "grupo": "facturas", "fuente": "operacion",
+                "valor": -abs(round(float(elegido.tarifa_admin) * float(ingreso), 2)),
+            }
+        return
+    detalle = {
+        inv_id: -abs(round(float(x.tarifa_admin) * float(ingreso)
+                           * fracciones.get(inv_id, 0.0), 2))
+        for inv_id, x in por_inv.items() if x.tarifa_admin
+    }
+    if detalle:
+        out["Administración"] = {"grupo": "facturas", "fuente": "operacion",
+                                 "valor": round(sum(detalle.values()), 2),
+                                 "valor_por_inversionista": detalle}
 
 
 def aplicar_costos_modulo(base: list[dict], mods: dict[str, dict], iva: float = 0.19) -> list[dict]:
@@ -282,6 +403,11 @@ def aplicar_costos_modulo(base: list[dict], mods: dict[str, dict], iva: float = 
         idx = _find(grupo, concepto)
         linea = {"grupo": grupo, "concepto": concepto, "valor": valor,
                  "hoja": None, "celda": None, "fuente": fuente}
+        # Con un contrato por inversionista el módulo ya resolvió cuánto le toca
+        # a cada uno: viaja en la línea para que el Panel use ESE valor en vez de
+        # multiplicar el total por la fracción.
+        if info.get("valor_por_inversionista"):
+            linea["valor_por_inversionista"] = info["valor_por_inversionista"]
         if idx is None:
             out.append(linea)
             idx = len(out) - 1

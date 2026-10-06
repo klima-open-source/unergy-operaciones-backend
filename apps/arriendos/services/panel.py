@@ -13,6 +13,7 @@ from datetime import date
 from types import SimpleNamespace
 
 from apps.arriendos import models as ar_models
+from apps.arriendos.services import iva as iva_service
 from apps.arriendos.services.calculadora import (
     calcular_arriendo, calcular_iva, serie_indexacion,
 )
@@ -79,7 +80,7 @@ def calculo(periodo: str) -> dict:
     contratos = _contrato_por_proyecto()
     # En operación (genera) y con contrato de operación vigente (la operamos).
     proyectos = py_models.Proyecto.objects.filter(
-        plantas.filtro_operadas(hoy_col())
+        plantas.filtro_operadas(hoy_col()), deleted_at__isnull=True,
     ).order_by("nombre_comercial")
 
     filas, total = [], 0
@@ -144,9 +145,11 @@ def _fila(proyecto, contrato, arrendador, periodo, ipc, seleccion, estado) -> di
     )
     fila.update({
         # El IVA es POR ARRENDADOR: dos arrendadores del mismo contrato pueden
-        # tener responsabilidad distinta.
+        # tener responsabilidad distinta, y ahora tambien tasa distinta -- la de
+        # la ficha de su cliente, si tiene una configurada.
         "iva_calculado": calcular_iva(
-            fila["canon_a_facturar"], arrendador.responsable_iva
+            fila["canon_a_facturar"],
+            iva_service.pct_de(arrendador, contrato.proyecto_id),
         ),
         "nombre_arrendador": arrendador.nombre,
         "motivo_exclusion": seleccion.motivo_exclusion if seleccion else None,
@@ -212,7 +215,7 @@ def valor_de_proyecto(proyecto_id: int, periodo: str) -> tuple[float, float] | N
             canon += float(fila.get("canon_a_facturar") or 0)
             iva += float(calcular_iva(
                 fila.get("canon_a_facturar"),
-                getattr(arrendador, "responsable_iva", False),
+                iva_service.pct_de(arrendador, getattr(contrato, "proyecto_id", None)),
             ) or 0)
     return (canon, iva)
 

@@ -53,7 +53,8 @@ def _plantas_del_mes(first_day: date) -> list[Proyecto]:
     """
     return list(
         Proyecto.objects
-        .filter(plantas.filtro_proyectos_con("representacion", hoy_col()), estado="en_operacion")
+        .filter(plantas.filtro_proyectos_con("representacion", hoy_col()),
+                deleted_at__isnull=True, estado="en_operacion")
         # `!=` de SQL descarta los NULL; `exclude()` de Django los conserva.
         .exclude(tipo_proyecto="autoconsumo")
         .exclude(tipo_proyecto__isnull=True)

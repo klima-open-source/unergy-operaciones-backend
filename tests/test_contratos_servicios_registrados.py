@@ -160,6 +160,28 @@ def test_un_contrato_solo_de_cgm_no_gana_representacion_al_guardarse(datos):
     assert _registrados(c) == ["cgm"]
 
 
+def test_el_filtro_de_orm_dice_lo_mismo_que_subservicios_de(datos):
+    """Si divergen, una consulta y una lectura devuelven conjuntos distintos. El
+    caso que motivó el filtro: un contrato solo de CGM no es de representación."""
+    from apps.contratos.models import ContratoServicio
+    from apps.contratos.services import grupos, servicios
+
+    casos = [["representacion", "cgm"], ["representacion"], ["cgm"]]
+    contratos = []
+    for lista in casos:
+        c = ContratoServicio.objects.create(servicio_aplica="representacion", tarifa_cgm=5)
+        servicios.registrar(c, lista)
+        contratos.append(c)
+    contratos.append(ContratoServicio.objects.create(servicio_aplica="arriendo"))
+
+    for sub in ("representacion", "cgm", "arriendo", "mantenimiento"):
+        por_filtro = set(ContratoServicio.objects.filter(grupos.filtro_subservicio(sub))
+                         .values_list("pk", flat=True))
+        por_funcion = {c.pk for c in ContratoServicio.objects.filter(pk__in=[x.pk for x in contratos])
+                       if sub in grupos.subservicios_de(c)}
+        assert por_filtro == por_funcion, sub
+
+
 # ── API ──────────────────────────────────────────────────────────────────────
 
 
@@ -178,9 +200,19 @@ def _pedir(metodo, url, datos_usuario, cuerpo=None, **kwargs):
     return respuesta
 
 
+def _partes():
+    """Un contrato nuevo exige sus partes vinculadas a un cliente (y el inversionista
+    en representación/CGM)."""
+    from apps.clientes.models import Cliente
+
+    cliente = Cliente.objects.create(razon_social_nombre="Cliente QA")
+    return {"contratante_id": cliente.id, "prestador_id": cliente.id,
+            "inversionista_id": cliente.id}
+
+
 def test_crear_un_contrato_de_representacion_y_cgm_por_la_api(datos):
     r = _pedir("post", "/api/v1/contratos-servicio", datos,
-               {"servicio_aplica": "representacion", "servicios": ["representacion", "cgm"]},
+               {"servicio_aplica": "representacion", "servicios": ["representacion", "cgm"], **_partes()},
                acciones={"post": "create"})
     assert r.status_code == 201, r.data
     assert r.data["subservicios"] == ["representacion", "cgm"]
@@ -190,7 +222,7 @@ def test_crear_un_contrato_de_representacion_y_cgm_por_la_api(datos):
 
 def test_crear_un_contrato_solo_de_cgm_por_la_api(datos):
     r = _pedir("post", "/api/v1/contratos-servicio", datos,
-               {"servicio_aplica": "representacion", "servicios": ["cgm"]},
+               {"servicio_aplica": "representacion", "servicios": ["cgm"], **_partes()},
                acciones={"post": "create"})
     assert r.status_code == 201, r.data
     assert r.data["subservicios"] == ["cgm"]
@@ -198,7 +230,7 @@ def test_crear_un_contrato_solo_de_cgm_por_la_api(datos):
 
 def test_una_lista_que_no_es_del_grupo_es_un_400(datos):
     r = _pedir("post", "/api/v1/contratos-servicio", datos,
-               {"servicio_aplica": "representacion", "servicios": ["mantenimiento"]},
+               {"servicio_aplica": "representacion", "servicios": ["mantenimiento"], **_partes()},
                acciones={"post": "create"})
     assert r.status_code == 400
     assert "servicios" in r.data

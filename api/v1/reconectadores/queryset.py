@@ -14,6 +14,7 @@ def proyectos_con_relay():
     """
     return py_models.Proyecto.objects.filter(
         plantas.filtro_operadas(hoy_col()),
+        deleted_at__isnull=True,
         project_id_solarview__isnull=False,
         tipo_proyecto="minigranja",
     )

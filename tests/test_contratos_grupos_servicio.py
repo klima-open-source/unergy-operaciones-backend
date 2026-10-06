@@ -173,3 +173,13 @@ def test_catalogo_expone_los_subservicios_de_cada_grupo():
     assert por_grupo["operacion"] == ["mantenimiento", "arriendo", "internet"]
     assert por_grupo["representacion_cgm"] == ["representacion", "cgm"]
     assert por_grupo["ppa"] == ["compra", "venta"]
+
+
+# ── El filtro de ORM ──────────────────────────────────────────────────────
+# Que diga lo mismo que `subservicios_de()` se prueba contra una base, en
+# `test_contratos_servicios_registrados.py`.
+
+def test_el_filtro_lee_la_tabla_servicios():
+    from apps.contratos.services.grupos import filtro_subservicio
+
+    assert filtro_subservicio("cgm").children == [("servicios__servicio", "cgm")]

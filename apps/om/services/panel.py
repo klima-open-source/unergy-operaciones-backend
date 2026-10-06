@@ -64,7 +64,7 @@ def calculo(periodo: str) -> dict:
     # (mantenimiento, arriendo o internet), tengan o no el de mantenimiento: así
     # se ven los que lo tienen pendiente.
     proyectos = py_models.Proyecto.objects.filter(
-        plantas.filtro_operadas(hoy_col())
+        plantas.filtro_operadas(hoy_col()), deleted_at__isnull=True,
     ).order_by("nombre_comercial")
 
     filas, total = [], 0
