@@ -22,10 +22,21 @@ from apps.contratos.services import comunidades  # noqa: E402
 HOY = date(2026, 9, 18)
 
 
+class _Servicios:
+    """Imita `contrato.servicios` (la relación con la tabla `servicios`)."""
+
+    def __init__(self, nombres):
+        self._filas = [type("Servicio", (), {"servicio": n})() for n in nombres]
+
+    def all(self):
+        return self._filas
+
+
 class ContratoFalso:
     def __init__(self, servicio_aplica="representacion", proyecto_id=7,
                  estado="firmado", fecha_fin=None,
-                 tarifa_representacion=None, tarifa_cgm=None, tarifa_base=None):
+                 tarifa_representacion=None, tarifa_cgm=None, tarifa_base=None,
+                 servicios=None):
         self.servicio_aplica = servicio_aplica
         self.proyecto_id = proyecto_id
         self.estado = estado
@@ -33,6 +44,8 @@ class ContratoFalso:
         self.tarifa_representacion = tarifa_representacion
         self.tarifa_cgm = tarifa_cgm
         self.tarifa_base = tarifa_base
+        self.pk = 1 if servicios is not None else None
+        self.servicios = _Servicios(servicios or [])
 
 
 # ── La exclusión ──────────────────────────────────────────────────────────
@@ -93,7 +106,7 @@ def test_al_salir_de_la_comunidad_el_servicio_vuelve():
 
 def test_los_subservicios_prestados_filtran_los_excluidos():
     """Un contrato que cubre los dos, en comunidad, no presta ninguno."""
-    contrato = ContratoFalso(tarifa_representacion=1, tarifa_cgm=2)
+    contrato = ContratoFalso(servicios=["representacion", "cgm"])
     assert comunidades.subservicios_prestados(contrato, HOY, set()) == [
         "representacion", "cgm"
     ]

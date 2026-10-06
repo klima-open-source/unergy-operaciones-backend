@@ -14,6 +14,7 @@ from apps.contratos.services import dedup as dedup_service
 from apps.contratos.services import fronteras as fronteras_service
 from apps.contratos.services import indexacion as indexacion_service
 from apps.contratos.services import partes as partes_service
+from apps.contratos.services import servicios as servicios_service
 from apps.facturacion import models as fa_models
 
 from . import queryset as cs_queryset
@@ -85,9 +86,11 @@ class ContratoServicioViewSet(
         datos = dict(serializer.validated_data)
         frontera_ids = datos.pop("frontera_ids", None) or []
         enlace = datos.pop("enlace_drive", None)
+        servicios = datos.pop("servicios", None)
 
         with transaction.atomic():
             contrato = ct_models.ContratoServicio.objects.create(**datos)
+            self._servicios(contrato, servicios)
             partes_service.sincronizar(contrato)
             self._fronteras(contrato, frontera_ids)
             if enlace:
@@ -108,11 +111,13 @@ class ContratoServicioViewSet(
         frontera_ids = datos.pop("frontera_ids", None)
         toca_enlace = "enlace_drive" in datos
         enlace = datos.pop("enlace_drive", None)
+        servicios = datos.pop("servicios", None)
 
         with transaction.atomic():
             for campo, valor in datos.items():
                 setattr(contrato, campo, valor)
             contrato.save()
+            self._servicios(contrato, servicios)
             if toca_enlace:
                 documentos_service.set_enlace(
                     contrato_servicio_id=contrato.id, url=enlace,
@@ -125,6 +130,17 @@ class ContratoServicioViewSet(
         return Response(
             cs_serializers.ContratoSerializer(self._contrato(contrato.pk)).data
         )
+
+    @staticmethod
+    def _servicios(contrato, servicios):
+        """La lista explícita de servicios, si vino. Sin ella, `save()` ya los dejó
+        al día. Una lista que no corresponde al grupo es un 400, no un 500."""
+        if servicios is None:
+            return
+        try:
+            servicios_service.registrar(contrato, servicios)
+        except servicios_service.ServiciosInvalidos as exc:
+            raise ValidationError({"servicios": str(exc)})
 
     @staticmethod
     def _fronteras(contrato, frontera_ids):

@@ -90,7 +90,7 @@ def subservicios_prestados(contrato, hoy: date, en_comunidad: set[int]) -> list[
     """Los subservicios del contrato que HOY se prestan de verdad.
 
     La diferencia con `grupos.subservicios_de()` es el "de verdad": esa dice qué
-    cubre el contrato según sus tarifas, sin mirar si sigue vivo ni si la planta
+    cubre el contrato según sus servicios registrados, sin mirar si sigue vivo ni si la planta
     salió a una comunidad.
     """
     return [

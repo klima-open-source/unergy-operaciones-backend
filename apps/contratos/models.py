@@ -291,6 +291,15 @@ class Contrato(Timer):
 
     deleted_at = models.DateTimeField(null=True, blank=True)
 
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Qué servicios cubre, desde el ÚNICO lugar que los escribe: así ningún
+        # camino de escritura (API, CRM, admin) puede dejarlos desalineados con
+        # `tipo_contrato` o `servicio_aplica`.
+        from apps.contratos.services import servicios
+
+        servicios.registrar(self)
+
     class Meta:
         db_table = "contratos"
         constraints = [
@@ -388,6 +397,22 @@ class ContratoServicioCorrespondencia(models.Model):
 
     class Meta:
         db_table = "contratos_servicio_correspondencia"
+
+
+#: Columnas de `contratos` que solo tienen sentido en un PPA (venían de
+#: `ppa_contratos`). Los serializers de `ContratoServicio` las excluyen para que su
+#: API siga teniendo exactamente los campos de antes de la tabla única: con
+#: `exclude` y la tabla ancha se colaban en la lectura y, peor, en la escritura.
+COLUMNAS_SOLO_PPA = (
+    "numero_codigo_contrato", "nombre_interno", "comprador_nombre", "comprador_nit",
+    "vendedor_nombre", "vendedor_nit", "responsable", "tipo_contrato", "comprador",
+    "vendedor", "periodicidad_indexacion", "periodo_indexacion_base",
+    "valor_indexacion_base", "cantidad_minima_kwh_mes", "cantidad_maxima_kwh_mes",
+    "periodicidad_facturacion", "tiempo_pago", "condiciones_pago", "gescon_codigo",
+    "gescon_fecha_inicio", "gescon_fecha_fin", "gescon_precio",
+    "gescon_cantidades_kwh", "codigo_sic", "es_comunidad_energetica",
+    "fecha_entrada_comunidad", "nombre_comunidad", "deleted_at",
+)
 
 
 class ContratoServicioManager(models.Manager):

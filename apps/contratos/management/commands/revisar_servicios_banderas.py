@@ -100,7 +100,7 @@ class Command(BaseCommand):
         salida: dict[int, set[str]] = {}
         vivos = ContratoServicio.objects.filter(
             vigencia_service.filtro_vivos(hoy_col()), proyecto__isnull=False,
-        )
+        ).prefetch_related("servicios")
         for contrato in vivos:
             if contrato.proyecto_id in plantas:
                 salida.setdefault(contrato.proyecto_id, set()).update(

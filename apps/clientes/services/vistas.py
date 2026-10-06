@@ -109,7 +109,8 @@ def _contratos_del_cliente(cliente_id: int, plant_ids: set[int]):
         .filter(criterio)
         # `enlace_drive` recorre los documentos de cada contrato: sin precargar
         # son tantas consultas como contratos.
-        .prefetch_related("cliente_documentos_comerciales_por_contrato_servicio_id")
+        .prefetch_related("cliente_documentos_comerciales_por_contrato_servicio_id",
+                          "servicios")
     )
 
 
