@@ -144,6 +144,9 @@ def _procesar_invs(rows, periodo: str | None = None) -> list[dict]:
             pct, fraccion = raw, raw / 100.0
         out.append({
             "id": r.id,
+            # El cliente, no la fila de participación: es lo que permite cruzar
+            # con `contratos_servicio.inversionista_id` sin comparar nombres.
+            "cliente_id": r.cliente_id,
             "nombre": r.razon_social_nombre or "—",
             "fraccion": fraccion,
             "pct": pct,

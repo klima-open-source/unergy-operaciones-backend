@@ -66,7 +66,9 @@ class OmViewSet(viewsets.GenericViewSet):
     def proyectos(self, request):
         contratos = (
             ct_models.ContratoServicio.objects
-            .filter(servicio_aplica=SERVICIO_OM, proyecto__estado="en_operacion")
+            .filter(servicio_aplica=SERVICIO_OM,
+                    proyecto__estado="en_operacion",
+                    proyecto__deleted_at__isnull=True)
             .select_related("proyecto").order_by("id")
         )
         filas = [

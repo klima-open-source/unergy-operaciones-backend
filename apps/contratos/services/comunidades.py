@@ -86,19 +86,6 @@ def presta_servicio(contrato, subservicio: str, hoy: date,
     return True
 
 
-def subservicios_prestados(contrato, hoy: date, en_comunidad: set[int]) -> list[str]:
-    """Los subservicios del contrato que HOY se prestan de verdad.
-
-    La diferencia con `grupos.subservicios_de()` es el "de verdad": esa dice qué
-    cubre el contrato según sus servicios registrados, sin mirar si sigue vivo ni si la planta
-    salió a una comunidad.
-    """
-    return [
-        sub for sub in grupos.subservicios_de(contrato)
-        if presta_servicio(contrato, sub, hoy, en_comunidad)
-    ]
-
-
 def motivo_bloqueo(proyecto_id: int | None, subservicio: str,
                    en_comunidad: set[int]) -> str | None:
     """Por qué NO se puede crear este contrato, o `None` si sí se puede.

@@ -113,11 +113,18 @@ def calcular_arriendo(
     }
 
 
-def calcular_iva(canon_a_facturar: int | None, responsable_iva: bool) -> int | None:
-    """IVA (19%) sobre el canon a facturar, solo si el contrato es responsable de IVA."""
-    if not responsable_iva or canon_a_facturar is None:
+def calcular_iva(canon_a_facturar: int | None, iva_pct: float) -> int | None:
+    """IVA sobre el canon a facturar, al porcentaje que le toque al arrendador.
+
+    **`iva_pct` es un PORCENTAJE, no un si/no.** Antes el parametro era el
+    booleano `responsable_iva` y el 19% estaba escrito aca dentro; ahora la tasa
+    la resuelve `apps/arriendos/services/iva.py::pct_de`, que la busca en la
+    ficha del cliente vinculado y cae al 19% de siempre cuando no hay ninguna
+    configurada. Pasar un booleano aca daria 1% en vez de 19%.
+    """
+    if not iva_pct or canon_a_facturar is None:
         return None
-    return _redondear(canon_a_facturar * 0.19)
+    return _redondear(canon_a_facturar * (float(iva_pct) / 100.0))
 
 
 def serie_indexacion(

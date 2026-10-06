@@ -165,6 +165,24 @@ def subservicio_de_ppa(contrato_ppa) -> str:
     return subservicio_de_tipo_contrato(getattr(contrato_ppa, "tipo_contrato", None))
 
 
+def filtro_subservicio(subservicio: str):
+    """El mismo criterio de `subservicios_de()`, como condición de ORM.
+
+    Existe porque `subservicios_de()` trabaja sobre un objeto ya traído y no
+    sirve dentro de un `filter()`. Sin esta cara, cada módulo escribe el criterio
+    a mano -- y lo que escribían era `servicio_aplica="representacion"`, que NO
+    distingue representación de CGM: en ese grupo la etiqueta nombra al grupo. Un
+    contrato que solo cubre CGM entraba en los filtros de representación.
+
+    Desde el corte a la tabla única los dos leen lo mismo: la fila de ese
+    servicio en `servicios`, que se escribe al guardar el contrato. Antes se
+    deducía de las tarifas cargadas.
+    """
+    from django.db.models import Q
+
+    return Q(servicios__servicio=subservicio)
+
+
 def catalogo() -> list[dict]:
     """El catálogo completo, como lo expone la API.
 

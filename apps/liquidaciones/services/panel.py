@@ -12,6 +12,7 @@ from django.db.models import Exists, OuterRef, Q
 from apps.clientes import models as cl_models
 from apps.contabilidad import models as cb_models
 from apps.contratos import models as ct_models
+from apps.contratos.services import grupos as grupos_service
 from apps.contratos.services import vigencia as vigencia_service
 from apps.liquidaciones import models as lq_models
 from apps.plataforma.services.fechas import hoy_col
@@ -128,11 +129,14 @@ def proyectos_sin_panel(proyecto_ids_con_panel) -> list[dict]:
     # "Contrato vivo" es `vigencia.filtro_vivos`, no `estado="firmado"`: el estado
     # dice lo que alguien decidio, y la fecha dice si todavia rige. Un contrato
     # firmado que ya vencio no representa a nadie.
+    # `filtro_subservicio` y no `servicio_aplica="representacion"`: representacion
+    # y CGM comparten esa etiqueta, asi que un contrato que solo cubre CGM
+    # entraba aca como planta representada.
     tiene_contrato = Exists(
         ct_models.ContratoServicio.objects.filter(
             vigencia_service.filtro_vivos(hoy_col()),
+            grupos_service.filtro_subservicio(grupos_service.REPRESENTACION),
             proyecto_id=OuterRef("id"),
-            servicio_aplica="representacion",
         )
     )
     consulta = py_models.Proyecto.objects.filter(

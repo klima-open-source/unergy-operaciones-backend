@@ -1,10 +1,16 @@
 """Resolver el cliente de las partes de un contrato de servicio.
 
-El wizard captura contratante y prestador como TEXTO LIBRE: nunca obliga a
-elegir del autocompletado, así que `contratante_id`/`prestador_id` casi nunca se
-poblaban — la auditoría de Clientes del 2026-08-27 encontró 0 de 162 contratos
-en producción con el vínculo puesto. Sin resolverlos, las «condiciones
-económicas» del panel 360 y otras vistas de clientes salían vacías.
+La auditoría de Clientes del 2026-08-27 encontró 0 de 162 contratos con el
+vínculo puesto, y sin él las «condiciones económicas» del panel 360 y otras
+vistas de clientes salían vacías. Eran DOS causas a la vez: el wizard no obligaba
+a elegir del autocompletado, y `ContratoEscrituraSerializer` descartaba en
+silencio la clave `contratante_id` que el frontend sí mandaba (el FK se llama
+`contratante`, así que el campo generado también). Las dos están corregidas.
+
+Esto queda como RED, no como vía principal: un contrato que llega con el vínculo
+puesto no pasa por `resolver_cliente_id`. Sigue haciendo falta para lo que entra
+por otros caminos y para los contratos viejos, pero adivinar por nombre es
+siempre el último recurso.
 """
 
 from apps.clientes import models as cl_models
@@ -51,14 +57,22 @@ def resolver_cliente_id(nombre: str | None, nit: str | None) -> int | None:
     return None
 
 
+# El inversionista entra a la lista aunque no tenga columna de NIT: es el que
+# usa el reparto de costos para saber qué tarifa le toca a cada quien
+# (`apps/contabilidad/services/costos.py`), y mientras su vínculo esté vacío ese
+# cálculo no tiene más remedio que emparejar comparando nombres.
+ROLES = ("contratante", "prestador", "inversionista")
+
+
 def sincronizar(contrato) -> None:
     """Resuelve los vínculos que falten y copia nombre y NIT del cliente."""
     campos = []
-    for rol in ("contratante", "prestador"):
+    for rol in ROLES:
+        tiene_nit = hasattr(contrato, f"{rol}_nit")
         if not getattr(contrato, f"{rol}_id"):
             resuelto = resolver_cliente_id(
                 getattr(contrato, f"{rol}_nombre"),
-                getattr(contrato, f"{rol}_nit"),
+                getattr(contrato, f"{rol}_nit") if tiene_nit else None,
             )
             if resuelto:
                 setattr(contrato, f"{rol}_id", resuelto)
@@ -71,8 +85,10 @@ def sincronizar(contrato) -> None:
         if cliente is None:
             continue
         setattr(contrato, f"{rol}_nombre", cliente.razon_social_nombre)
-        setattr(contrato, f"{rol}_nit", cliente.nit_cedula)
-        campos += [f"{rol}_nombre", f"{rol}_nit"]
+        campos.append(f"{rol}_nombre")
+        if tiene_nit:
+            setattr(contrato, f"{rol}_nit", cliente.nit_cedula)
+            campos.append(f"{rol}_nit")
 
     if campos:
         contrato.save(update_fields=list(dict.fromkeys(campos)))

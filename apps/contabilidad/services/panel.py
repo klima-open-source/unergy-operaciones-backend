@@ -87,10 +87,14 @@ def guardar_panel(proyecto_id: int, periodo: str, tipo: str, parsed: dict,
         # compra sí resta, y ese camino se deja intacto con kwh/total_ingresos.
         base_kwh = parsed.get("base_tarifa_kwh")
         base_cop = parsed.get("base_tarifa_cop")
+        # Los inversionistas se resuelven ANTES del cálculo: en las minigranjas
+        # hay un contrato de representación por inversionista y cada uno paga SU
+        # tarifa. Sin esto se tomaba un contrato y se repartía por participación.
         mods.update(valores_facturas_modulo(
             proyecto_id, periodo,
             parsed.get("kwh") if base_kwh is None else base_kwh,
-            parsed.get("total_ingresos") if base_cop is None else base_cop))
+            parsed.get("total_ingresos") if base_cop is None else base_cop,
+            inversionistas=_inversionistas_de(proyecto_id, periodo)))
         if mods:
             base = aplicar_costos_modulo(base, mods, iva=IVA)
     except Exception:
@@ -141,7 +145,10 @@ def guardar_panel(proyecto_id: int, periodo: str, tipo: str, parsed: dict,
                 porcentaje=inv["pct"],
                 grupo=l["grupo"],
                 concepto=l["concepto"],
-                valor_cop=round(l["valor"] * frac, 2),
+                # Si el módulo resolvió cuánto le toca a ESTE inversionista --su
+                # contrato de representación, con su tarifa-- se usa tal cual.
+                # El resto de conceptos sí se reparte por participación.
+                valor_cop=_valor_linea(l, inv["id"], frac),
                 hoja=l.get("hoja"),
                 celda=l.get("celda"),
                 fuente=l.get("fuente"),
@@ -150,6 +157,21 @@ def guardar_panel(proyecto_id: int, periodo: str, tipo: str, parsed: dict,
             orden += 1
     PanelContableLinea.objects.bulk_create(filas)
     return panel
+
+
+def _valor_linea(linea: dict, inversionista_id, fraccion: float) -> float:
+    """Lo que le toca a un inversionista de una línea.
+
+    Por defecto, su fracción del total. Pero los conceptos que salen de un
+    contrato por inversionista --Representación, CGM, Administración en las
+    minigranjas-- ya vienen resueltos por `valores_facturas_modulo`: cada uno con
+    SU tarifa. Repartir ese total por la fracción volvería a cobrarle a todos lo
+    mismo, que es justo lo que se corrigió.
+    """
+    propio = (linea.get("valor_por_inversionista") or {}).get(inversionista_id)
+    if propio is not None:
+        return round(propio, 2)
+    return round(linea["valor"] * fraccion, 2)
 
 
 def clasificacion_vigente(periodo: str) -> dict[int, str]:
@@ -206,15 +228,20 @@ def representamos():
     """
     from apps.contratos.models import ContratoServicio
 
+    from apps.contratos.services import grupos as grupos_service
     from apps.contratos.services import vigencia as vigencia_service
     from apps.plataforma.services.fechas import hoy_col
 
     # "Vigente" es `vigencia.filtro_vivos`, la misma definicion que usan el
     # informe FMO y la alerta de aniversario: estado no cerrado Y fecha que
     # todavia rige. Comparar solo el estado dejaba pasar los vencidos.
+    # `filtro_subservicio` y no `servicio_aplica="representacion"`: esa etiqueta
+    # la comparten representacion y CGM --el campo admite un solo valor-- asi que
+    # un contrato que solo cubre CGM entraba aca como si representara la planta.
     con_contrato = ContratoServicio.objects.filter(
         vigencia_service.filtro_vivos(hoy_col()),
-        proyecto_id=OuterRef("pk"), servicio_aplica="representacion",
+        grupos_service.filtro_subservicio(grupos_service.REPRESENTACION),
+        proyecto_id=OuterRef("pk"),
     )
     return Q(srv_representacion=True) | Q(Exists(con_contrato))
 

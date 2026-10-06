@@ -599,16 +599,24 @@ def test_la_respuesta_avisa_de_lo_que_quedo_cojo(datos):
 
 
 def test_un_contrato_completo_no_trae_avisos(datos):
+    from django.test import override_settings
+
+    from apps.clientes.models import Cliente
     from apps.proyectos.models import Proyecto
 
     planta = Proyecto.objects.create(nombre_comercial="Planta Dos")
+    # Desde el 2026-09-18 «completo» incluye también las DOS partes, y en un PPA
+    # una de ellas es siempre Unergy: este es de compra, así que Unergy compra.
+    # Ver tests/test_ppa_lado_unergy.py.
+    Cliente.objects.create(razon_social_nombre="Unergy S.A.S.", nit_cedula="901234567-8")
 
-    respuesta = _crear(datos, {
-        **CUERPO_MINIMO,
-        "proyecto_ids": [planta.id],
-        "tarifas": [{"año": 2026, "mes": 1, "tarifa": 300}],
-        "compromisos": [{"año": 2026, "mes": 1, "energia_minima": 100}],
-    })
+    with override_settings(UNERGY_NIT="901234567-8"):
+        respuesta = _crear(datos, {
+            **CUERPO_MINIMO,
+            "proyecto_ids": [planta.id],
+            "tarifas": [{"año": 2026, "mes": 1, "tarifa": 300}],
+            "compromisos": [{"año": 2026, "mes": 1, "energia_minima": 100}],
+        })
 
     assert respuesta.data["avisos"] == []
 

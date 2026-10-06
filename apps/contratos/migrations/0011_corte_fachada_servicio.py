@@ -14,11 +14,11 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('arriendos', '0004_corte_estado'),
+        ('arriendos', '0005_corte_estado'),
         ('clientes', '0005_corte_estado'),
         ('comercial', '0006_corte_estado'),
         ('contratos', '0010_corte_estado'),
-        ('facturacion', '0003_corte_estado'),
+        ('facturacion', '0004_corte_estado'),
         ('fronteras', '0003_corte_estado'),
         ('om', '0004_corte_estado'),
     ]

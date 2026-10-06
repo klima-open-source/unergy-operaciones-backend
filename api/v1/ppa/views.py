@@ -17,6 +17,8 @@ from apps.ppa import models as ppa_models
 from apps.ppa.services import contratos as contratos_service
 from apps.ppa.services import escritura as escritura_service
 from apps.ppa.services import responsables as responsables_service
+from apps.ppa.services import unicidad as unicidad_service
+from apps.plataforma.services.fechas import hoy_col
 
 from . import queryset as ppa_queryset
 from . import serializers as ppa_serializers
@@ -96,6 +98,35 @@ class PpaViewSet(
 
     # ── Escritura ─────────────────────────────────────────────────────────
 
+    def _avisar_ppa_repetido(self, request, datos, tipo, proyecto_ids, excluir_id=None):
+        """409 estructurado si ya hay un PPA vivo que cubre lo mismo.
+
+        `forzar=true` lo salta, igual que en contratos de servicio, clientes,
+        proyectos y fronteras. Avisa y no bloquea: hay razones reales para dos
+        contratos parecidos --una renovación, un contrato de compra y otro de
+        venta sobre la misma planta-- y una regla equivocada no puede dejar a
+        nadie sin poder registrar lo que existe.
+        """
+        if request.query_params.get("forzar", "").strip().lower() in ("1", "true", "yes", "on"):
+            return
+
+        repetido = unicidad_service.buscar_duplicado(
+            datos={**datos, "tipo_contrato": tipo},
+            proyecto_ids=proyecto_ids,
+            hoy=hoy_col(),
+            excluir_id=excluir_id,
+        )
+        if repetido:
+            raise Conflict({
+                "mensaje": (
+                    f"Ya existe un contrato PPA vigente que cubre esto: "
+                    f"'{unicidad_service.descripcion(repetido)}' (ID {repetido.id})."
+                ),
+                "duplicado_contrato": True,
+                "candidato_id": repetido.id,
+                "candidato_nombre": unicidad_service.descripcion(repetido),
+            })
+
     def create(self, request, *args, **kwargs):
         """Crea el contrato COMPLETO: plantas, tarifas y compromisos incluidos.
 
@@ -119,6 +150,8 @@ class PpaViewSet(
         tarifas = datos.pop("tarifas", None) or []
         compromisos = datos.pop("compromisos", None) or []
         enlace = datos.pop("carpeta_link", None)
+
+        self._avisar_ppa_repetido(request, datos, tipo, proyecto_ids)
 
         try:
             resultado = escritura_service.crear_ppa(
