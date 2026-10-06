@@ -63,9 +63,16 @@ def _limpio():
     from apps.mercado_xm.models import AsicSolicitud
     from apps.proyectos.models import Proyecto
 
-    AsicSolicitud.objects.all().delete()
-    ContratoServicio.objects.all().delete()
-    Proyecto.objects.all().delete()
+    def vaciar():
+        AsicSolicitud.objects.all().delete()
+        ContratoServicio.objects.all().delete()
+        Proyecto.objects.all().delete()
+
+    # También al salir: la base en memoria se comparte entre módulos, y otro
+    # (`test_proyectos_codigos_unicos`) cuenta todos los proyectos.
+    vaciar()
+    yield
+    vaciar()
 
 
 def _planta(nombre):

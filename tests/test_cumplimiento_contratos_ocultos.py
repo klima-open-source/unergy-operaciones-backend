@@ -104,7 +104,15 @@ def datos():
             porcentaje_despacho=0.5, reemplaza_anterior=True,
             es_duplicado=False, uso_del_recurso=False,
         )
-    return {"visible": visible, "oculta": oculta, "c_visible": c_visible, "c_oculto": c_oculto}
+    yield {"visible": visible, "oculta": oculta, "c_visible": c_visible, "c_oculto": c_oculto}
+
+    # Lo creado no se queda: la base en memoria se comparte entre módulos, y otro
+    # (`test_proyectos_codigos_unicos`) cuenta todos los proyectos.
+    AsicSolicitud.objects.all().delete()
+    PpaContrato.objects.all().delete()
+    ContratoServicio.objects.all().delete()
+    PpaResponsable.objects.all().delete()
+    Proyecto.objects.all().delete()
 
 
 def _ids_bolsa(out):
