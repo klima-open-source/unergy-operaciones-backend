@@ -25,8 +25,10 @@ from datetime import date
 
 from django.db.models import Q
 
+from apps.contratos.services import plantas
 from apps.mercado_xm.models import AsicSolicitud
 from apps.mercado_xm.services.gescon_vigencia import resolver_vigencias
+from apps.plataforma.services.fechas import hoy_col
 from apps.ppa.models import PpaContratoProyecto
 from apps.proyectos.models import Proyecto
 
@@ -46,12 +48,12 @@ def _plantas_del_mes(first_day: date) -> list[Proyecto]:
 
     Entra si YA tiene fecha de inicio de comercialización (primer día con
     generación real, autoderivada) O si tiene `sub_project` — aditivo, no saca
-    ninguna que ya salía. Exige representación activa: el flag de Proyectos →
-    Servicios es la fuente correcta, no `contratos_servicio`.
+    ninguna que ya salía. Exige representación: un contrato de representación
+    vigente (`plantas.filtro_proyectos_con`), no la bandera del proyecto.
     """
     return list(
         Proyecto.objects
-        .filter(estado="en_operacion", srv_representacion=True)
+        .filter(plantas.filtro_proyectos_con("representacion", hoy_col()), estado="en_operacion")
         # `!=` de SQL descarta los NULL; `exclude()` de Django los conserva.
         .exclude(tipo_proyecto="autoconsumo")
         .exclude(tipo_proyecto__isnull=True)

@@ -59,20 +59,27 @@ def _base():
 
 @pytest.fixture(autouse=True)
 def _limpio():
+    from apps.contratos.models import ContratoServicio
     from apps.mercado_xm.models import AsicSolicitud
     from apps.proyectos.models import Proyecto
 
     AsicSolicitud.objects.all().delete()
+    ContratoServicio.objects.all().delete()
     Proyecto.objects.all().delete()
 
 
 def _planta(nombre):
+    """Una planta que representamos: entra a Cumplimiento por su contrato de
+    representación vigente, no por la bandera del proyecto."""
+    from apps.contratos.models import ContratoServicio
     from apps.proyectos.models import Proyecto
 
-    return Proyecto.objects.create(
-        nombre_comercial=nombre, estado="en_operacion", srv_representacion=True,
+    planta = Proyecto.objects.create(
+        nombre_comercial=nombre, estado="en_operacion",
         tipo_proyecto="minigranja", fecha_inicio_comercializacion=date(2025, 1, 1),
     )
+    ContratoServicio.objects.create(proyecto=planta, servicio_aplica="representacion")
+    return planta
 
 
 def _gescon(**kw):

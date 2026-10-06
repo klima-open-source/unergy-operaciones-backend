@@ -7,12 +7,9 @@ Todas van EN LOTE: la versión anterior resolvía el cliente de cada
 
 from datetime import date
 
-from django.db.models import Exists, OuterRef, Q
-
 from apps.clientes import models as cl_models
 from apps.contabilidad import models as cb_models
-from apps.contratos import models as ct_models
-from apps.contratos.services import vigencia as vigencia_service
+from apps.contratos.services import plantas
 from apps.liquidaciones import models as lq_models
 from apps.plataforma.services.fechas import hoy_col
 from apps.proyectos import models as py_models
@@ -117,28 +114,13 @@ def clientes_por_inversionista(pi_ids) -> dict:
 def proyectos_sin_panel(proyecto_ids_con_panel) -> list[dict]:
     """Minigranjas en operación que REPRESENTAMOS y no tienen panel del mes.
 
-    Es una alerta de «puede faltar cargar el ER». Criterio deliberadamente
-    SEGURO —mejor alertar de más que dejar de liquidar algo representado—: se
-    considera representado si el flag `srv_representacion` está activo O existe
-    un contrato de representación vigente.
-
-    Los dos se contradicen en la práctica (El Roble y Chima Oriente tienen el
-    flag apagado pero contrato vigente), así que se conservan por seguridad.
+    Es una alerta de «puede faltar cargar el ER». "Representamos" es tener un
+    contrato de representación vigente: la misma regla del Panel Contable
+    (`contabilidad.services.panel.representamos`).
     """
-    # "Contrato vivo" es `vigencia.filtro_vivos`, no `estado="firmado"`: el estado
-    # dice lo que alguien decidio, y la fecha dice si todavia rige. Un contrato
-    # firmado que ya vencio no representa a nadie.
-    tiene_contrato = Exists(
-        ct_models.ContratoServicio.objects.filter(
-            vigencia_service.filtro_vivos(hoy_col()),
-            proyecto_id=OuterRef("id"),
-            servicio_aplica="representacion",
-        )
-    )
     consulta = py_models.Proyecto.objects.filter(
-        estado="en_operacion", tipo_proyecto="minigranja"
-    ).annotate(con_contrato=tiene_contrato).filter(
-        Q(srv_representacion=True) | Q(con_contrato=True)
+        plantas.filtro_proyectos_con("representacion", hoy_col()),
+        estado="en_operacion", tipo_proyecto="minigranja",
     )
     if proyecto_ids_con_panel:
         consulta = consulta.exclude(id__in=proyecto_ids_con_panel)

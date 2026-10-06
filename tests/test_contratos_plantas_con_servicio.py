@@ -265,7 +265,35 @@ def test_portafolios_cuenta_en_operacion_o_con_contrato():
         "En operación sin contrato", "En desarrollo con O&M"}
 
 
-def test_nadie_nuevo_lee_srv_operacion():
+# ── Paso 2b: los que leían `srv_representacion` ──────────────────────────
+
+
+def test_representamos_es_tener_contrato_de_representacion():
+    """Solo representación: un contrato que cubre únicamente CGM no cuenta, una
+    planta en comunidad tampoco, y la bandera sola ya no basta."""
+    from apps.contabilidad.services.panel import representamos
+    from apps.liquidaciones.services.panel import proyectos_sin_panel
+    from apps.proyectos.models import Proyecto
+
+    def minigranja(nombre, **kw):
+        return _proyecto(nombre, estado="en_operacion", tipo_proyecto="minigranja", **kw)
+
+    _servicio(minigranja("Representada"), "representacion")
+    _servicio(minigranja("Las dos"), "representacion", ["representacion", "cgm"])
+    _servicio(minigranja("Solo CGM"), "representacion", ["cgm"])
+    minigranja("Solo bandera", srv_representacion=True)
+    comunidad = minigranja("En comunidad")
+    _servicio(comunidad, "representacion")
+    _ppa(comunidad, es_comunidad_energetica=True, fecha_entrada_comunidad=date(2025, 1, 1))
+
+    esperadas = {"Representada", "Las dos"}
+    assert set(Proyecto.objects.filter(representamos())
+               .values_list("nombre_comercial", flat=True)) == esperadas
+    assert {f["proyecto"] for f in proyectos_sin_panel(set())} == esperadas
+
+
+@pytest.mark.parametrize("bandera", ["srv_operacion", "srv_representacion"])
+def test_nadie_nuevo_lee_la_bandera(bandera):
     """Los que quedan son los pasos siguientes (API de proyectos, pipeline, el
     modelo) y el informe que mide el barrido. La lista solo puede achicarse."""
     from pathlib import Path
@@ -277,10 +305,13 @@ def test_nadie_nuevo_lee_srv_operacion():
         "apps/comercial/services/pipeline.py",
         "apps/contratos/management/commands/revisar_servicios_banderas.py",
     }
+    if bandera == "srv_representacion":
+        # Conserva el nombre de la clave en su respuesta; el valor ya sale del contrato.
+        permitidos.add("apps/energia/services/comercializacion.py")
     leen = {
         str(p.relative_to(raiz)).replace("\\", "/")
         for carpeta in ("apps", "api", "config")
         for p in (raiz / carpeta).rglob("*.py")
-        if "migrations" not in p.parts and "srv_operacion" in p.read_text(encoding="utf-8")
+        if "migrations" not in p.parts and bandera in p.read_text(encoding="utf-8")
     }
     assert leen <= permitidos, sorted(leen - permitidos)

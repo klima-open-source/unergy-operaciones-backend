@@ -63,20 +63,25 @@ def datos():
     - "Planta Visible" en un contrato sin responsable (siempre visible).
     - "Planta Oculta" en un contrato de un responsable NO relevante.
     """
+    from apps.contratos.models import ContratoServicio
     from apps.mercado_xm.models import AsicSolicitud
     from apps.ppa.models import PpaContrato, PpaResponsable
     from apps.proyectos.models import Proyecto
 
     AsicSolicitud.objects.all().delete()
     PpaContrato.objects.all().delete()
+    ContratoServicio.objects.all().delete()
     PpaResponsable.objects.all().delete()
     Proyecto.objects.all().delete()
 
     def planta(nombre):
-        return Proyecto.objects.create(
-            nombre_comercial=nombre, estado="en_operacion", srv_representacion=True,
+        # Entra a Cumplimiento por su contrato de representación vigente.
+        p = Proyecto.objects.create(
+            nombre_comercial=nombre, estado="en_operacion",
             tipo_proyecto="minigranja", fecha_inicio_comercializacion=date(2025, 1, 1),
         )
+        ContratoServicio.objects.create(proyecto=p, servicio_aplica="representacion")
+        return p
 
     visible, oculta = planta("Planta Visible"), planta("Planta Oculta")
     tercero = PpaResponsable.objects.create(nombre="Tercero", incluir_en_cumplimiento=False)

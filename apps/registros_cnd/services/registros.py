@@ -17,6 +17,7 @@ from datetime import date, datetime
 from django.db import transaction
 from django.utils import timezone
 
+from apps.contratos.services import plantas
 from apps.plataforma.services.fechas import hoy_col
 from apps.proyectos.models import Proyecto
 from apps.registros_cnd.models import (
@@ -279,8 +280,9 @@ def listar_todos() -> list[dict]:
     proyectos = (
         Proyecto.objects
         # El proceso de conexion/frontera aplica solo a proyectos que Unergy
-        # representa (servicio de representacion). Excluye autoconsumo y demas.
-        .filter(deleted_at__isnull=True, srv_representacion=True)
+        # representa: contrato de representacion vigente, en cualquier estado del
+        # proyecto (el proceso empieza antes de operar). Excluye autoconsumo y demas.
+        .filter(plantas.filtro_proyectos_con("representacion", hoy_col()), deleted_at__isnull=True)
         .select_related("operador_red")
         .order_by("nombre_comercial")
     )
