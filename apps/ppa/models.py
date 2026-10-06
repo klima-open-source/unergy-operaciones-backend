@@ -13,31 +13,33 @@ Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 from django.db import models
 from django.utils import timezone
 
-from apps.contratos.models import Contrato, ContratoProyecto
+from apps.contratos.models import Contrato, ContratoProyecto, GrupoContrato
 from apps.plataforma.models import Timer
 
 
 class PpaContratoManager(models.Manager):
-    """Solo las filas de compraventa de energía: las que NO tienen servicio_aplica.
-
-    `servicio_aplica` lo llenan solo los contratos de servicio; un PPA lo deja nulo,
-    así que es el discriminador entre las dos fachadas sobre `contratos`."""
+    """Solo los contratos de compraventa de energía: `grupo = 'ppa'`."""
 
     def get_queryset(self):
-        return super().get_queryset().filter(servicio_aplica__isnull=True)
+        return super().get_queryset().filter(grupo=GrupoContrato.PPA)
 
 
 class PpaContrato(Contrato):
     """Fachada de solo-PPA sobre la única tabla `contratos` (modelo PROXY).
 
-    `ppa_contratos` dejó de existir: un contrato PPA es una fila de `contratos` con
-    `servicio_aplica` nulo. Conserva el nombre y la API de los lectores — todas las
-    columnas PPA (numero_codigo_contrato, tipo_contrato, valor_indexacion_base,
-    comprador, …) son columnas de `contratos`, así que se acceden y se filtran igual.
-    Las tarifas mensuales están en `PpaTarifa` (`contrato.tarifas_ppa`), los
-    compromisos en `PpaCompromisoEnergia` (`contrato.compromisos`)."""
+    `ppa_contratos` deja de usarse en el corte: un contrato PPA es una fila de
+    `contratos` con `grupo = 'ppa'`, y conserva su id (plan 08, decisión 1). Conserva
+    el nombre y la API de los lectores — todas las columnas PPA (numero_codigo_contrato,
+    tipo_contrato, valor_indexacion_base, comprador, …) son columnas de `contratos`, así
+    que se acceden y se filtran igual. Las tarifas mensuales están en `PpaTarifa`
+    (`contrato.tarifas`), los compromisos en `PpaCompromisoEnergia`
+    (`contrato.compromisos`)."""
 
     objects = PpaContratoManager()
+
+    def save(self, *args, **kwargs):
+        self.grupo = GrupoContrato.PPA
+        super().save(*args, **kwargs)
 
     class Meta:
         proxy = True
@@ -56,7 +58,7 @@ class PpaResponsable(Timer):
 
 class PpaTarifa(models.Model):
     id = models.BigAutoField(primary_key=True)
-    contrato = models.ForeignKey("contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_id", related_name="tarifas_ppa")
+    contrato = models.ForeignKey("contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_id", related_name="tarifas")
     año = models.IntegerField()
     mes = models.IntegerField()
     tarifa = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
@@ -93,20 +95,17 @@ class IppMensual(models.Model):
 
 
 class PpaContratoProyectoManager(models.Manager):
-    """Solo los vínculos de contratos PPA (servicio_aplica nulo). `contrato_proyectos`
-    ahora mezcla PPA y servicio; este filtro conserva la semántica vieja de
-    `ppa_contrato_proyectos`, que era solo-PPA."""
+    """Solo los vínculos de contratos PPA, como `ppa_contrato_proyectos`."""
 
     def get_queryset(self):
-        return super().get_queryset().filter(contrato__servicio_aplica__isnull=True)
+        return super().get_queryset().filter(contrato__grupo=GrupoContrato.PPA)
 
 
 class PpaContratoProyecto(ContratoProyecto):
     """Fachada proxy sobre `ContratoProyecto` (tabla `contrato_proyectos`).
 
-    `ppa_contrato_proyectos` dejó de existir: los vínculos PPA↔planta viven en
-    `contrato_proyectos` junto con los de servicio. Conserva el nombre y la semántica
-    solo-PPA para los lectores."""
+    `ppa_contrato_proyectos` deja de usarse en el corte: los vínculos PPA↔planta viven
+    en `contrato_proyectos`. Conserva el nombre para los lectores."""
 
     objects = PpaContratoProyectoManager()
 
