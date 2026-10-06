@@ -2,6 +2,7 @@
 
 from rest_framework import serializers
 
+from apps.clientes import models as cl_models
 from apps.contratos import models as ct_models
 from apps.contratos.services import comunidades as comunidades_service
 from apps.contratos.services import grupos as grupos_service
@@ -87,11 +88,69 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
         source="proyecto", queryset=py_models.Proyecto.objects.all(),
         allow_null=True, required=False,
     )
+    # Las tres partes tenían el MISMO problema que `proyecto_id`, y por la misma
+    # razón: el FK se llama `contratante` en el modelo, así que el campo que
+    # genera ModelSerializer también se llama así, y la clave `contratante_id`
+    # que manda el frontend se descartaba sin decir nada. El wizard vinculaba al
+    # cliente, la API respondía 200 y el vínculo no quedaba guardado -- de ahí
+    # que `contratante_id`/`prestador_id` "casi nunca se pueblen" pese a que la
+    # pantalla tiene autocompletado desde hace tiempo, y que el cálculo de
+    # costos por inversionista tenga que emparejar por nombre.
+    contratante_id = serializers.PrimaryKeyRelatedField(
+        source="contratante", queryset=cl_models.Cliente.objects.all(),
+        allow_null=True, required=False,
+    )
+    prestador_id = serializers.PrimaryKeyRelatedField(
+        source="prestador", queryset=cl_models.Cliente.objects.all(),
+        allow_null=True, required=False,
+    )
+    inversionista_id = serializers.PrimaryKeyRelatedField(
+        source="inversionista", queryset=cl_models.Cliente.objects.all(),
+        allow_null=True, required=False,
+    )
 
     class Meta:
         model = ct_models.ContratoServicio
-        exclude = ["proyecto"]
+        exclude = ["proyecto", "contratante", "prestador", "inversionista"]
         extra_kwargs = {"servicio_aplica": {"required": False}}
+
+    def _exigir_partes_vinculadas(self, datos):
+        """Un contrato NUEVO nombra a sus partes con un cliente, no con texto.
+
+        Solo al CREAR. Al editar no se exige todavía: hay 160 contratos sin
+        vínculo, y bloquear el guardado dejaría a cualquiera que corrija una
+        fecha atrapado resolviendo datos maestros que no son suyos. La pantalla
+        sí lo pide en los dos casos --decisión de Sara-- porque ahí hay una
+        persona que puede resolverlo; la API la usan también el CRM y las
+        cargas. Se cierra cuando corra `vincular_partes_contratos`
+        (`docs/SERVICIOS_AGRUPACION.md` §4-decies).
+
+        El inversionista solo en representación/CGM, que es donde la tarifa
+        varía por inversionista y donde el reparto de costos lo necesita.
+        """
+        if self.instance is not None:
+            return
+
+        faltan = [
+            etiqueta for campo, etiqueta in (
+                ("contratante", "contratante_id"), ("prestador", "prestador_id"),
+            ) if not datos.get(campo)
+        ]
+        servicio = datos.get("servicio_aplica")
+        if grupos_service.grupo_de(servicio) == grupos_service.REPRESENTACION_CGM \
+                and not datos.get("inversionista"):
+            faltan.append("inversionista_id")
+
+        if faltan:
+            raise serializers.ValidationError({
+                campo: (
+                    "Vincula esta parte a un cliente registrado. Si no existe, "
+                    "créalo: un contrato que nombra a alguien que el sistema no "
+                    "reconoce queda fuera del panel de ese cliente y de todo lo "
+                    "que se calcula por cliente."
+                )
+                for campo in faltan
+            })
 
     def validate(self, datos):
         """Una planta en comunidad energética no recibe representación ni CGM.
@@ -104,6 +163,8 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
         Se valida sobre los datos YA combinados con la instancia: en un PATCH
         que solo cambia la planta, `servicio_aplica` no viene en el cuerpo.
         """
+        self._exigir_partes_vinculadas(datos)
+
         proyecto = datos.get("proyecto", getattr(self.instance, "proyecto", None))
         servicio = datos.get(
             "servicio_aplica", getattr(self.instance, "servicio_aplica", None)
@@ -126,21 +187,49 @@ class FacturaSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = fa_models.ContratoFactura
+        # `inversionista_nombre` FALTABA. `inversionista_id` ya estaba aquí
+        # cuando el modelo todavía guardaba el inversionista como texto llamado
+        # `inversionista`: ese id no existía, salía siempre `None`, y el nombre
+        # no se mandaba. La pantalla de facturas lee `inversionista` y por eso su
+        # columna mostraba "—" aunque el dato estuviera guardado.
         fields = [
-            "id", "contrato_id", "tipo", "fecha", "inversionista_id",
+            "id", "contrato_id", "tipo", "fecha",
+            "inversionista_id", "inversionista_nombre",
             "numero_factura", "monto", "enlace_soporte",
             "created_at", "updated_at",
         ]
 
 
 class FacturaEscrituraSerializer(serializers.ModelSerializer):
+    # Como en el contrato: el FK se llama `inversionista`, así que la clave
+    # `inversionista_id` que manda el frontend no la reconocería nadie y DRF la
+    # descartaría en silencio. Ver el comentario de `ContratoEscrituraSerializer`.
+    inversionista_id = serializers.PrimaryKeyRelatedField(
+        source="inversionista", queryset=cl_models.Cliente.objects.all(),
+        allow_null=True, required=False,
+    )
+
     class Meta:
         model = fa_models.ContratoFactura
         fields = [
-            "tipo", "fecha", "inversionista", "numero_factura", "monto",
-            "enlace_soporte",
+            "tipo", "fecha", "inversionista_id", "inversionista_nombre",
+            "numero_factura", "monto", "enlace_soporte",
         ]
-        extra_kwargs = {c: {"required": False} for c in fields}
+        extra_kwargs = {
+            c: {"required": False} for c in fields if c != "inversionista_id"
+        }
+
+    def validate(self, datos):
+        """El nombre se copia del cliente vinculado; el vínculo manda.
+
+        Así deja de haber dos grafías del mismo inversionista según quién
+        registró la factura, que es la mitad del problema que esto viene a
+        resolver. Igual que `partes.sincronizar` en los contratos.
+        """
+        cliente = datos.get("inversionista")
+        if cliente is not None:
+            datos["inversionista_nombre"] = cliente.razon_social_nombre
+        return datos
 
 
 

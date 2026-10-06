@@ -11,6 +11,7 @@ def proyectos_con_relay():
     `srv_operacion` no la operamos nosotros.
     """
     return py_models.Proyecto.objects.filter(
+        deleted_at__isnull=True,
         estado="en_operacion",
         project_id_solarview__isnull=False,
         tipo_proyecto="minigranja",

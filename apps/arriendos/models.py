@@ -32,6 +32,13 @@ class ArrArrendador(Timer):
     id = models.BigAutoField(primary_key=True)
     contrato = models.ForeignKey("contratos.ContratoServicio", on_delete=models.CASCADE, db_column="contrato_id", related_name="arr_arrendador_por_contrato_id")
     nombre = models.CharField(max_length=255)
+    # La SEXTA parte de un contrato, y la unica que no tenia donde vincularse.
+    # El arrendador FACTURA --cada uno su parte, con su propio IVA-- y hasta el
+    # 2026-09-18 solo se guardaba su nombre: ni NIT, ni razon social, ni sus
+    # documentos, asi que quien emitia la factura buscaba el NIT fuera del
+    # sistema. SET_NULL y no CASCADE: dar de baja un cliente no puede borrar el
+    # historico de arriendos que se le pagaron.
+    cliente = models.ForeignKey("clientes.Cliente", on_delete=models.SET_NULL, db_column="cliente_id", null=True, blank=True, related_name="arrendamientos")
     valor_base = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     responsable_iva = models.BooleanField(default=False)
     activo = models.BooleanField(default=True)
