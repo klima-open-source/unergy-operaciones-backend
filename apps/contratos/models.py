@@ -268,7 +268,6 @@ class Contrato(Timer):
     indexacion_mensual = models.JSONField(null=True, blank=True)
     indexacion_cgm = models.JSONField(null=True, blank=True)
     indexacion_representacion = models.JSONField(null=True, blank=True)
-    cgm_codigo_sic = models.CharField(max_length=20, null=True, blank=True)
     fecha_inicio_om = models.DateField(null=True, blank=True)
     fecha_indexacion = models.DateField(null=True, blank=True)
     responsable_iva = models.BooleanField(default=False)

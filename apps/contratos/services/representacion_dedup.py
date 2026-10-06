@@ -53,7 +53,6 @@ CAMPOS = (
     "tarifa_admin", "tarifa_cgm", "tarifa_representacion",
     "indexacion_cgm", "indexacion_representacion",
     "enlace_drive", "estado_pago", "estado",
-    "cgm_codigo_sic",
     "responsable_iva",
 )
 

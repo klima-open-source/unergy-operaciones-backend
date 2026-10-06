@@ -145,6 +145,8 @@ del monitoreo sin aviso (eran ~36 en septiembre).
   base.
 - Migración con el `DROP` de las tres.
 - Se borran `backfill_contratos_unificados` y `verificar_corte_contratos`.
+- Se borra la columna `contratos.cgm_codigo_sic` (`0013`): nadie la leía y el único contrato que la
+  tenía guardaba ahí su mismo número de contrato. El front dejó de pedirla.
 - **Rollback:** restaurar del dump. Es el único paso sin vuelta atrás por deploy.
 
 ## 6 · Verificación (en `pg17` antes de cada deploy, y en producción después)
