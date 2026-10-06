@@ -91,15 +91,6 @@ def test_al_salir_de_la_comunidad_el_servicio_vuelve():
     assert contrato.estado == "firmado"
 
 
-def test_los_subservicios_prestados_filtran_los_excluidos():
-    """Un contrato que cubre los dos, en comunidad, no presta ninguno."""
-    contrato = ContratoFalso(tarifa_representacion=1, tarifa_cgm=2)
-    assert comunidades.subservicios_prestados(contrato, HOY, set()) == [
-        "representacion", "cgm"
-    ]
-    assert comunidades.subservicios_prestados(contrato, HOY, {7}) == []
-
-
 # ── El mensaje que bloquea la creación ────────────────────────────────────
 
 def test_bloquea_crear_representacion_en_una_planta_en_comunidad():

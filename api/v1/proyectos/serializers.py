@@ -272,6 +272,11 @@ class ProyectoSerializer(serializers.ModelSerializer):
     info_tecnica = serializers.SerializerMethodField()
     inversores = ProyectoInversorSerializer(many=True, read_only=True)
     area_contactos = serializers.SerializerMethodField()
+    # DERIVADO, no guardado. `proyectos.es_comunidad_energetica` se elimino en
+    # `proyectos/0008` porque era una segunda verdad: la marca se negocia en el
+    # PPA y de ahi baja a la planta. La pantalla del proyecto seguia mostrando
+    # este campo desde entonces, y siempre salia vacio porque nadie lo mandaba.
+    es_comunidad_energetica = serializers.SerializerMethodField()
 
     class Meta:
         model = py_models.Proyecto
@@ -279,8 +284,33 @@ class ProyectoSerializer(serializers.ModelSerializer):
             "id", "potencia_instalada_kwp",   # alias de transición, ver arriba
             "operador_red_legal", "ppa_contratos", "inversionistas",
             "info_tecnica", "inversores", "area_contactos",
+            "es_comunidad_energetica",
             "created_at", "updated_at",
         ]
+
+    def get_es_comunidad_energetica(self, obj) -> bool:
+        """Si la planta esta hoy en una comunidad energetica, segun sus PPA.
+
+        Lo resuelve `comunidades.plantas_en_comunidad`, que es la UNICA
+        definicion de esto --la misma que decide si la planta recibe
+        representacion y CGM--. Derivarlo aca de `obj.contratos_ppa` seria mas
+        rapido pero crearia una segunda regla, y esa duplicacion es justo lo que
+        el cambio de comunidades vino a quitar.
+
+        El set se calcula UNA vez por serializacion y no por fila: en un listado
+        de 200 plantas seria una consulta por cada una.
+        """
+        return obj.id in self._plantas_en_comunidad()
+
+    def _plantas_en_comunidad(self) -> set:
+        cache = self.context.get("_plantas_en_comunidad")
+        if cache is None:
+            from apps.contratos.services import comunidades as comunidades_service
+            from apps.plataforma.services.fechas import hoy_col
+
+            cache = comunidades_service.plantas_en_comunidad(hoy_col())
+            self.context["_plantas_en_comunidad"] = cache
+        return cache
 
     def get_operador_red_legal(self, obj) -> str | None:
         from apps.comercial.services.pipeline import operador_red_legal

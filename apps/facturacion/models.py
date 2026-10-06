@@ -56,7 +56,13 @@ class ContratoFactura(Timer):
     contrato = models.ForeignKey("contratos.ContratoServicio", on_delete=models.CASCADE, db_column="contrato_id", related_name="contrato_factura_por_contrato_id")
     tipo = models.CharField(max_length=13, choices=[("solenium", "solenium"), ("inversionista", "inversionista")])
     fecha = models.CharField(max_length=7)
-    inversionista = models.CharField(max_length=255, null=True, blank=True)
+    # Mismo par que en `ContratoServicio`, y a proposito: la factura se le emite
+    # a alguien, y hasta el 2026-09-20 de ese alguien solo se guardaba el nombre
+    # escrito a mano -- sin NIT y sin forma de saber a que cliente corresponde.
+    # El vinculo manda; el texto queda como copia de la razon social con la que
+    # se emitio, que no debe cambiar si el cliente se renombra despues.
+    inversionista = models.ForeignKey("clientes.Cliente", on_delete=models.SET_NULL, db_column="inversionista_id", null=True, blank=True, related_name="facturas_de_contrato")
+    inversionista_nombre = models.CharField(max_length=255, null=True, blank=True)
     numero_factura = models.CharField(max_length=100, null=True, blank=True)
     monto = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     enlace_soporte = models.CharField(max_length=1000, null=True, blank=True)

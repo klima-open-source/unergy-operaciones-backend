@@ -534,6 +534,278 @@ que correr cuando vuelva.
 - **Dónde va la validación de la decisión 3**: en el serializer de
   `contratos_servicio`, en el wizard, o en los dos.
 
+## 4-octies. De cinco definiciones de "planta en operación" a dos
+
+Diagnóstico del 2026-09-18. Eran cuatro en §4-quinquies; revisando de nuevo
+aparecieron **cinco**:
+
+| Criterio | Dónde |
+|---|---|
+| `estado` **AND** `srv_operacion` | `om/panel.py`, `arriendos/panel.py` |
+| `srv_operacion` **OR** `estado` | `proyectos/portafolios.py` |
+| `estado` **AND** `srv` **AND** minigranja | `energia/solarview_monitoreo.py` |
+| solo `estado` del proyecto | `api/v1/om/views.py` |
+| solo `srv_operacion` | alarmas de desconexión, informe FMO |
+
+### Por qué son cinco: se mezclaron dos preguntas
+
+Cada sitio combinó a su manera dos cosas que responden a preguntas distintas:
+
+- **"¿la planta está energizada?"** → `proyectos.estado`
+- **"¿le prestamos operación?"** → hoy la bandera; mañana el contrato
+
+Como nadie las separó, cada módulo eligió su propio `AND` o `OR`. No fue una
+decisión: fue divergencia acumulada.
+
+### Cómo quedan en dos
+
+Al aplicar la regla de §4-sexies —*contrato del servicio, y vigente*— cada
+pregunta responde lo suyo:
+
+```
+¿le prestamos operación?   ->  ¿tiene contrato vivo de mantenimiento,
+                               arriendo o internet?
+¿está energizada?          ->  estado = "en_operacion"
+```
+
+Un módulo que necesite las dos las pide **por separado y explícito**, en vez de
+heredar la combinación que alguien eligió una vez.
+
+Lo concreto: una función `plantas_con_servicio("operacion")` --una consulta que
+devuelve un conjunto de ids, igual que `comunidades.plantas_en_comunidad()`-- y
+los cinco sitios la consumen. Las cinco variantes pasan a ser una llamada.
+
+**Cuándo:** con el bloque D, no antes. Aplicarlo hoy sacaría 36 plantas del
+sondeo MGS, las alarmas y el informe FMO -- las que operan sin contrato de
+operación cargado (§4-ter).
+
+### Lo mismo pasaba con los subservicios, y eso YA se corrigió
+
+`liquidaciones` y `contabilidad/panel` preguntaban "¿esta planta está
+representada?" filtrando por `servicio_aplica="representacion"`. Esa etiqueta la
+comparten representación y CGM --el campo admite un solo valor-- así que un
+contrato que solo cubre CGM contaba como representación. Ahora usan
+`grupos.filtro_subservicio()`, la cara de ORM del catálogo.
+
+`costos.py` y `alertas_representacion` **siguen filtrando por la etiqueta, y está
+bien**: ellos buscan el contrato del GRUPO y después leen cada tarifa por
+separado. La distinción importa: filtrar por grupo y filtrar por subservicio son
+preguntas distintas, y solo la segunda necesitaba el catálogo.
+
+## 4-nonies. Cuántos contratos por planta, y el costo que sale mal
+
+**Regla de negocio (Sara, 2026-09-18):**
+
+> En **GD** hay un único contrato de Representación y CGM por planta.
+> En **minigranjas** hay **uno por inversionista**, y sus tarifas pueden diferir.
+
+### Lo que ya estaba bien
+
+`representacion_dedup` agrupa por `(inversionista + planta)`, no solo por planta,
+y su comentario dice *"Baraya tiene tres"*: reconoce que varios contratos en una
+minigranja son legítimos. **No hay riesgo de fusionar contratos reales.**
+
+El catálogo, la vigencia y las comunidades trabajan contrato por contrato, así
+que les da igual cuántos haya. Y los conteos ya distinguen contratos de plantas.
+
+### Lo que está mal: el costo de representación del panel contable
+
+`apps/contabilidad/services/costos.py` hace:
+
+```python
+c = elegir_contrato_representacion(...)   # elige UNO de varios
+t_rep = tarifa_indexada(c.tarifa_representacion, ...) × kwh
+```
+
+y el panel reparte ese costo por participación.
+
+Su docstring trata los contratos múltiples como **duplicados sucios** --*"66 filas
+para 38 proyectos y algunas se contradicen"*--. Y en parte lo eran: el seed creó
+duplicados. Pero **en minigranjas no son duplicados**: son un contrato por
+inversionista, y con tarifas distintas el cálculo sale mal para todos.
+
+Ejemplo: tres inversionistas con 3,0 / 5,0 / 7,0 $/kWh y 50/30/20 de
+participación. Hoy se toma una sola tarifa y se reparte; lo correcto es la de
+cada uno, ponderada.
+
+**Conviven dos conceptos que se parecen y no son lo mismo:** duplicados del seed
+(que hay que fusionar) y contratos por inversionista (que hay que conservar y
+usar cada uno).
+
+### Por qué no se arregló todavía
+
+Toca **cifras contables** que alguien concilia contra el ER, y no se pudo medir:
+el acceso a la base estaba caído el 2026-09-18. Cambiar un cálculo financiero
+sin ver su efecto es lo que no se hace.
+
+`python manage.py revisar_tarifas_por_inversionista` (solo lee) queda listo para
+correr apenas haya acceso: dice en cuántas plantas cambiaría el costo, cuánto se
+desvía cada una y qué tarifa tiene cada inversionista. **Con esos números se
+decide el arreglo, y contabilidad valida el antes/después.**
+
+## 4-decies. Las partes de un contrato: la API descartaba el vínculo
+
+Decidido con Sara el 2026-09-18: **o se vincula un cliente existente, o se crea
+uno formal ahí mismo.** Nunca un nombre suelto.
+
+### Lo que se encontró
+
+Las cinco partes que nombra un contrato ya tenían clave foránea a `clientes`, y
+cuatro de ellas ya tenían autocompletado en la pantalla. Aun así la auditoría
+del 2026-08-27 encontró **0 de 162 contratos** con el vínculo puesto. La
+explicación que se daba —"el usuario no elige del autocompletado"— era solo la
+mitad. Había dos causas:
+
+1. **La API descartaba el id en silencio.** El FK se llama `contratante` en el
+   modelo (con `db_column="contratante_id"`), así que el campo que genera
+   `ModelSerializer` también se llama `contratante`. El frontend mandaba
+   `contratante_id`, DRF no reconocía esa clave y la ignoraba: respuesta 200,
+   vínculo sin guardar. **Es el mismo bug que ya se había corregido para
+   `proyecto_id`** ("respondía 200 sin guardar nada"), repetido en las tres
+   partes de `ContratoServicio`. En `PpaContrato` lo corrigió el commit
+   `752def3e` el mismo día, por separado.
+
+2. **El autocompletado perdía el vínculo al teclear.** Sugería *strings*, y
+   después buscaba el cliente comparando el nombre exacto
+   (`find(c => c.razon_social_nombre === texto)`). Un espacio de más y el id
+   quedaba en `null` sin aviso.
+
+Y el **inversionista** no tenía ni campo: era un `InputText` suelto en
+`RepresentacionView.vue`, y en el wizard no existía. Es justo el que decide qué
+tarifa de representación se le cobra a cada inversionista de una minigranja
+(§4-nonies).
+
+### Lo que se hizo
+
+**Un solo componente, `SelectorCliente.vue`**, para las cinco partes. El
+autocompletado sugiere el OBJETO cliente, no su nombre, así que lo que se elige
+es el cliente. Si lo escrito no corresponde a ninguno, el campo lo dice y ofrece
+crearlo; guardar queda bloqueado hasta resolverlo, también al editar un contrato
+viejo. Antes ese bloque —autocompletado, botón de crear, aviso de vinculado—
+estaba copiado en los dos wizards, y agregar el inversionista habría sido una
+tercera copia.
+
+**El aviso de duplicado dejó de ser un callejón sin salida.** El backend ya
+detectaba el nombre parecido y respondía un 409 con el candidato, y el cliente
+HTTP ya sabía mandar `forzar=true`; pero `NuevoClienteDialog` pintaba ese 409
+como un error rojo bajo el nombre. No se podía ni vincular al candidato ni crear
+de todos modos: la única salida era cerrar y escribir el nombre a mano, que es
+exactamente lo que duplica los clientes. Ahora el diálogo ofrece las dos.
+
+**Dos pruebas nuevas**, porque los dos fallos eran silenciosos:
+`tests/test_contratos_servicio_partes_vinculo.py` (el id se guarda de verdad) y
+`app/features/componentesImportados.test.ts` en el front — `nuxt.config.ts` no
+auto-importa `features/**/components`, así que una etiqueta sin su `import` no
+rompe el build: no renderiza y ya.
+
+### `sincronizar` no queda obsoleto, cambia de papel
+
+`apps/contratos/services/partes.py` hace dos cosas, y solo una sobra:
+
+- **Adivinar el cliente por nombre/NIT** cuando el id viene vacío. Desde la UI ya
+  no se ejecuta (solo actúa `if not contratante_id`). Sigue haciendo falta para
+  los contratos viejos, que se resuelven la próxima vez que alguien los guarde, y
+  para cualquier llamada directa a la API.
+- **Copiar nombre y NIT desde el cliente vinculado.** Esta se queda: es la que
+  evita dos grafías del mismo inversionista según quién escribió el contrato.
+
+`resolver_cliente_id` se retira cuando se cumplan las dos condiciones: el
+backfill hecho **y** la API exigiendo el FK. Adivinar por nombre ya produjo un
+falso positivo real ("BALI ENERGY S.A.S." contra "INENERGY S.A.S."), y por eso
+exige solapamiento de tokens además de similitud.
+
+### El arrendador: la SEXTA parte, y la que no tenia donde vincularse
+
+Descubierto el 2026-09-18 al listar los pendientes. Las partes de un contrato no
+son cinco, son **seis**: contratante, prestador e inversionista
+(`contratos_servicio`), comprador y vendedor (`ppa_contratos`), y **el
+arrendador** (`arr_arrendador`).
+
+De el solo se guardaba `nombre`. **Sin NIT, sin FK, sin nada** -- y el arrendador
+FACTURA: el panel dice textualmente que "cada uno factura su parte con su propio
+IVA". Quien emitia esa factura buscaba el NIT fuera del sistema.
+
+Lo hecho:
+
+- `arr_arrendador.cliente_id` (migracion `arriendos/0004`), NULL y sin exigencia
+  en la base: las filas existentes siguen funcionando.
+- El mismo `SelectorCliente` en los dos sitios donde se gestionan arrendadores
+  (el wizard de arriendo y `OperacionView`), y obligatorio: sin cliente no hay
+  NIT con que facturar.
+- `vincular_partes_contratos` tambien los recorre.
+
+### El IVA del arrendador sale de su cliente
+
+Habia dos formas de responder a la misma pregunta: el arrendador tenia un
+`responsable_iva` suelto y `calcular_iva` aplicaba **19% fijo**, mientras los
+clientes ya tenian tasas configurables por servicio y por proyecto
+(`cliente_tasa_servicio`), que es lo que usan las facturas de Representacion,
+CGM y Administracion.
+
+Decidido con Sara que se derive del cliente. **Esto toca facturacion**, asi que
+se hizo de forma que no mueva ningun numero de golpe:
+
+| Situacion | Que pasa |
+|---|---|
+| Sin cliente vinculado (todos, hoy) | 19%, igual que siempre |
+| Con cliente, sin tasa configurada | 19%, igual que siempre |
+| Con cliente y tasa configurada | manda la tasa del cliente |
+
+Vincular un cliente **no cambia una factura por si solo**: la derivacion se
+enciende cliente por cliente, cuando alguien configura la tasa a proposito. Y el
+`responsable_iva` sigue decidiendo SI se cobra; la tasa solo dice CUANTO, porque
+si no, vincular empezaria a cobrarle IVA a quien no lo paga.
+
+`calcular_iva` cambio de firma: recibe un PORCENTAJE, no un si/no. Pasarle un
+booleano daria 1% en vez de 19%.
+
+**Sin verificar contra la base**: que valores usa `cliente_tasa_servicio.
+servicio`. Las facturas guardan "Representacion"/"CGM"/"Administracion" con
+mayuscula y tilde; para arriendo no hay precedente, asi que el servicio se
+compara normalizado (minusculas, sin tildes) en vez de exigir una grafia exacta.
+
+### Lo que queda
+
+1. ~~Que `firmar()` escriba las dos partes.~~ **HECHO el 2026-09-18**, pero no
+   en `firmar()`: en **`crear_ppa`**, que desde `3f1eebc1` es la única puerta de
+   creación. Así lo aplican los DOS caminos --la API y el CRM-- en vez de solo
+   uno; esa asimetría es justo el problema que `crear_ppa` vino a resolver.
+
+   Unergy es un cliente más, identificado por `UNERGY_NIT` (en el `.env`, porque
+   es un dato de la empresa y no una regla). El lado sale del `tipo_contrato`,
+   que ya era parámetro obligatorio precisamente porque define quién va de cada
+   lado:
+
+   | `tipo_contrato` | comprador | vendedor |
+   |---|---|---|
+   | `compra` (Unergy compra) | Unergy | el cliente de la oferta |
+   | `venta` (Unergy vende) | el cliente de la oferta | Unergy |
+
+   Si falta el ajuste **avisa, no bloquea**: dejar al CRM sin poder firmar por un
+   ajuste que falta sería peor que el hueco que esto tapa. Tampoco elige nada si
+   dos clientes comparten el NIT: son un duplicado que hay que fusionar.
+
+   **Falta poner `UNERGY_NIT` en el `.env`** (en el secret `ENV_FILE` para
+   producción) y confirmar contra la base que Unergy existe como cliente --muy
+   probable, es el `prestador` de los contratos de representación--. Hasta
+   entonces la función avisa en cada PPA nuevo.
+
+2. **Correr el backfill.** El comando ya está escrito:
+   `manage.py vincular_partes_contratos`. Por defecto solo informa; escribe con
+   `--aplicar`, y `--csv` deja el detalle parte por parte para revisar lo que no
+   empareje. Falta correrlo, y eso necesita la base.
+
+3. **Validar en la API**, no solo en la pantalla: rechazar un contrato cuya parte
+   no venga vinculada. Va DESPUÉS de los dos anteriores, o rechazaría lo que
+   todavía no se ha podido arreglar.
+
+4. **Sin medir**: cuántos contratos tienen el FK nulo. Necesita la base, que
+   estaba caída el 2026-09-18.
+
+Cumplidos 1, 2 y 3, se puede retirar `resolver_cliente_id` de
+`partes.sincronizar` —la parte que adivina— y dejar solo la que copia el nombre
+y el NIT desde el cliente vinculado.
+
 ## 5. Cómo estructurarlo — dos opciones
 
 ### Opción A — Derivar los subservicios al leer (sin cambio de esquema)
