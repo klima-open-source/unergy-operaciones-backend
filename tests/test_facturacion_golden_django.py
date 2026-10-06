@@ -21,13 +21,18 @@ django = pytest.importorskip("django", reason="requiere el entorno de Django (uv
 
 @pytest.fixture(scope="module", autouse=True)
 def _base():
+    """Base SQLite en memoria, aislada: al terminar se restauran la configuración
+    y las conexiones (mismo patrón que `test_proyectos_filtro_ppa.py`). Sin esto,
+    los archivos que corrían después heredaban esta base y sus filas, y fallaban
+    con `FOREIGN KEY constraint failed` solo en la suite completa."""
     import os
 
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
     os.environ.setdefault("SECRET_KEY", "x" * 40)
-
+    import django
     from django.conf import settings
 
+    originales = settings.DATABASES
     settings.DATABASES = {
         "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}
     }
@@ -40,13 +45,30 @@ def _base():
     connections.close_all()
     connections.__dict__.pop("settings", None)
     connections.__init__()
-
     settings.MIGRATION_MODULES = {a.label: None for a in django_apps.get_app_configs()}
     setup_test_environment()
     connections["default"].creation.create_test_db(verbosity=0)
     assert connections["default"].vendor == "sqlite", "no se aisló de la base real"
     yield
+
+    connections.close_all()
     teardown_test_environment()
+    settings.DATABASES = originales
+    connections.__dict__.pop("settings", None)
+    connections.__init__()
+
+
+@pytest.fixture(autouse=True)
+def _deshacer_datos():
+    """Cada prueba corre dentro de una transacción que se deshace: lo que crea
+    no queda para la siguiente ni para otros archivos."""
+    from django.db import transaction
+
+    atomica = transaction.atomic()
+    atomica.__enter__()
+    yield
+    transaction.set_rollback(True)
+    atomica.__exit__(None, None, None)
 
 
 def _setup_terpel8():
