@@ -1105,15 +1105,15 @@ def _comunidad_de(proyecto) -> dict:
 def _servicios_planta(proyecto) -> dict:
     """Qué le presta Unergy a esta planta.
 
-    Son los flags del Proyecto, que dicen qué servicio está ACTIVO — no los
-    contratos que lo respaldan, que son otra entidad (`contratos_servicio`). Se
-    exponen sin el prefijo `srv_` porque afuera el prefijo no significa nada.
+    Sale de sus contratos vigentes (`apps/contratos/services/plantas.py`), la
+    misma respuesta que da `GET /proyectos`; antes eran las banderas `srv_*` del
+    proyecto, que se ponían a mano y nada sincronizaba.
     """
+    from apps.contratos.services import plantas
+    from apps.plataforma.services.fechas import hoy_col
+
     return {
-        "operacion": bool(proyecto.srv_operacion),
-        "representacion": bool(proyecto.srv_representacion),
-        "cgm": bool(proyecto.srv_cgm),
-        "ppa": bool(proyecto.srv_ppa),
+        **plantas.resumen_servicios([proyecto], hoy_col())[proyecto.id],
         # Hasta cuándo la representa Unergy ante el mercado. Va con los
         # servicios y no con las fechas del contrato de energía: son cosas
         # distintas y una planta puede tener representación sin PPA.

@@ -272,7 +272,6 @@ Las cuatro etapas que sí producen PPA: `oferta`, `contrato`, `firmado`, `operan
             ],
             "servicios": {
               "operacion": true, "representacion": true, "cgm": true, "ppa": true,
-              "promotor": false, "rec": false,
               "fecha_fin_representacion": "2030-12-31"
             },
             "construccion": {
@@ -370,7 +369,7 @@ ni códigos SIC—, así que **sale del Proyecto o sale null**, y por eso no apa
 | `clasificacion` | `clasificacion_regulatoria` (la de la CREG: AGP/AGPE/AGGE/GD/DER — la que manda para el mercado), `tipo_proyecto` (la interna: minigranja/autoconsumo/gd/...), `tipo_tecnologia` y la etiqueta de comunidad energética. Tres ejes independientes: no se derivan uno del otro |
 | `tecnica` | Red (`voltaje_red`, `tipo_conexion`, `potencia_ac_kw` — que es AC, distinta de los kWp DC), paneles, inversores, almacenamiento y marcas de equipos. `paneles.grupos` e `inversores.equipos` son las listas **reales cargadas** —los inversores son los que se usan para reportar fallas por inversor— y `cantidad`/`marca` son el resumen que declaró el diseño: pueden no coincidir, y por eso viajan los dos. Los `equipos` excluyen los dados de baja. **No** salen IPs de módem ni contraseñas de medidor, que están en la misma tabla: esta superficie es de consulta |
 | `fronteras[]` | Las fronteras comerciales: **con qué código se liquida**. No pueden vivir a nivel de PPA (una planta tiene generación y consumo; un contrato de dos plantas tiene las de las dos). Traen código, tipo, estado, nivel de tensión, capacidad, subestación, punto de conexión y el operador de la frontera. Las borradas no salen; las credenciales de medidor tampoco |
-| `servicios` | Qué le presta Unergy a esta planta (`operacion`, `representacion`, `cgm`, `ppa`, `promotor`, `rec`) más `fecha_fin_representacion`. Son los **flags** del Proyecto —qué está activo—, no los contratos que los respaldan, que son otra entidad |
+| `servicios` | Qué le presta Unergy a esta planta (`operacion`, `representacion`, `cgm`, `ppa`) más `fecha_fin_representacion`. Sale de sus **contratos vigentes**, la misma respuesta que `GET /proyectos` (`apps/contratos/services/plantas.py`) |
 | `construccion` | `fase` (en_construccion / pruebas / proximo_energizar / energizado), `avance_obra_pct` y `fecha_estimada_energizacion`, de Sun Factory. Complementa `estado_proyecto`, que se queda en `en_desarrollo` toda la obra y no separa una planta en cimientos de una que se energiza la semana entrante |
 | `simulacion` | La curva simulada, 12 valores en kWh con **índice 0 = enero**. Los tres escenarios viajan porque no son intercambiables (el P50 es el esperado; con P90/P99 se estructura el negocio). Es una **proyección**, distinta de `energia_promedio_mensual_*`, que puede ser medida. `p50_anual_kwh` solo se calcula con la serie completa: sumar 7 meses y llamarlo anual sería mentira |
 

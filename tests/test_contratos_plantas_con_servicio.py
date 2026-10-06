@@ -292,22 +292,17 @@ def test_representamos_es_tener_contrato_de_representacion():
     assert {f["proyecto"] for f in proyectos_sin_panel(set())} == esperadas
 
 
-@pytest.mark.parametrize("bandera", ["srv_operacion", "srv_representacion"])
-def test_nadie_nuevo_lee_la_bandera(bandera):
-    """Los que quedan son los pasos siguientes (API de proyectos, pipeline, el
-    modelo) y el informe que mide el barrido. La lista solo puede achicarse."""
+@pytest.mark.parametrize("bandera", ["srv_operacion", "srv_representacion", "srv_cgm", "srv_ppa"])
+def test_nadie_lee_la_bandera(bandera):
+    """Fuera del modelo (sus columnas se borran en el último paso) y del informe
+    que mide el barrido, nadie lee ni escribe una bandera `srv_*`."""
     from pathlib import Path
 
     raiz = Path(__file__).resolve().parents[1]
     permitidos = {
         "apps/proyectos/models.py",
-        "api/v1/proyectos/serializers.py",
-        "apps/comercial/services/pipeline.py",
         "apps/contratos/management/commands/revisar_servicios_banderas.py",
     }
-    if bandera == "srv_representacion":
-        # Conserva el nombre de la clave en su respuesta; el valor ya sale del contrato.
-        permitidos.add("apps/energia/services/comercializacion.py")
     leen = {
         str(p.relative_to(raiz)).replace("\\", "/")
         for carpeta in ("apps", "api", "config")

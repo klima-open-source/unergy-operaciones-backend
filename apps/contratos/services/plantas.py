@@ -116,3 +116,36 @@ def servicios_por_proyecto(hoy: date) -> dict[int, set[str]]:
     for proyecto_id in comunidades.plantas_en_comunidad(hoy) & salida.keys():
         salida[proyecto_id] -= comunidades.EXCLUIDOS_EN_COMUNIDAD
     return {pid: subs for pid, subs in salida.items() if subs}
+
+
+#: Las claves de `resumen_servicios`, en el orden en que las muestra el front.
+SERVICIOS_DE_PLANTA = ("operacion", "representacion", "cgm", "ppa")
+
+
+def resumen_de(subservicios: set[str], estado: str | None) -> dict[str, bool]:
+    """Los cuatro servicios de una planta, como los muestra la plataforma. Puro.
+
+    `operacion` es la misma pregunta que `filtro_operadas` —genera Y la
+    operamos—, para que el catálogo de Fallas y el sondeo nunca discrepen.
+    """
+    return {
+        "operacion": bool(subservicios & set(grupos.SUBSERVICIOS[grupos.OPERACION]))
+        and estado == "en_operacion",
+        "representacion": grupos.REPRESENTACION in subservicios,
+        "cgm": grupos.CGM in subservicios,
+        "ppa": bool(subservicios & set(grupos.SUBSERVICIOS[grupos.PPA])),
+    }
+
+
+def resumen_servicios(proyectos, hoy: date, por_proyecto=None) -> dict[int, dict[str, bool]]:
+    """`{proyecto_id: {operacion, representacion, cgm, ppa}}` para esos proyectos.
+
+    Reemplaza a las banderas `srv_*` en lo que devuelve la API. `por_proyecto` se
+    pasa ya calculado cuando se arma para muchos a la vez (un listado): así son
+    cuatro consultas para toda la página, no cuatro por fila.
+    """
+    if por_proyecto is None:
+        por_proyecto = servicios_por_proyecto(hoy)
+    return {
+        p.id: resumen_de(por_proyecto.get(p.id, set()), p.estado) for p in proyectos
+    }

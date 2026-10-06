@@ -178,7 +178,6 @@ CASOS = [
     ("/api/v1/proyectos/7/debug-generacion", "debug_generacion"),
     ("/api/v1/proyectos/7/vincular-sunfactory/99", "vincular_sunfactory"),
     ("/api/v1/proyectos/7/merge/9", "merge"),
-    ("/api/v1/proyectos/7/servicios", "servicios"),
     ("/api/v1/proyectos/7/info-tecnica", "info_tecnica"),
     ("/api/v1/proyectos/7/inversores", "inversores"),
     ("/api/v1/proyectos/7/inversores/3", "inversor"),

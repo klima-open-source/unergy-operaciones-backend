@@ -163,12 +163,7 @@ Devuelve un objeto grande (~60 campos escalares más varias relaciones). Recorta
   "codigo_sic_generacion": "FRTXXXXX",
   "sub_project": "monterrubio",
   "codigo_tsf": "MGS-0029",
-  "srv_operacion": true,
-  "srv_representacion": true,
-  "srv_cgm": false,
-  "srv_ppa": true,
-  "srv_promotor": false,
-  "srv_rec": false,
+  "servicios": { "operacion": true, "representacion": true, "cgm": false, "ppa": true },
   "info_tecnica": { "potencia_ac_kw": 990.0, "marca_inversores": "Huawei" },
   "inversionistas": [
     { "cliente_id": 44, "cliente_nombre": "Fondo XYZ", "porcentaje_participacion": 0.6 }
@@ -193,7 +188,7 @@ Grupos de información que trae:
 | Ubicación | `departamento`, `municipio`, `direccion_vereda`, `latitud`, `longitud`, `operador_red`, `tipo_conexion` |
 | Fechas | `fecha_entrada_operacion`, `fecha_inicio_comercializacion`, `fecha_fin_representacion`, `fecha_estimada_energizacion` |
 | Códigos de mercado | Los IDs de Quoia y `project_id_solenium` (los códigos SIC de generación/consumo viven en la API de Liquidaciones, ver `/liquidaciones-api/proyectos/{id}`) |
-| Servicios contratados | Las banderas `srv_operacion`, `srv_representacion`, `srv_cgm`, `srv_ppa`, `srv_promotor`, `srv_rec` |
+| Servicios | `servicios`: `{operacion, representacion, cgm, ppa}`, **calculado de los contratos vigentes** y de solo lectura (`apps/contratos/services/plantas.py`). `operacion` es "genera y la operamos": estado `en_operacion` y contrato de operación vigente. A una planta en comunidad energética no se le cuentan representación ni CGM. Reemplaza a las banderas `srv_*`, que se ponían a mano |
 | Relaciones | `info_tecnica`, `inversionistas`, `inversores`, `area_contactos`, `servicio_representacion` |
 
 **404** si el `id` no existe: `{"detail": "Proyecto no encontrado"}`
@@ -298,7 +293,7 @@ curl -G https://operaciones.unergy.io/api/v1/proyectos \
 | `estado` | `en_desarrollo`, `en_operacion`, `suspendido`, `cancelado` |
 | `tipo_proyecto` | `minigranja`, `autoconsumo`, `gd`, `movilidad_electrica`, `otro` |
 | `portafolio_id` | Entero |
-| `servicio` | `operacion`, `representacion`, `cgm`, `ppa`, `promotor`, `rec` — banderas de servicio contratado (`srv_*`), no el contrato PPA real |
+| `servicio` | `operacion`, `representacion`, `cgm`, `ppa` — la planta tiene hoy un contrato vigente de ese servicio (la misma regla que `servicios`). No es lo mismo que `ppa_id`, que mira el vínculo a un contrato concreto |
 | `ppa_id` | Entero, repetible (`?ppa_id=12&ppa_id=45`). Proyectos vinculados a alguno de esos contratos (tabla `ppa_contratos`, join por `ppa_contrato_proyectos`). Un contrato borrado (borrado lógico) no cuenta: `ppa_id` de un contrato borrado no encuentra nada |
 | `sin_ppa` | `true` — proyectos sin ningún contrato PPA **vivo** vinculado. Se combina con `ppa_id` como OR: `ppa_id=12&sin_ppa=true` trae los del contrato 12 más los que no tienen ninguno. Un proyecto cuyo único contrato está borrado cuenta como "sin PPA" |
 

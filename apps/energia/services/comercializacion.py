@@ -363,9 +363,9 @@ def proyectos_sin_fecha_comercializacion() -> list[dict]:
             "id": p.id,
             "nombre": p.nombre_comercial,
             "estado": p.estado,
-            # La clave conserva su nombre por compatibilidad; el valor ya sale del
-            # contrato de representación vigente, no de la bandera.
-            "srv_representacion": p.id in representados,
+            # Del contrato de representación vigente; antes, la bandera del
+            # proyecto. Ningún front lee esta clave.
+            "representacion": p.id in representados,
             "identificador_monitoreo": ident,
             "motivo": "sin_identificador_monitoreo" if not ident else "sin_generacion_registrada",
         })

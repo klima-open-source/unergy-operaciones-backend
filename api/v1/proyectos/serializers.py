@@ -30,7 +30,6 @@ CAMPOS_CREACION = [
     "departamento", "municipio", "direccion_vereda", "latitud", "longitud",
     "altitud_msnm", "operador_red_id", "project_id_solenium",
     "p90_mensual_kwh", "p50_mensual_kwh", "p99_mensual_kwh", "codigo_tsf",
-    "srv_operacion", "srv_representacion", "srv_cgm", "srv_ppa",
     "origina_code", "sunfactory_project_id", "fase_construccion",
     "fecha_estimada_energizacion", "avance_obra_pct", "origen",
 ]
@@ -272,15 +271,33 @@ class ProyectoSerializer(serializers.ModelSerializer):
     info_tecnica = serializers.SerializerMethodField()
     inversores = ProyectoInversorSerializer(many=True, read_only=True)
     area_contactos = serializers.SerializerMethodField()
+    servicios = serializers.SerializerMethodField()
 
     class Meta:
         model = py_models.Proyecto
         fields = CAMPOS_CREACION + [
             "id", "potencia_instalada_kwp",   # alias de transición, ver arriba
             "operador_red_legal", "ppa_contratos", "inversionistas",
-            "info_tecnica", "inversores", "area_contactos",
+            "info_tecnica", "inversores", "area_contactos", "servicios",
             "created_at", "updated_at",
         ]
+
+    def get_servicios(self, obj) -> dict:
+        """`{operacion, representacion, cgm, ppa}`, de los contratos vigentes.
+
+        Reemplaza a las banderas `srv_*`, que se ponían a mano y nada sincronizaba
+        con los contratos (`apps/contratos/services/plantas.py`). Solo lectura. Un
+        listado pasa `servicios_por_proyecto` por contexto, calculado una vez para
+        toda la página; el detalle lo calcula para su único proyecto.
+        """
+        from apps.contratos.services import plantas
+        from apps.plataforma.services.fechas import hoy_col
+
+        hoy = hoy_col()
+        por_proyecto = self.context.get("servicios_por_proyecto")
+        if por_proyecto is None:
+            por_proyecto = plantas.servicios_por_proyecto(hoy)
+        return plantas.resumen_servicios([obj], hoy, por_proyecto)[obj.id]
 
     def get_operador_red_legal(self, obj) -> str | None:
         from apps.comercial.services.pipeline import operador_red_legal

@@ -5,7 +5,7 @@ Puerto de `app/services/reporte_energia/orquestador.py`.
 **Quoia es la fuente de verdad de QUÉ frontera reporta al ASIC**, no una regla
 propia. `codigos_quoia` es el conjunto de `frt_code` que trae
 `gaia.get_all_borders()`, lo mismo que alimenta la vista "Reportes" de Quoia
-Manager. La regla anterior (`estado == en_operacion AND srv_cgm`, con una
+Manager. La regla anterior (`estado == en_operacion` y la bandera de CGM, con una
 excepción manual) se descartó el 2026-08-21: comparadas contra datos reales, 0
 fronteras se habrían perdido y esa regla SÍ tenía huecos (GD Piojó, GD La
 Hormiguita ya registradas en Quoia pero nunca marcadas a mano).
@@ -143,7 +143,7 @@ def _fronteras_con_reporte(codigos_quoia: set[str]) -> list[tuple[Frontera, str 
     codigos_quoia es el conjunto de frt_code (lowercase) que trae
     gaia.get_all_borders() -- lo mismo que alimenta la vista "Reportes" de
     Quoia Manager. Antes se usaba una regla propia (Proyecto.estado ==
-    en_operacion AND srv_cgm, con una excepción manual
+    en_operacion AND la bandera de CGM, con una excepción manual
     reportar_asic_forzado) -- se descartó 2026-08-21 tras comparar ambos
     conjuntos contra datos reales: 0 fronteras se habrían perdido, y esa
     regla propia SÍ tenía huecos reales (GD Piojó, GD La Hormiguita: ya
