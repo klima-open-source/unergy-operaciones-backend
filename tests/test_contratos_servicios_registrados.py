@@ -92,14 +92,18 @@ def test_operacion_cubre_solo_su_servicio_aplica():
         servicios.deseados(om, ["arriendo", "internet"])
 
 
-def test_representacion_acepta_uno_o_los_dos_y_exige_su_servicio_aplica():
+def test_representacion_acepta_uno_o_los_dos():
+    """`servicio_aplica` vale siempre 'representacion' en este grupo: nombra al
+    grupo, así que un contrato solo de CGM es válido."""
     from apps.contratos.services import servicios
 
     rep = SimpleNamespace(grupo="representacion_cgm", servicio_aplica="representacion")
     assert servicios.deseados(rep, ["representacion", "cgm"]) == {"representacion", "cgm"}
-    # Sin lista: conserva lo que tenga, y siempre el principal.
-    assert servicios.deseados(rep, None, {"cgm"}) == {"representacion", "cgm"}
-    for malo in ([], ["mantenimiento"], ["cgm"]):
+    assert servicios.deseados(rep, ["cgm"]) == {"cgm"}
+    # Sin lista: conserva lo que tenga, sin agregarle nada; si es nuevo, representación.
+    assert servicios.deseados(rep, None, {"cgm"}) == {"cgm"}
+    assert servicios.deseados(rep, None, set()) == {"representacion"}
+    for malo in ([], ["mantenimiento"]):
         with pytest.raises(servicios.ServiciosInvalidos):
             servicios.deseados(rep, malo)
 
@@ -145,6 +149,17 @@ def test_representacion_conserva_el_cgm_registrado_al_volver_a_guardar(datos):
     assert _registrados(c) == ["cgm", "representacion"]
 
 
+def test_un_contrato_solo_de_cgm_no_gana_representacion_al_guardarse(datos):
+    """El caso del contrato 152 (MGS 0011 El Roble): solo CGM."""
+    from apps.contratos.models import ContratoServicio
+    from apps.contratos.services import servicios
+
+    c = ContratoServicio.objects.create(servicio_aplica="representacion")
+    servicios.registrar(c, ["cgm"])
+    c.save()
+    assert _registrados(c) == ["cgm"]
+
+
 # ── API ──────────────────────────────────────────────────────────────────────
 
 
@@ -171,6 +186,14 @@ def test_crear_un_contrato_de_representacion_y_cgm_por_la_api(datos):
     assert r.data["subservicios"] == ["representacion", "cgm"]
     # Ni `grupo` ni columnas de PPA se cuelan en la API de servicio.
     assert "tipo_contrato" not in r.data and "comprador_nit" not in r.data
+
+
+def test_crear_un_contrato_solo_de_cgm_por_la_api(datos):
+    r = _pedir("post", "/api/v1/contratos-servicio", datos,
+               {"servicio_aplica": "representacion", "servicios": ["cgm"]},
+               acciones={"post": "create"})
+    assert r.status_code == 201, r.data
+    assert r.data["subservicios"] == ["cgm"]
 
 
 def test_una_lista_que_no_es_del_grupo_es_un_400(datos):

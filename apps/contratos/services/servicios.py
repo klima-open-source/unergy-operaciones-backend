@@ -12,8 +12,11 @@ Por grupo:
 - **Operación:** una fila, la de `servicio_aplica`: cada subservicio de operación tiene
   su propio contrato, siempre.
 - **Representación / CGM:** los que se pidan (`representacion`, `cgm` o los dos). Si no
-  se piden, se conservan los que tenga. `servicio_aplica` —el servicio "principal" que
-  todavía leen ~15 filtros— tiene que estar entre ellos.
+  se piden, se conservan los que tenga; un contrato nuevo sin lista cubre representación.
+  Aquí `servicio_aplica` vale siempre `representacion` y nombra al GRUPO, no al servicio
+  (`'cgm'` no se usa: liquidaciones, costos y la pestaña filtran por `representacion`),
+  así que no dice nada de si el contrato cubre representación. Un contrato solo de CGM
+  tiene `servicio_aplica='representacion'` y una sola fila, `cgm`.
 
 Ya no se deduce nada de las tarifas cargadas: la tarifa puede llegar después, o nunca,
 sin cambiar qué servicios cubre el contrato. La única deducción que queda es la de la
@@ -57,16 +60,11 @@ def deseados(contrato, servicios=None, actuales=None) -> set[str]:
     if grupo == grupos.REPRESENTACION_CGM:
         validos = set(grupos.SUBSERVICIOS[grupos.REPRESENTACION_CGM])
         if pedidos is None:
-            return set(actuales or ()) | {contrato.servicio_aplica}
+            return set(actuales or ()) or {grupos.REPRESENTACION}
         if not pedidos or not pedidos <= validos:
             raise ServiciosInvalidos(
                 f"Un contrato de representación/CGM cubre {sorted(validos)}, "
                 "uno o los dos."
-            )
-        if contrato.servicio_aplica not in pedidos:
-            raise ServiciosInvalidos(
-                f"servicio_aplica ({contrato.servicio_aplica}) tiene que estar entre "
-                "los servicios del contrato."
             )
         return pedidos
 
