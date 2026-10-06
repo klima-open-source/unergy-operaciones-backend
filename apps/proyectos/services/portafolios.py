@@ -18,6 +18,8 @@ from django.db import IntegrityError, transaction
 from django.db.models import Q
 
 from apps.comun.nombre_matching import mejor_candidato
+from apps.contratos.services import plantas
+from apps.plataforma.services.fechas import hoy_col
 from apps.proyectos import models as py_models
 
 
@@ -26,12 +28,17 @@ class SiembraConcurrente(RuntimeError):
 
 
 def operativos_q() -> Q:
-    """Criterio de proyecto operativo. Escrito UNA vez: lo usan tres consultas."""
-    return Q(srv_operacion=True) | Q(estado="en_operacion")
+    """Criterio de proyecto operativo: en operación, o con contrato de operación
+    vigente aunque todavía no lo esté. Escrito UNA vez: lo usan tres consultas."""
+    return plantas.filtro_proyectos_con("operacion", hoy_col()) | Q(estado="en_operacion")
 
 
-def es_operativo(proyecto) -> bool:
-    return bool(proyecto.srv_operacion) or proyecto.estado == "en_operacion"
+def ids_operativos() -> set[int]:
+    """Los ids que cumplen `operativos_q()`, en UNA consulta: para quien recorre
+    todos los proyectos y pregunta por cada uno."""
+    return set(
+        py_models.Proyecto.objects.filter(operativos_q()).values_list("id", flat=True)
+    )
 
 
 def parecido(nombre: str, excluir_id: int | None = None):

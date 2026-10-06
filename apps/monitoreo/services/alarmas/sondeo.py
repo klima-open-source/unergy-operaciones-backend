@@ -24,7 +24,8 @@ from django.db import transaction
 
 from apps.fronteras.models import Frontera
 from apps.monitoreo.models import AlarmaMonitoreo
-from apps.plataforma.services.fechas import ahora_col
+from apps.contratos.services import plantas
+from apps.plataforma.services.fechas import ahora_col, hoy_col
 from apps.proyectos.models import Proyecto
 
 logger = logging.getLogger("operaciones.mgs")
@@ -72,8 +73,9 @@ def _resolver_mapa_proyectos(gaia) -> tuple[dict[int, int], dict[int, str]]:
 
     proyectos = list(
         Proyecto.objects.filter(
-            estado="en_operacion", deleted_at__isnull=True,
-            tipo_proyecto__in=TIPOS_MONITOREADOS, srv_operacion=True,
+            plantas.filtro_operadas(hoy_col()),
+            deleted_at__isnull=True,
+            tipo_proyecto__in=TIPOS_MONITOREADOS,
         ).values_list("id", "nombre_comercial")
     )
     fronteras = list(

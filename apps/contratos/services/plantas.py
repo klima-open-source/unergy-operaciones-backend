@@ -73,6 +73,24 @@ def filtro_proyectos_con(servicio: str, hoy: date) -> Q:
     return condicion
 
 
+def filtro_operadas(hoy: date) -> Q:
+    """Las plantas que se monitorean: generan Y las operamos.
+
+    Dos preguntas distintas, cada una con su fuente (decisión del 2026-10-06):
+
+    - **¿Genera?** El estado del proyecto, `en_operacion`. Es la condición técnica
+      para sondearla: un contrato de arriendo se firma antes de construir, y sin
+      ella esas plantas entrarían al sondeo y darían "sin comunicación" falsas.
+    - **¿La operamos?** Un contrato de operación vigente. Reemplaza a
+      la bandera de operación del proyecto.
+
+    La usan el sondeo MGS, las alarmas de desconexión, las tarjetas de Generación
+    Solar, los reconectadores, el informe de puesta en marcha y los paneles de O&M
+    y arriendos. Cada uno le suma sus filtros técnicos (tipo, id de SolarView).
+    """
+    return filtro_proyectos_con(grupos.OPERACION, hoy) & Q(estado="en_operacion")
+
+
 def servicios_por_proyecto(hoy: date) -> dict[int, set[str]]:
     """Los subservicios que hoy tiene cada planta con al menos uno. Cuatro consultas."""
     from apps.contratos.models import ContratoProyecto, Servicio

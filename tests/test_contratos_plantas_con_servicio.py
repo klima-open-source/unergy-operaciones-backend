@@ -215,3 +215,72 @@ def test_servicios_por_proyecto_coincide_con_el_filtro():
     assert por_proyecto == {"Completa": {"representacion", "cgm", "arriendo", "compra"}}
     for sub in grupos.GRUPO_DE_SUBSERVICIO:
         assert _con(sub) == {n for n, subs in por_proyecto.items() if sub in subs}
+
+
+# ── Paso 2: los que leían `srv_operacion` ────────────────────────────────
+
+
+def test_se_monitorean_las_que_generan_y_operamos():
+    """`en_operacion` dice que genera; el contrato, que la operamos. Un arriendo
+    firmado en desarrollo no la mete al sondeo, y la bandera sola ya no basta."""
+    from apps.contratos.services import plantas
+    from apps.proyectos.models import Proyecto
+
+    _servicio(_proyecto("Opera", estado="en_operacion"), "mantenimiento")
+    _servicio(_proyecto("En desarrollo", estado="en_desarrollo"), "arriendo")
+    _proyecto("Solo bandera", estado="en_operacion", srv_operacion=True)
+
+    assert set(Proyecto.objects.filter(plantas.filtro_operadas(HOY))
+               .values_list("nombre_comercial", flat=True)) == {"Opera"}
+
+
+def test_reconectadores_e_informe_de_puesta_en_marcha_usan_el_contrato():
+    from api.v1.informe_om.queryset import proyectos_con_informe
+    from api.v1.reconectadores.queryset import proyectos_con_relay
+
+    con_sv = _proyecto("Con SolarView", estado="en_operacion", tipo_proyecto="minigranja",
+                       project_id_solarview="sv-1")
+    _servicio(con_sv, "internet")
+    _servicio(_proyecto("Sin SolarView", estado="en_operacion",
+                        tipo_proyecto="minigranja"), "mantenimiento")
+    _proyecto("Solo bandera", estado="en_operacion", tipo_proyecto="minigranja",
+              project_id_solarview="sv-2", srv_operacion=True)
+
+    assert {p.nombre_comercial for p in proyectos_con_relay()} == {"Con SolarView"}
+    assert {p.nombre_comercial for p in proyectos_con_informe()} == {
+        "Con SolarView", "Sin SolarView"}
+
+
+def test_portafolios_cuenta_en_operacion_o_con_contrato():
+    from apps.proyectos.services import portafolios
+
+    _proyecto("En operación sin contrato", estado="en_operacion")
+    _servicio(_proyecto("En desarrollo con O&M", estado="en_desarrollo"), "mantenimiento")
+    _proyecto("Ninguna", estado="en_desarrollo", srv_operacion=True)
+
+    from apps.proyectos.models import Proyecto
+
+    nombres = dict(Proyecto.objects.values_list("id", "nombre_comercial"))
+    assert {nombres[i] for i in portafolios.ids_operativos()} == {
+        "En operación sin contrato", "En desarrollo con O&M"}
+
+
+def test_nadie_nuevo_lee_srv_operacion():
+    """Los que quedan son los pasos siguientes (API de proyectos, pipeline, el
+    modelo) y el informe que mide el barrido. La lista solo puede achicarse."""
+    from pathlib import Path
+
+    raiz = Path(__file__).resolve().parents[1]
+    permitidos = {
+        "apps/proyectos/models.py",
+        "api/v1/proyectos/serializers.py",
+        "apps/comercial/services/pipeline.py",
+        "apps/contratos/management/commands/revisar_servicios_banderas.py",
+    }
+    leen = {
+        str(p.relative_to(raiz)).replace("\\", "/")
+        for carpeta in ("apps", "api", "config")
+        for p in (raiz / carpeta).rglob("*.py")
+        if "migrations" not in p.parts and "srv_operacion" in p.read_text(encoding="utf-8")
+    }
+    assert leen <= permitidos, sorted(leen - permitidos)

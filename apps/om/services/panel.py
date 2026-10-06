@@ -9,8 +9,10 @@ from datetime import date
 from pathlib import Path
 
 from apps.contratos import models as ct_models
+from apps.contratos.services import plantas
 from apps.om import models as om_models
 from apps.om.services.calculadora import calcular_proyecto, serie_indexacion
+from apps.plataforma.services.fechas import hoy_col
 from apps.proyectos import models as py_models
 
 SERVICIO_OM = "mantenimiento"
@@ -58,10 +60,11 @@ def calculo(periodo: str) -> dict:
     documentos = _documentos_disponibles(periodo)
     contratos = _contrato_por_proyecto()
 
-    # Todos los proyectos EN OPERACIÓN con el servicio de operación contratado,
-    # tengan o no contrato de mantenimiento.
+    # Todos los proyectos EN OPERACIÓN con contrato de operación vigente
+    # (mantenimiento, arriendo o internet), tengan o no el de mantenimiento: así
+    # se ven los que lo tienen pendiente.
     proyectos = py_models.Proyecto.objects.filter(
-        estado="en_operacion", srv_operacion=True
+        plantas.filtro_operadas(hoy_col())
     ).order_by("nombre_comercial")
 
     filas, total = [], 0

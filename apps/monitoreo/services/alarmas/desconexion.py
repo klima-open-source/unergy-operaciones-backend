@@ -30,10 +30,12 @@ from concurrent.futures import ThreadPoolExecutor
 from django.db import close_old_connections
 from datetime import datetime, timezone, timedelta
 
+from apps.contratos.services import plantas
 from apps.fronteras.models import Frontera
 from apps.monitoreo.services.alarmas.estado import (
     cargar_estados, decidir_notificar, guardar_estados, notificar, usuarios_notificables,
 )
+from apps.plataforma.services.fechas import hoy_col
 from apps.proyectos.models import Proyecto
 
 TIPOS_GENERACION = ["generacion", "generacion_consumo"]
@@ -181,10 +183,9 @@ def evaluar_desconexiones(gaia=None):
 
     try:
         proyectos = list(Proyecto.objects.filter(
-            estado="en_operacion",
+            plantas.filtro_operadas(hoy_col()),
             project_id_solarview__isnull=False,
             tipo_proyecto="minigranja",
-            srv_operacion=True,
         ))
         if not proyectos:
             return
