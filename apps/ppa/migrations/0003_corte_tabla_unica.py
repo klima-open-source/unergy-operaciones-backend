@@ -11,7 +11,7 @@ class Migration(migrations.Migration):
         ("comercial", "0006_corte_tabla_unica"),
         ("contratos", "0009_corte_tabla_unica"),
         ("mercado_xm", "0002_corte_tabla_unica"),
-        ("monitoreo", "0007_corte_tabla_unica"),
+        ("monitoreo", "0008_corte_tabla_unica"),
         ("ppa", "0002_fecha_entrada_comunidad"),
     ]
 

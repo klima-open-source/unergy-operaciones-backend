@@ -8,7 +8,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("contratos", "0009_corte_tabla_unica"),
-        ("monitoreo", "0006_eliminar_mantenimientos"),
+        ("monitoreo", "0007_interruptor_reconectadores"),
     ]
 
     operations = [
