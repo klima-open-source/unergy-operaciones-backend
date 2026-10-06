@@ -228,15 +228,18 @@ class Command(BaseCommand):
             )
 
             w("\n== Para revisar en el barrido de servicios ==")
+            # Con el id VIEJO, que es el que la gente ve hoy en la plataforma.
             cur.execute(
-                "SELECT id, nombre_interno, servicio_aplica FROM contratos "
-                f"WHERE grupo = '{grupos.REPRESENTACION_CGM}' AND tarifa_representacion IS NULL "
-                "AND tarifa_cgm IS NOT NULL ORDER BY id"
+                "SELECT m.id_viejo, c.id, c.nombre_proyecto_ref FROM contratos c "
+                "JOIN contratos_servicio_correspondencia m ON m.contrato_id = c.id "
+                f"WHERE c.grupo = '{grupos.REPRESENTACION_CGM}' AND c.tarifa_representacion IS NULL "
+                "AND c.tarifa_cgm IS NOT NULL ORDER BY m.id_viejo"
             )
             filas = cur.fetchall()
             w(f"  Dicen `representacion` pero solo tienen tarifa de CGM: {len(filas)}")
-            for f in filas:
-                w(f"    contrato {f[0]} ({f[1] or 'sin nombre'}): quedó solo con `cgm`")
+            for viejo, nuevo, proyecto in filas:
+                w(f"    contrato de servicio {viejo} (nuevo {nuevo}, {proyecto or 'sin proyecto'}): "
+                  "quedó solo con `cgm`")
             cur.execute(
                 "SELECT count(*) FROM contratos "
                 f"WHERE grupo = '{grupos.REPRESENTACION_CGM}' AND tarifa_representacion IS NULL "
