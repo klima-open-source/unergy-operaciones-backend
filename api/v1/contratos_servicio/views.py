@@ -83,6 +83,12 @@ class ContratoServicioViewSet(
             cs_serializers.ContratoSerializer(contratos, many=True).data
         )
 
+    #: Lo que, al cambiar en un contrato existente, puede volverlo duplicado de
+    #: otro: es lo que compara `unicidad.buscar_duplicado`.
+    CAMPOS_QUE_DUPLICAN = frozenset({
+        "proyecto", "servicio_aplica", "inversionista", "inversionista_nombre",
+    })
+
     def _avisar_contrato_repetido(self, request, datos, instancia=None):
         """409 estructurado si ya hay un contrato vivo que cubre lo mismo.
 
@@ -92,6 +98,14 @@ class ContratoServicioViewSet(
         único que existía era el informe de duplicados, que se mira después.
         """
         if request.query_params.get("forzar", "").strip().lower() in ("1", "true", "yes", "on"):
+            return
+
+        # Al editar, solo si el cambio puede CREAR el duplicado: otra planta, otro
+        # servicio u otro inversionista. Si no, cambiar una fecha o una tarifa de un
+        # contrato que ya convive con otro en su planta daba 409 en cada guardado
+        # --el detalle del contrato no ofrece "guardar igual"-- y ese contrato
+        # quedaba sin poder editarse (5 en producción al 2026-10-06).
+        if instancia is not None and not (self.CAMPOS_QUE_DUPLICAN & datos.keys()):
             return
 
         # Sobre los datos YA combinados con la instancia: en un PATCH que solo

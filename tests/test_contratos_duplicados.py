@@ -330,6 +330,31 @@ def test_al_editar_se_usa_el_servicio_guardado_si_no_viene_en_el_cuerpo(datos):
     assert respuesta.status_code == 409, respuesta.data
 
 
+def test_editar_la_tarifa_de_un_contrato_que_convive_con_otro_no_avisa(datos):
+    """El caso de producción: dos contratos vivos del mismo servicio en la planta,
+    a uno le falta el inversionista (así que "podrían" ser el mismo). Cambiarle la
+    tarifa no crea nada nuevo: avisar ahí dejaba el contrato sin poder editarse."""
+    planta = _planta()
+    _contrato(proyecto=planta)
+    otro = _contrato(proyecto=planta, inversionista=_cliente("Inversionista B"))
+
+    respuesta = _editar(datos, otro.id, {"tarifa_representacion": "12.5"})
+
+    assert respuesta.status_code == 200, respuesta.data
+
+
+def test_cambiarle_el_inversionista_si_revisa(datos):
+    """Cambiar el inversionista sí puede volverlo el duplicado de otro."""
+    planta = _planta()
+    a = _cliente("Inversionista A")
+    _contrato(proyecto=planta, inversionista=a)
+    otro = _contrato(proyecto=planta, inversionista=_cliente("Inversionista B"))
+
+    respuesta = _editar(datos, otro.id, {"inversionista_id": a.id})
+
+    assert respuesta.status_code == 409, respuesta.data
+
+
 def test_forzar_tambien_vale_al_editar(datos):
     destino = _planta("Destino")
     _contrato(proyecto=destino)
