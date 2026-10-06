@@ -34,7 +34,8 @@ class ContratoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ct_models.ContratoServicio
-        exclude = ["contratante", "prestador", "inversionista", "portafolio"]
+        exclude = ["contratante", "prestador", "inversionista", "portafolio",
+                   *ct_models.COLUMNAS_SOLO_PPA]
 
     def get_nombre_proyecto(self, obj) -> str | None:
         return obj.proyecto.nombre_comercial if obj.proyecto else None
@@ -78,6 +79,13 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
     enlace_drive = serializers.CharField(
         required=False, allow_null=True, allow_blank=True
     )
+    # Qué servicios cubre (tabla `servicios`). Opcional: sin ella se conservan los
+    # que ya tenga y siempre el de `servicio_aplica`. Hace falta para un contrato de
+    # representación Y CGM (`["representacion", "cgm"]`).
+    servicios = serializers.ListField(
+        child=serializers.ChoiceField(choices=ct_models.ServicioContrato.choices),
+        required=False, write_only=True,
+    )
     # `fields = "__all__"` generaba el campo relacional bajo la clave "proyecto"
     # (el nombre del FK), pero el frontend manda "proyecto_id" -- DRF ignora en
     # silencio una clave que no reconoce, asi que "Asociar a un proyecto"
@@ -90,7 +98,8 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ct_models.ContratoServicio
-        exclude = ["proyecto"]
+        # `grupo` lo fija el `save()` desde `servicio_aplica`: no se escribe.
+        exclude = ["proyecto", "grupo", *ct_models.COLUMNAS_SOLO_PPA]
         extra_kwargs = {"servicio_aplica": {"required": False}}
 
     def validate(self, datos):

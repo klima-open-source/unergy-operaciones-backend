@@ -6,26 +6,23 @@ El razonamiento completo y la ruta están en `docs/SERVICIOS_AGRUPACION.md`.
 **Un contrato cubre uno o más subservicios, todos del mismo grupo**, y ese "uno
 o más" es siempre UNO salvo en `representacion_cgm`:
 
-- `ppa` — un contrato, de compra O de venta. La tabla es otra (`ppa_contratos`)
-  y el subservicio sale de su `tipo_contrato`.
+- `ppa` — un contrato, de compra O de venta (de su `tipo_contrato`).
 - `representacion_cgm` — un contrato puede cubrir los dos subservicios a la vez
   (el caso general), uno solo, o existir un contrato por cada uno. Es el ÚNICO
   caso con más de un subservicio, y por eso `subservicios_de()` devuelve lista.
 - `operacion` — cada subservicio tiene su PROPIO contrato, siempre. Una planta
   con mantenimiento, arriendo e internet tiene tres contratos distintos.
 
-Por qué los subservicios de `representacion_cgm` se derivan de las tarifas y no
-de `servicio_aplica`: ese campo admite un solo valor, así que un contrato que es
-representación Y CGM tiene que mentir, y el subservicio que no quedó grabado se
-vuelve invisible para todo filtro. Las cuatro columnas (`tarifa_*`,
-`indexacion_*`) sí conviven en la fila, así que el dato está; lo que falta es la
-etiqueta. Ver `docs/SERVICIOS_AGRUPACION.md` §5: esto es la "Opción A", y se
-eligió sobre una tabla `contrato_subservicio` porque no necesita migración ni
-escritura en el wizard -- y la revisión 118 de Alembic ya mostró qué le pasa a
-una estructura que nada llena.
+**Qué servicios cubre un contrato se REGISTRA en la tabla `servicios`** (plan
+`docs/refactor/08-plan-django-contratos.md`), y `subservicios_de()` la lee. Antes
+se deducía de las tarifas cargadas ("Opción A" de `docs/SERVICIOS_AGRUPACION.md`
+§5): `servicio_aplica` admite un solo valor, así que un contrato de representación
+Y CGM solo se delataba por tener las dos tarifas. Esa deducción se usa ya una sola
+vez, en la copia inicial a la tabla única; la tabla la escribe únicamente
+`apps/contratos/services/servicios.py`, desde `Contrato.save()`.
 
 `servicio_aplica` NO se toca: los ~15 filtros literales repartidos por `apps/`
-siguen funcionando igual.
+siguen funcionando igual, y es siempre uno de los servicios del contrato.
 """
 
 from decimal import Decimal
@@ -102,28 +99,34 @@ def grupo_de(subservicio: str | None) -> str | None:
     return GRUPO_DE_SUBSERVICIO.get(subservicio or "")
 
 
+#: Orden de presentación de todos los subservicios: el del catálogo.
+ORDEN_SUBSERVICIOS: tuple[str, ...] = tuple(
+    sub for grupo in ORDEN_GRUPOS for sub in SUBSERVICIOS[grupo]
+)
+
+
+def en_orden(subservicios) -> list[str]:
+    """Los subservicios dados, en el orden del catálogo."""
+    dados = set(subservicios)
+    return [sub for sub in ORDEN_SUBSERVICIOS if sub in dados]
+
+
 def subservicios_de(contrato) -> list[str]:
-    """Los subservicios que cubre un `ContratoServicio`.
+    """Los subservicios que cubre un contrato, según la tabla `servicios`.
 
     Devuelve **lista** porque un contrato de representación+CGM cubre dos. Para
-    Operación siempre trae uno: ahí cada subservicio tiene su propio contrato.
+    precargarlos en un listado: `prefetch_related("servicios")`.
 
-    En `representacion_cgm` el valor NO sale de `servicio_aplica` —que solo
-    admite uno— sino de qué tarifas tiene la fila. Si no tiene ninguna, se cae a
-    `servicio_aplica` para no devolver vacío: un contrato recién creado, todavía
-    sin tarifas cargadas, debe seguir apareciendo en su pestaña.
+    Un contrato todavía sin guardar (o sin filas, que no debería pasar: el
+    `save()` las escribe) cae a `servicio_aplica`, para no desaparecer de su
+    pestaña. Un valor fuera del catálogo devuelve lista vacía en vez de inventar.
     """
-    aplica = contrato.servicio_aplica
-    if grupo_de(aplica) != REPRESENTACION_CGM:
-        # Operación: uno y solo uno. Un valor desconocido devuelve lista vacía
-        # en vez de inventar un grupo.
-        return [aplica] if aplica in SUBSERVICIOS_DE_CONTRATO_SERVICIO else []
-
-    encontrados = [
-        sub for sub in SUBSERVICIOS[REPRESENTACION_CGM]
-        if getattr(contrato, COLUMNA_TARIFA[sub], None) is not None
-    ]
-    return encontrados or [aplica]
+    if getattr(contrato, "pk", None) is not None:
+        registrados = [s.servicio for s in contrato.servicios.all()]
+        if registrados:
+            return en_orden(registrados)
+    aplica = getattr(contrato, "servicio_aplica", None)
+    return [aplica] if aplica in SUBSERVICIOS_DE_CONTRATO_SERVICIO else []
 
 
 def grupo_de_contrato(contrato) -> str | None:
@@ -146,14 +149,20 @@ def tarifas_de(contrato) -> dict[str, Decimal | None]:
     return {sub: tarifa_de(contrato, sub) for sub in subservicios_de(contrato)}
 
 
-def subservicio_de_ppa(contrato_ppa) -> str:
-    """Compra o venta, desde `PpaContrato.tipo_contrato`.
+def subservicio_de_tipo_contrato(tipo_contrato: str | None) -> str:
+    """Compra o venta, desde `tipo_contrato`. Nulo = venta, como su default: un PPA
+    nunca queda sin subservicio y fuera de todo filtro."""
+    return COMPRA if tipo_contrato == COMPRA else VENTA
 
-    La columna admite nulo y su default es `venta`; un nulo se trata como venta
-    igual que el default, en vez de dejar el PPA sin subservicio y fuera de todo
-    filtro.
-    """
-    return COMPRA if contrato_ppa.tipo_contrato == COMPRA else VENTA
+
+def subservicio_de_ppa(contrato_ppa) -> str:
+    """Compra o venta de un PPA, según su fila en `servicios` (la escribe
+    `servicios.registrar` desde `tipo_contrato`, y nunca por separado)."""
+    if getattr(contrato_ppa, "pk", None) is not None:
+        for s in contrato_ppa.servicios.all():
+            if s.servicio in SUBSERVICIOS[PPA]:
+                return s.servicio
+    return subservicio_de_tipo_contrato(getattr(contrato_ppa, "tipo_contrato", None))
 
 
 def catalogo() -> list[dict]:

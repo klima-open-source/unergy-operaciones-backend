@@ -104,6 +104,8 @@ docker compose exec operaciones python manage.py backfill_contratos_unificados
 - **Pausa de edición de contratos** desde la copia hasta el deploy 2 (se avisa al equipo). La copia se
   repite (`--reset`) justo antes del deploy 2.
 - Se revisa el reporte del `--dry-run` antes de la copia real.
+- Con la copia hecha (y después del `--reset`, si se repite), la foto de antes:
+  `docker compose exec operaciones python manage.py verificar_corte_contratos foto`.
 
 ### Deploy 2 — el corte
 
@@ -114,6 +116,12 @@ docker compose exec operaciones python manage.py backfill_contratos_unificados
   sus datos**.
 - Se ajusta el SQL directo contra las tablas viejas (`apps/clientes/services/gestion.py:142` y `:155`).
 - `servicios` queda conectada (§3).
+- Justo después del deploy, la foto de después y la comparación (falla si algo cambió):
+
+  ```bash
+  docker compose exec operaciones python manage.py verificar_corte_contratos foto
+  docker compose exec operaciones python manage.py verificar_corte_contratos comparar       uploads/corte_contratos/foto_antes_<...>.json uploads/corte_contratos/foto_despues_<...>.json
+  ```
 - **Rollback:** revertir el PR. La migración inversa vuelve a apuntar las FK a las tablas viejas y
   deshace la reescritura con la misma tabla de correspondencia. Hay que escribirla y ensayarla en `pg17`
   antes, no improvisarla.
@@ -136,10 +144,15 @@ del monitoreo sin aviso (eran ~36 en septiembre).
 - `pg_dump` de `ppa_contratos`, `contratos_servicio` y `ppa_contrato_proyectos` a un archivo fuera de la
   base.
 - Migración con el `DROP` de las tres.
-- Se borra `backfill_contratos_unificados`.
+- Se borran `backfill_contratos_unificados` y `verificar_corte_contratos`.
 - **Rollback:** restaurar del dump. Es el único paso sin vuelta atrás por deploy.
 
 ## 6 · Verificación (en `pg17` antes de cada deploy, y en producción después)
+
+`verificar_corte_contratos comparar` cubre la base cruda (las 18 FK: nombre, definición y los valores de
+cada fila, con los ids de servicio traducidos), los conteos, los servicios de cada contrato, la
+compra/venta y las plantas de cada PPA, y el resumen de facturación de los dos meses cerrados. Ensayado
+en `pg17` el 2026-10-06: sin diferencias. El resto de la lista se revisa a mano:
 
 - `contratos` tiene 35 + 160 filas (o lo que diga la captura); los 35 ids de PPA son idénticos a los
   de `ppa_contratos`.

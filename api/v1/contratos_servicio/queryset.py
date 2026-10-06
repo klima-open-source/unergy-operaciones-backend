@@ -28,6 +28,7 @@ def con_relaciones():
         .prefetch_related(
             "contrato_frontera_por_contrato_servicio_id__frontera",
             "cliente_documentos_comerciales_por_contrato_servicio_id",
+            "servicios",
         )
     )
 

@@ -4,8 +4,10 @@ Lo que se prueba acá es la cardinalidad que define el negocio y que el esquema
 no sabe expresar: en Operación cada subservicio tiene su contrato, y solo
 representación+CGM puede traer dos en uno.
 
-No tocan la base: `subservicios_de` y `tarifa_de` leen atributos, así que un
-objeto suelto sirve y las pruebas corren sin `django_db`.
+No tocan la base: `subservicios_de` lee `contrato.servicios.all()` y `tarifa_de`
+lee atributos, así que un objeto suelto sirve y las pruebas corren sin
+`django_db`. Lo que escribe la tabla `servicios` se prueba en
+`test_contratos_servicios_registrados.py`.
 """
 
 from decimal import Decimal
@@ -15,15 +17,28 @@ import pytest
 from apps.contratos.services import grupos
 
 
+class _Servicios:
+    """Imita `contrato.servicios` (la relación con la tabla `servicios`)."""
+
+    def __init__(self, nombres):
+        self._filas = [type("Servicio", (), {"servicio": n})() for n in nombres]
+
+    def all(self):
+        return self._filas
+
+
 class ContratoFalso:
-    """Lo mínimo que leen las funciones del catálogo."""
+    """Lo mínimo que leen las funciones del catálogo. Con `servicios`, es un
+    contrato ya guardado (tiene `pk`) con esas filas registradas."""
 
     def __init__(self, servicio_aplica, tarifa_representacion=None,
-                 tarifa_cgm=None, tarifa_base=None):
+                 tarifa_cgm=None, tarifa_base=None, servicios=None):
         self.servicio_aplica = servicio_aplica
         self.tarifa_representacion = tarifa_representacion
         self.tarifa_cgm = tarifa_cgm
         self.tarifa_base = tarifa_base
+        self.pk = 1 if servicios is not None else None
+        self.servicios = _Servicios(servicios or [])
 
 
 class PpaFalso:
@@ -92,47 +107,36 @@ def test_los_tres_de_operacion_comparten_tarifa_base():
 
 # ── Representación y CGM: el único caso de dos en uno ─────────────────────
 
-def test_un_contrato_con_las_dos_tarifas_cubre_los_dos_subservicios():
+def test_un_contrato_registrado_con_los_dos_cubre_los_dos_subservicios():
     """El caso general que `servicio_aplica` no puede expresar."""
-    contrato = ContratoFalso(
-        "representacion",
-        tarifa_representacion=Decimal("0.5"), tarifa_cgm=Decimal("1.25"),
-    )
+    contrato = ContratoFalso("representacion", servicios=["cgm", "representacion"])
+    assert grupos.subservicios_de(contrato) == ["representacion", "cgm"]  # orden del catálogo
+
+
+def test_la_tarifa_ya_no_decide_que_servicios_cubre():
+    """Antes, un contrato con solo tarifa de CGM era 'de CGM'. Ahora manda lo
+    registrado: la tarifa puede llegar después, o nunca."""
+    contrato = ContratoFalso("representacion", tarifa_cgm=Decimal("1.25"),
+                             servicios=["representacion", "cgm"])
     assert grupos.subservicios_de(contrato) == ["representacion", "cgm"]
-
-
-def test_grabado_como_representacion_pero_solo_con_tarifa_cgm_es_cgm():
-    """Lo que hoy queda invisible: la etiqueta dice una cosa y el dato otra."""
-    contrato = ContratoFalso("representacion", tarifa_cgm=Decimal("1.25"))
-    assert grupos.subservicios_de(contrato) == ["cgm"]
 
 
 def test_solo_representacion():
-    contrato = ContratoFalso(
-        "representacion", tarifa_representacion=Decimal("0.5")
-    )
+    contrato = ContratoFalso("representacion", servicios=["representacion"])
     assert grupos.subservicios_de(contrato) == ["representacion"]
 
 
-def test_sin_tarifas_cae_a_servicio_aplica():
-    """Un contrato recién creado no puede desaparecer de su pestaña."""
+def test_sin_guardar_cae_a_servicio_aplica():
+    """Un contrato todavía sin guardar no puede desaparecer de su pestaña."""
     contrato = ContratoFalso("cgm")
     assert grupos.subservicios_de(contrato) == ["cgm"]
-
-
-def test_tarifa_en_cero_cuenta_como_subservicio_contratado():
-    """Cero es un valor cargado, no un dato ausente. Solo `None` significa 'no'."""
-    contrato = ContratoFalso(
-        "representacion",
-        tarifa_representacion=Decimal("0.5"), tarifa_cgm=Decimal("0"),
-    )
-    assert grupos.subservicios_de(contrato) == ["representacion", "cgm"]
 
 
 def test_cada_subservicio_tiene_su_propia_tarifa():
     contrato = ContratoFalso(
         "representacion",
         tarifa_representacion=Decimal("0.5"), tarifa_cgm=Decimal("1.25"),
+        servicios=["representacion", "cgm"],
     )
     assert grupos.tarifa_de(contrato, "representacion") == Decimal("0.5")
     assert grupos.tarifa_de(contrato, "cgm") == Decimal("1.25")
