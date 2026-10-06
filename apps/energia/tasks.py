@@ -30,11 +30,16 @@ logger = logging.getLogger("operaciones.tareas")
 def reporte_diario() -> str:
     """Clasifica el Reporte de Energía (Generación + Consumo) del día anterior.
 
-    A las 3:30am hora Bogotá el reporte CGM de Quoia ya suele estar asentado: el
-    de un día llega completo entre las 9 y las 10am del día siguiente. Se
-    adelantó de 4:00 a 3:30 el 2026-08-21 porque la corrida del 20-ago tardó más
-    de 45 min sin terminar (vs. 23-50 min los diez días previos), y hacía falta
-    media hora más de margen antes de que alguien lo revise en la mañana.
+    Corre a las 3:00am hora Bogotá. Se adelantó de 4:00 a 3:30 el 2026-08-21
+    porque la corrida del 20-ago tardó más de 45 min sin terminar (vs. 23-50 min
+    los diez días previos), y hacía falta media hora más de margen antes de que
+    alguien lo revise en la mañana; a las 3:30 el reporte CGM de Quoia ya solía
+    estar asentado. Se adelantó otra vez, a las 3:00, el 2026-09-30, a pedido de
+    Sara. Si desde entonces suben las fronteras en "Revisar Manualmente", lo
+    primero a mirar es si el CGM de Quoia todavía no está asentado a esa hora.
+
+    Con `--concurrency=1`, mientras corre ocupa el worker: las tareas de las
+    3:20 y 3:30-3:35 (`config/horarios.py`) quedan en cola hasta que termine.
 
     `ejecutar_dia_background` maneja su propia sesión, su logging y su registro
     de últimas corridas — el mismo mecanismo que usa `POST /reporte-energia/ejecutar`.
@@ -63,7 +68,7 @@ def drift_medidores() -> str:
     2026-08-26).
 
     Corre varias veces entre las 4:00 y las 5:30am: después de la clasificación
-    de las 3:30, con margen para que termine, y dándole varias oportunidades de
+    de las 3:00, con margen para que termine, y dándole varias oportunidades de
     detectar un valor que Quoia siga asentando esa madrugada. El costo por
     corrida no crece: las filas ya marcadas se excluyen de la consulta
     siguiente.

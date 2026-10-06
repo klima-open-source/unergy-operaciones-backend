@@ -378,7 +378,7 @@ class InformeViewSet(viewsets.GenericViewSet):
                 "(tab Contactos)."
             )}, status=422)
 
-        from app.services.email_service import send_informe_email
+        from apps.comun.integraciones.email_service import send_informe_email
 
         try:
             send_informe_email(

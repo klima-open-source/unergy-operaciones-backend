@@ -298,7 +298,7 @@ def test_notificar_manda_el_nombre_de_quien_registro(datos, monkeypatch):
     # Sin correos operacionales el servicio corta antes de armar el mensaje.
     monkeypatch.setattr(notificacion, "correos_de",
                         lambda *a, **k: ["cliente@ejemplo.com"])
-    import app.services.email_service as email_service
+    import apps.comun.integraciones.email_service as email_service
     monkeypatch.setattr(email_service, "send_falla_notification_email", _falso_envio)
 
     falla = _falla(datos)

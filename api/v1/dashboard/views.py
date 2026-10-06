@@ -6,7 +6,6 @@ from rest_framework.response import Response
 
 from api.logging import class_logger_wrapper
 from api.permissions import RolePermission
-from apps.monitoreo.services import flota as flota_service
 from apps.proyectos import models as py_models
 
 from . import queryset as dashboard_queryset
@@ -16,7 +15,7 @@ from . import queryset as dashboard_queryset
 class DashboardViewSet(viewsets.GenericViewSet):
     """GET /api/v1/dashboard/kpis — todas las métricas de la portada.
 
-    Una sola llamada a propósito: la pantalla necesita las 19 cifras juntas y
+    Una sola llamada a propósito: la pantalla necesita todas las cifras juntas y
     partirlas en varios endpoints multiplicaría los viajes sin ahorrar consultas.
     """
 
@@ -25,4 +24,4 @@ class DashboardViewSet(viewsets.GenericViewSet):
 
     @action(detail=False, methods=["get"], url_path="kpis")
     def kpis(self, request):
-        return Response({**dashboard_queryset.kpis(), **flota_service.resumen()})
+        return Response(dashboard_queryset.kpis())

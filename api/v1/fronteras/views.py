@@ -352,7 +352,7 @@ class FronteraViewSet(viewsets.GenericViewSet):
 
         Nunca se crean solos: se listan para confirmar a mano.
         """
-        from app.services.mgs.gaia_client import _mgs_number
+        from apps.comun.integraciones.gaia_client import _mgs_number
 
         resultado = self._quoia(quoia_service.borders)
         if isinstance(resultado, Response):

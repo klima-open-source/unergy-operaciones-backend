@@ -1,9 +1,7 @@
 """El arbol Django (`apps/`, `api/`, `config/`) no importa FastAPI ni SQLAlchemy.
 
 Django reemplazo a FastAPI el 2026-09-04, pero el paquete `app/` sigue en el
-repo --266 archivos-- porque `apps/` le importa clientes puros (MGS, SMTP, los
-parsers de correo de mandatos, `liquidaciones_loader`). Parece vivo, y ahi esta
-el riesgo: quien entre a iterar puede concluir que ese es el arbol donde se
+repo --266 archivos-- como copia congelada. Parece vivo, y ahi esta el riesgo: quien entre a iterar puede concluir que ese es el arbol donde se
 escribe, o traerse un `Depends`/`Session` a un modulo nuevo bajo `apps/`.
 
 La regla esta escrita en `CLAUDE.md`, pero la prosa se ignora y un test rojo no.
@@ -15,10 +13,10 @@ Se mira el AST y no el texto: hay docstrings que NOMBRAN a las dos librerias a
 proposito (`apps/plataforma/models.py` explica que su tabla no tiene modelo
 SQLAlchemy), y un grep las contaria como violaciones.
 
-La escotilla que existe --`apps/liquidaciones/services/excel.py` importa
-`app.core.database.SessionLocal`-- no la ve este test, y es correcto: importa
-`app.*`, no `sqlalchemy`. Los imports de `app.*` son la deuda que se paga
-portando esos 21 modulos; los de `sqlalchemy` serian deuda NUEVA.
+El primer test no ve un import INDIRECTO --`app.core.database` abre una sesion
+de SQLAlchemy sin que el archivo nombre a la libreria--. Por eso los dos tests
+de `PRESTADOS_DE_APP`, mas abajo, vigilan cualquier `from app.`: la lista de lo
+que el arbol Django todavia le toma a `app/`, que solo se achica.
 """
 import ast
 from pathlib import Path
@@ -61,4 +59,74 @@ def test_arbol_django_no_importa_fastapi_ni_sqlalchemy():
         "El arbol Django importa FastAPI o SQLAlchemy. Codigo nuevo va a "
         "`apps/<dominio>/` + `api/v1/<recurso>/` con el ORM de Django "
         "(ver CLAUDE.md):\n  " + "\n  ".join(violaciones)
+    )
+
+
+# ── Lo que el arbol Django todavia le toma prestado a `app/` ────────────────
+#
+# Los modulos de `app/` que `apps/`, `api/` o `config/` importan HOY. La lista
+# solo se achica: al portar uno a `apps/`, se reapuntan sus imports y se borra
+# de aca (el segundo test falla si queda una entrada que ya nadie usa). Lo que
+# no esta en la lista no se puede importar: ningun `from app.` nuevo.
+#
+# `app/` no se toca: queda como copia congelada. Cuando la lista este vacia,
+# nada de lo que corre en produccion depende de el.
+PRESTADOS_DE_APP = {
+    "app.models.proyectos",           # apps/comercial/services/pipeline.py
+}
+
+
+def _modulo_de_app(modulo: str, nombre: str) -> str:
+    """`from apps.comun.integraciones import email_service` importa el MODULO
+    `app.services.email_service`, no un nombre de `app.services`."""
+    candidato = f"{modulo}.{nombre}"
+    ruta = RAIZ.joinpath(*candidato.split("."))
+    if ruta.with_suffix(".py").exists() or (ruta / "__init__.py").exists():
+        return candidato
+    return modulo
+
+
+def _imports_de_app(archivo: Path) -> list[tuple[str, str]]:
+    arbol = ast.parse(archivo.read_text(encoding="utf-8"), filename=str(archivo))
+    encontrados = []
+    for nodo in ast.walk(arbol):
+        if isinstance(nodo, ast.Import):
+            modulos = [a.name for a in nodo.names if _raiz_del_modulo(a.name) == "app"]
+        elif isinstance(nodo, ast.ImportFrom) and nodo.module and not nodo.level:
+            if _raiz_del_modulo(nodo.module) != "app":
+                continue
+            modulos = [_modulo_de_app(nodo.module, a.name) for a in nodo.names]
+        else:
+            continue
+        for modulo in modulos:
+            encontrados.append((modulo, f"{archivo.relative_to(RAIZ)}:{nodo.lineno}"))
+    return encontrados
+
+
+def _todos_los_imports_de_app() -> list[tuple[str, str]]:
+    return [
+        i
+        for paquete in PAQUETES
+        for archivo in sorted((RAIZ / paquete).rglob("*.py"))
+        for i in _imports_de_app(archivo)
+    ]
+
+
+def test_arbol_django_no_toma_de_app_nada_fuera_de_la_lista():
+    nuevos = [f"{donde} → {modulo}" for modulo, donde in _todos_los_imports_de_app()
+              if modulo not in PRESTADOS_DE_APP]
+    assert not nuevos, (
+        "El arbol Django importa de `app/` algo que no estaba prestado. `app/` "
+        "esta congelado: el codigo va en `apps/` (ver CLAUDE.md):\n  "
+        + "\n  ".join(nuevos)
+    )
+
+
+def test_la_lista_de_prestados_no_guarda_modulos_ya_portados():
+    usados = {modulo for modulo, _ in _todos_los_imports_de_app()}
+    sobrantes = sorted(PRESTADOS_DE_APP - usados)
+    assert not sobrantes, (
+        "Estos modulos ya no se importan desde el arbol Django: borralos de "
+        "PRESTADOS_DE_APP para que no se puedan volver a usar:\n  "
+        + "\n  ".join(sobrantes)
     )

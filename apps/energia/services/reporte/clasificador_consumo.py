@@ -58,7 +58,7 @@ from datetime import date
 
 import pandas as pd
 
-from app.services.mgs.gaia_client import GaiaClient
+from apps.comun.integraciones.gaia_client import GaiaClient
 from apps.energia.services.reporte import curvas, historial
 from apps.energia.services.reporte.utils import CURVA_CERO, CURVA_VACIA, HORAS_SOLARES, escalar_curva, curva_a_lista
 

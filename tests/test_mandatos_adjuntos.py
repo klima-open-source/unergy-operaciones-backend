@@ -2,7 +2,7 @@
 import io
 import zipfile
 
-from app.services.mandatos.adjuntos import expandir_adjuntos
+from apps.mandatos.services.adjuntos import expandir_adjuntos
 
 
 def _zip(nombres: dict[str, bytes]) -> bytes:

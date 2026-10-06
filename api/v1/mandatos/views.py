@@ -295,7 +295,7 @@ class MandatoViewSet(viewsets.GenericViewSet):
     @action(detail=False, methods=["get"], url_path="diagnostico-imap")
     def diagnostico_imap(self, request):
         """Prueba la conexión IMAP a demanda. Solo lee: no toca base ni buzón."""
-        from app.services.mandatos.diagnostico import diagnostico_imap
+        from apps.mandatos.services.diagnostico import diagnostico_imap
 
         return Response(diagnostico_imap())
 

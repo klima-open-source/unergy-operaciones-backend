@@ -14,9 +14,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-# `ponytail: los clientes de Quoia y SolarView siguen en app/services/mgs/`.
-# Son HTTP puro, sin sesión de base: se mueven cuando se retire FastAPI.
-from app.services.mgs.solarview_client import SolarViewClient
+from apps.comun.integraciones.solarview_client import SolarViewClient
 from apps.energia.services.reporte.curvas import dia_completo
 from apps.energia.services.reporte.utils import limite_plausible_kwh
 

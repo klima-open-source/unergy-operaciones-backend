@@ -5,8 +5,7 @@ Puerto de `app/api/v1/reporte_cgm.py`. Acá vive todo lo que toca la base
 lote de llamadas a Quoia. El cálculo y el Excel están en
 `apps.energia.services.cgm`, que no sabe de la base ni de destinatarios.
 
-El cliente SMTP sigue en `app/services/email_service.py`: no toca la base y se
-portará cuando se retire FastAPI, como los clientes de MGS.
+El cliente SMTP vive en `apps/comun/integraciones/email_service.py`.
 """
 
 from __future__ import annotations
@@ -214,7 +213,7 @@ def _resultado(dest, nombre, correos, fronteras, ok, **extra) -> dict:
 
 def enviar(fecha_inicio, fecha_fin, destinatarios: list[dict]) -> dict:
     """Genera y manda el reporte CGM a cada destinatario."""
-    from app.services.mgs.gaia_client import GaiaClient
+    from apps.comun.integraciones.gaia_client import GaiaClient
 
     if fecha_fin < fecha_inicio:
         fecha_inicio, fecha_fin = fecha_fin, fecha_inicio
@@ -338,7 +337,7 @@ def enviar(fecha_inicio, fecha_fin, destinatarios: list[dict]) -> dict:
             close_old_connections()
 
     # 3. Generar y enviar un Excel por destinatario, filtrado a sus fronteras.
-    from app.services import email_service
+    from apps.comun.integraciones import email_service
 
     resultados = []
     for item in items:

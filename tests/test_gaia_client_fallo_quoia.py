@@ -6,8 +6,8 @@ de una respuesta vacía real. Esto hacía que /fronteras/quoia/pendientes
 reportara "0 pendientes" durante una caída de Quoia (en vez de un error), y
 que los backfills marcaran fronteras reales como "código ya no existe en
 Quoia" / "sin info en Quoia"."""
-import app.services.mgs.gaia_client as gaia_client
-from app.services.mgs.gaia_client import _get_dynamic_maps
+import apps.comun.integraciones.gaia_client as gaia_client
+from apps.comun.integraciones.gaia_client import _get_dynamic_maps
 
 
 class _GaiaParcial:

@@ -14,8 +14,9 @@ recalcula en cada request y puede cambiar de respuesta si el proveedor renombra
 algo. Mismo criterio que Reporte de Energía: un proyecto sin id reconciliado no
 tiene inversores, y el hueco queda visible para que lo resuelva el backfill.
 
-Los clientes HTTP (`SolarViewClient`, `GaiaClient`, `medidor_tiempo_real`) se
-reusan de `app/services/mgs/` tal cual: no tocan la base ni saben de framework.
+Los clientes HTTP (`SolarViewClient`, `GaiaClient`) viven en
+`apps/comun/integraciones/` y `medidor_tiempo_real` en `apps/energia/services/`:
+no tocan la base ni saben de framework.
 """
 
 from __future__ import annotations
@@ -61,7 +62,15 @@ _PREFIJO_REDIS = "solar_monitoreo:"
 
 CACHE_TTL_FLOTA = 120    # segundos — monitoreo de flota
 CACHE_TTL_DETALLE = 90   # segundos — detalle por proyecto
-CACHE_TTL_GENHOY = 120   # segundos — generación de hoy
+CACHE_TTL_GENHOY = 120   # segundos — resumen de generación del día
+CACHE_TTL_IRRADIANCIA = 300       # segundos — curva POA de hoy
+CACHE_TTL_SIN_IRRADIANCIA = 3600  # sin estación o sin sensor POA: no cambia en el día
+# La estación existe y mide POA, pero todo da 0: es de noche o de madrugada. No
+# se guarda una hora (escondería la POA hasta mucho después del amanecer).
+CACHE_TTL_POA_EN_CERO = 300
+# SolarView falló (timeout, 5xx): se reintenta pronto, pero no en cada request
+# -- con ~38 tarjetas, una estación lenta haría ~38 llamadas de hasta 60 s.
+CACHE_TTL_ERROR = 60
 
 TIPOS_GENERACION = ["generacion", "generacion_consumo"]
 
@@ -104,10 +113,22 @@ def _cache_set(clave: str, ttl: int, datos) -> None:
         pass  # sin Redis el cache queda por proceso, como antes
 
 
+def _cache_borrar(clave: str) -> None:
+    """Borra una clave del caché (proceso y Redis). Los otros procesos web la
+    conservan hasta su TTL: el caché de proceso no se comparte."""
+    _cache.pop(clave, None)
+    try:
+        from django.core.cache import cache
+
+        cache.delete(_PREFIJO_REDIS + clave)
+    except Exception:
+        pass
+
+
 def _get_cliente():
     global _cliente
     if _cliente is None:
-        from app.services.mgs.solarview_client import SolarViewClient
+        from apps.comun.integraciones.solarview_client import SolarViewClient
 
         _cliente = SolarViewClient()
     if not _cliente.enabled:
@@ -119,7 +140,7 @@ def _get_gaia():
     """El GaiaClient si hay credenciales, si no None (no es fatal)."""
     global _gaia
     if _gaia is None:
-        from app.services.mgs.gaia_client import GaiaClient
+        from apps.comun.integraciones.gaia_client import GaiaClient
 
         _gaia = GaiaClient()
     return _gaia if _gaia.enabled else None
@@ -299,71 +320,6 @@ def _proyectos_en_operacion() -> list[tuple[Proyecto, int]]:
     return emparejados
 
 
-def generacion_hoy() -> dict:
-    """Generación real de HOY por proyecto. Un proyecto sin id no aparece.
-
-    Dos fuentes, en orden: los inversores (`/generation/`) y, si dan cero, el
-    medidor de frontera (`/project_detail/`). El campo `fuente` dice cuál se usó.
-    """
-    clave = f"genhoy:{hoy_col().isoformat()}"
-    if (cacheado := _cache_get(clave)) is not None:
-        return cacheado
-
-    cliente = _get_cliente()
-    emparejados = _proyectos_en_operacion()
-    hoy_str = hoy_col().isoformat()
-    ayer_str = (hoy_col() - timedelta(days=1)).isoformat()
-
-    def _leer(item: tuple) -> tuple:
-        p, sol_id = item
-        kwh = 0.0
-        fuente = "sin_dato"
-
-        # Fuente 1: get_generation(ayer, hoy) → filtramos solo entradas de hoy.
-        # Con un solo día devuelve el acumulado histórico; con rango ayer→hoy
-        # devuelve incrementales por franja horaria.
-        try:
-            gen = cliente.get_generation(sol_id, ayer_str, hoy_str) or {}
-            if "results" in gen:
-                gen = gen["results"]
-            kwh = _suma_kwh_inversor_hoy(
-                gen.get("generation_kwh") or {}, hoy_str, p.potencia_ac_kw)
-            if kwh > 0:
-                fuente = "inversor"
-        except Exception as exc:
-            logger.warning("generation fallo sol_id=%s: %s", sol_id, exc)
-
-        # Fuente 2: el medidor de frontera.
-        if kwh == 0.0:
-            try:
-                kwh_med = _kwh_medidor_de_detalle(cliente.get_project_detail(sol_id))
-                if kwh_med and kwh_med > 0:
-                    kwh, fuente = kwh_med, "medidor"
-            except Exception as exc:
-                logger.warning("project_detail fallo sol_id=%s: %s", sol_id, exc)
-
-        return (p.id, p.nombre_comercial, sol_id, round(kwh, 1), fuente)
-
-    filas = []
-    if emparejados:
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            for pid, nombre, sol_id, kwh_real, fuente in pool.map(_leer, emparejados):
-                filas.append({
-                    "proyecto_id": pid, "nombre": nombre, "sol_id": sol_id,
-                    "kwh_real": kwh_real, "fuente": fuente,
-                })
-        close_old_connections()
-
-    filas.sort(key=lambda x: x["kwh_real"], reverse=True)
-    datos = {
-        "fecha": hoy_str,
-        "total": round(sum(r["kwh_real"] for r in filas), 1),
-        "proyectos": filas,
-    }
-    _cache_set(clave, CACHE_TTL_GENHOY, datos)
-    return datos
-
-
 def resumen_dia() -> dict:
     """Top de generación del día, por medidores y por inversores.
 
@@ -371,6 +327,12 @@ def resumen_dia() -> dict:
     lote de summary de Solenium (una llamada para toda la flota); SolarView no
     tiene ese lote, así que va por project-detail, una por proyecto — pero
     aprovechando el mismo worker que ya pedía la generación de inversores.
+
+    Los inversores se piden SOLO para hoy. Antes se pedía ayer y hoy, por un
+    comentario que decía que con un solo día SolarView devolvía el acumulado
+    histórico; medido el 2026-09-30 (3 rondas x 39 plantas) ya no es así: con un
+    solo día devuelve los valores por hora, los mismos kWh, en un tercio del
+    tiempo (1,5 s contra 4,6 s en promedio).
     """
     clave = f"resumendia:{hoy_col().isoformat()}"
     if (cacheado := _cache_get(clave)) is not None:
@@ -378,14 +340,13 @@ def resumen_dia() -> dict:
 
     cliente = _get_cliente()
     hoy_str = hoy_col().isoformat()
-    ayer_str = (hoy_col() - timedelta(days=1)).isoformat()
     emparejados = _proyectos_en_operacion()
 
     def _leer(item: tuple) -> tuple:
         p, sol_id = item
         kwh_inv = 0.0
         try:
-            gen = cliente.get_generation(sol_id, ayer_str, hoy_str) or {}
+            gen = cliente.get_generation(sol_id, hoy_str, hoy_str) or {}
             if "results" in gen:
                 gen = gen["results"]
             kwh_inv = _suma_kwh_inversor_hoy(
@@ -423,33 +384,27 @@ def resumen_dia() -> dict:
     return datos
 
 
-ORDEN_ESTADO = {"caido": 0, "sin_comunicacion": 1, "degradado": 2,
-                "online": 3, "sin_datos": 4}
-
-
-def _estado_de(categoria: str | None) -> str:
-    """Categoría de disponibilidad de SolarView → estado de la tarjeta."""
-    if categoria is None:
-        # Ni id ni respuesta del proveedor: no es que la comunicación esté
-        # caída, es que no sabemos. El frontend pinta gris lo que no reconoce.
-        return "sin_datos"
-    if categoria == "disconnect":
-        return "sin_comunicacion"
-    if categoria == "critical":
-        return "caido"
-    if categoria in ("low", "medium"):
-        return "degradado"
-    return "online"
+def _orden_comunicacion(fila: dict) -> int:
+    """Primero las que no comunican por ninguna fuente, luego por una, luego el resto."""
+    com = fila.get("comunicacion") or {}
+    return -sum(bool((com.get(f) or {}).get("sin_comunicacion"))
+                for f in ("inversores", "medidor"))
 
 
 def monitoreo_flota() -> dict:
     """Estado de la flota: minigranjas en operación con servicio de operación.
 
-    Un proyecto SIN `project_id_solarview` igual aparece, con estado
-    "sin_datos": sus medidores no dependen del proveedor y la tarjeta tiene que
-    poder mostrarlos. Antes se lo saltaba y el proyecto desaparecía de la vista.
+    Cada planta lleva su `comunicacion` por fuente (inversores y medidor), que
+    evalúa el sondeo MGS cada 15 min (`apps/monitoreo/services/comunicacion.py`).
+    Ya no consulta la disponibilidad de SolarView (`/kpis/availability/`): medía
+    otra cosa y la pantalla la llamaba "comunicación" (decisión del 2026-10-05).
+    No hace ninguna llamada externa.
+
+    Un proyecto SIN `project_id_solarview` igual aparece: sus medidores no
+    dependen del proveedor y la tarjeta tiene que poder mostrarlos.
     """
-    cliente = _get_cliente()
+    from apps.monitoreo.services import comunicacion
+
     proyectos = list(Proyecto.objects.filter(
         estado="en_operacion", tipo_proyecto="minigranja", srv_operacion=True,
         deleted_at__isnull=True,
@@ -458,8 +413,9 @@ def monitoreo_flota() -> dict:
     if not proyectos:
         return {
             "timestamp": datetime.utcnow().isoformat() + "Z",
-            "fleet": {"total": 0, "online": 0, "caido": 0, "degradado": 0,
-                      "sin_comunicacion": 0, "sin_datos": 0, "total_capacity_kwp": 0},
+            "fleet": {"total": 0, "sin_comunicacion_inversores": 0,
+                      "sin_comunicacion_medidor": 0, "total_capacity_kwp": 0},
+            "consultas": {},
             "projects": [],
         }
 
@@ -468,32 +424,25 @@ def monitoreo_flota() -> dict:
     if cacheado is not None:
         return cacheado
 
-    # Una sola llamada para toda la flota: /kpis/availability/ devuelve el mismo
-    # shape que el de Solenium a propósito, así que el mapeo de estado no cambia.
-    disponibilidad = cliente.get_availability() or {}
-
+    evaluada = comunicacion.leer()
     filas = []
     capacidad_total = 0.0
-    cuenta = {"online": 0, "caido": 0, "degradado": 0, "sin_comunicacion": 0,
-              "sin_datos": 0}
+    cuenta = {"inversores": 0, "medidor": 0}
 
     for p in proyectos:
-        sol_id = _sv_id(p)
-        disp = disponibilidad.get(sol_id, {}) if sol_id else {}
-        categoria = disp.get("category")
         capacidad = float(p.potencia_ac_kw or 0)
-
-        estado = _estado_de(categoria)
-        cuenta[estado] = cuenta.get(estado, 0) + 1
         capacidad_total += capacidad
+        # None = aún no evaluada (el sondeo corre cada 15 min, solo de día).
+        com = evaluada.get(p.id)
+        for fuente in cuenta:
+            if ((com or {}).get(fuente) or {}).get("sin_comunicacion"):
+                cuenta[fuente] += 1
 
         filas.append({
             "proyecto_id": p.id,
             "nombre": p.nombre_comercial,
-            "sol_id": sol_id,
-            "status": estado,
-            "availability_category": categoria,
-            "availability_pct": disp.get("availability"),
+            "sol_id": _sv_id(p),
+            "comunicacion": com,
             "capacity_kwp": round(capacidad, 1),
             # La meta del día según el P90 del mes. Va acá porque el proyecto ya
             # está cargado en este bucle: no cuesta ni una consulta más.
@@ -506,19 +455,19 @@ def monitoreo_flota() -> dict:
             "p90_diario_kwh": _p90_del_dia(p),
         })
 
-    filas.sort(key=lambda x: (ORDEN_ESTADO.get(x["status"], 5), x["nombre"] or ""))
+    filas.sort(key=lambda x: (_orden_comunicacion(x), x["nombre"] or ""))
 
     datos = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "fleet": {
             "total": len(proyectos),
-            "online": cuenta["online"],
-            "caido": cuenta["caido"],
-            "degradado": cuenta["degradado"],
-            "sin_comunicacion": cuenta["sin_comunicacion"],
-            "sin_datos": cuenta.get("sin_datos", 0),
+            "sin_comunicacion_inversores": cuenta["inversores"],
+            "sin_comunicacion_medidor": cuenta["medidor"],
             "total_capacity_kwp": round(capacidad_total, 1),
         },
+        # Si la última consulta a SolarView (inversores) o a Quoia (medidor)
+        # falló entera: la pantalla avisa que los estados pueden estar viejos.
+        "consultas": comunicacion.consultas(),
         "projects": filas,
     }
     _cache_set(clave, CACHE_TTL_FLOTA, datos)
@@ -532,7 +481,7 @@ def _nodos_gaia(gaia, proyecto_id: int) -> tuple:
     proveedor externo — por eso funciona aunque el proyecto no tenga id de
     SolarView.
     """
-    from app.services.mgs.gaia_client import (
+    from apps.comun.integraciones.gaia_client import (
         build_db_proyecto_frt_map, find_gaia_node_pair,
     )
 
@@ -657,7 +606,7 @@ def monitoreo_detalle(proyecto_id: int, incluir_snapshot: bool = False,
     recibiendo lo de siempre rompe callado al que no se entere; uno que hay que
     pedir para dejar de recibirlo, no rompe a nadie.
     """
-    from app.services.mgs.medidor_tiempo_real import elegir_medidor, snapshot_medidor
+    from apps.energia.services.medidor_tiempo_real import elegir_medidor, snapshot_medidor
 
     p = _proyecto_o_404(proyecto_id)
 
@@ -759,6 +708,60 @@ def monitoreo_detalle(proyecto_id: int, incluir_snapshot: bool = False,
         "gaia_snapshot_respaldo": snap_r,
     }
     _cache_set(clave, CACHE_TTL_DETALLE, datos)
+    return datos
+
+
+def irradiancia_poa(proyecto_id: int) -> dict:
+    """La irradiancia POA de hoy (W/m²), para dibujarla junto a la potencia.
+
+    Solo la POA (sobre el plano de los módulos), que es la que se compara con la
+    potencia; la horizontal no. Hoy (2026-10-01) la tienen 12 de las 39 plantas
+    de SolarView; el resto no tiene estación (404) o no mide POA (-1 en toda la
+    serie). En esos casos `disponible` es False y el front no dibuja nada.
+
+    Los -1 y los negativos se descartan punto por punto: son "sin dato", no cero.
+    """
+    p = _proyecto_o_404(proyecto_id)
+    sol_id = _sv_id(p)
+    vacio = {"disponible": False, "unidad": "W/m²", "puntos": []}
+    if sol_id is None:
+        return vacio
+
+    hoy = hoy_col().isoformat()
+    clave = f"poa:{sol_id}:{hoy}"
+    if (cacheado := _cache_get(clave)) is not None:
+        return cacheado
+
+    estado, crudo = _get_cliente().get_weather_con_estado(
+        sol_id, f"{hoy}T00:00:00", f"{hoy}T23:59:59")
+    if estado == "error":
+        # Falla pasajera de SolarView: no es "esta planta no tiene POA".
+        _cache_set(clave, CACHE_TTL_ERROR, vacio)
+        return vacio
+    if estado == "no_existe":
+        _cache_set(clave, CACHE_TTL_SIN_IRRADIANCIA, vacio)
+        return vacio
+
+    serie = ((crudo or {}).get("results") or {}).get("irradiation_POA") or {}
+    puntos = []
+    for momento, valor in sorted(serie.items()):
+        try:
+            v = float(valor)
+        except (TypeError, ValueError):
+            continue
+        if v < 0:
+            continue
+        puntos.append({"time": str(momento), "w_m2": round(v, 1)})
+
+    if not any(pt["w_m2"] > 0 for pt in puntos):
+        # Sin un solo valor >= 0 la estación no mide POA (llega todo en -1): eso
+        # no cambia en el día. Con ceros, sí la mide y aún no hay sol.
+        ttl = CACHE_TTL_POA_EN_CERO if puntos else CACHE_TTL_SIN_IRRADIANCIA
+        _cache_set(clave, ttl, vacio)
+        return vacio
+
+    datos = {"disponible": True, "unidad": "W/m²", "puntos": puntos}
+    _cache_set(clave, CACHE_TTL_IRRADIANCIA, datos)
     return datos
 
 

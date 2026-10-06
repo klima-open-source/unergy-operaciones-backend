@@ -7,12 +7,11 @@ idénticos aunque el correo real por SMTP se mandó una sola vez (Reporte CGM).
 Ahora cada función llama a `_log_envio()` UNA SOLA VEZ por evento, con la
 lista completa de destinatarios reales -- 1 fila en email_envios + N filas en
 email_envio_destinatarios."""
-from app.services import email_service
+from apps.comun.integraciones import email_service
 
 
 def _sin_smtp_real(monkeypatch):
-    from app.core.config import settings
-    monkeypatch.setattr(settings, "SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
     monkeypatch.setattr(email_service, "_smtp_send", lambda msg, recipients: None)
 
 
@@ -161,3 +160,62 @@ def test_send_otp_email_ya_no_existe():
     """Finding #3 de la auditoría -- código muerto, cero llamadores en todo
     el repo (nunca existió una ruta/feature de OTP real)."""
     assert not hasattr(email_service, "send_otp_email")
+
+
+# ── El registro va por la conexión de Django ──────────────────────────────────
+
+
+class _Cursor:
+    def __init__(self, falla=False):
+        self.sentencias = []
+        self.falla = falla
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql, params):
+        if self.falla:
+            raise RuntimeError("la base no responde")
+        self.sentencias.append((" ".join(sql.split()), params))
+
+    def fetchone(self):
+        return (7,)
+
+
+def _conexion_falsa(monkeypatch, cursor):
+    import contextlib
+
+    import django.db
+
+    monkeypatch.setattr(django.db, "connection", type("C", (), {"cursor": lambda self: cursor})())
+    monkeypatch.setattr(django.db.transaction, "atomic", contextlib.nullcontext)
+
+
+def test_log_envio_escribe_el_evento_y_sus_destinatarios_con_la_conexion_de_django(monkeypatch):
+    cursor = _Cursor()
+    _conexion_falsa(monkeypatch, cursor)
+
+    email_service._log_envio(
+        destinatarios=[{"email": "a@test.com", "tipo": "to"}, {"email": "c@test.com", "tipo": "cc"}],
+        subject="Informe", tipo="informe", success=True, proyecto_id=42,
+    )
+
+    evento, dest_a, dest_c = cursor.sentencias
+    assert evento[0].startswith("INSERT INTO email_envios")
+    assert evento[1]["subject"] == "Informe" and evento[1]["proyecto_id"] == 42
+    assert dest_a[0].startswith("INSERT INTO email_envio_destinatarios")
+    assert (dest_a[1]["envio_id"], dest_a[1]["email"], dest_a[1]["tipo_dest"]) == (7, "a@test.com", "to")
+    assert (dest_c[1]["email"], dest_c[1]["tipo_dest"]) == ("c@test.com", "cc")
+
+
+def test_si_no_se_puede_registrar_el_envio_no_revienta(monkeypatch):
+    """Fire-and-forget: el correo ya salió; un fallo al registrarlo no es un
+    fallo del envío."""
+    _conexion_falsa(monkeypatch, _Cursor(falla=True))
+
+    email_service._log_envio(
+        destinatarios=[{"email": "a@test.com"}], subject="x", tipo="informe", success=True,
+    )

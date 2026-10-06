@@ -12,9 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 
-# `ponytail: los clientes de Quoia y SolarView siguen en app/services/mgs/`.
-# Son HTTP puro, sin sesión de base: se mueven cuando se retire FastAPI.
-from app.services.mgs.gaia_client import GaiaClient
+from apps.comun.integraciones.gaia_client import GaiaClient
 from apps.energia.services.reporte import recuperacion
 from apps.energia.services.reporte.utils import limite_plausible_kwh
 

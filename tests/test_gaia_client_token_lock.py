@@ -9,7 +9,7 @@ import threading
 import time
 import types
 
-from app.services.mgs.gaia_client import GaiaClient
+from apps.comun.integraciones.gaia_client import GaiaClient
 
 
 class _RespuestaOk:

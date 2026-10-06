@@ -19,8 +19,7 @@ from django.db.models import Q
 from apps.comun.nombre_matching import mejor_candidato
 from apps.proyectos.models import Proyecto, ProyectoInfoTecnica
 
-# `ponytail: el cliente de Solenium sigue en app/services/mgs/`. Es HTTP puro.
-from app.services.mgs.solenium_client import SoleniumClient
+from apps.comun.integraciones.solenium_client import SoleniumClient
 
 logger = logging.getLogger("operaciones.proyectos.solenium")
 

@@ -78,10 +78,6 @@ class GeneracionSolarViewSet(viewsets.GenericViewSet):
             granularidad,
         ))
 
-    @action(detail=False, methods=["get"], url_path="generacion-hoy")
-    def generacion_hoy(self, request):
-        return Response(sv.generacion_hoy())
-
     @action(detail=False, methods=["get"], url_path="resumen-dia")
     def resumen_dia(self, request):
         return Response(sv.resumen_dia())
@@ -108,6 +104,15 @@ class GeneracionSolarViewSet(viewsets.GenericViewSet):
             incluir_snapshot=_bandera(request, "incluir_snapshot", por_defecto=False),
             incluir_30d=_bandera(request, "incluir_30d", por_defecto=True),
         ))
+
+    @action(
+        detail=False, methods=["get"],
+        url_path=r"monitoring/(?P<proyecto_id>[0-9]+)/irradiancia",
+    )
+    def monitoring_irradiancia(self, request, proyecto_id=None):
+        # Aparte del detalle a proposito: solo 12 de 39 plantas tienen POA, y
+        # asi una estacion lenta o caida no demora ni tumba la tarjeta.
+        return Response(sv.irradiancia_poa(int(proyecto_id)))
 
     @action(
         detail=False, methods=["get"],

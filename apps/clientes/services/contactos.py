@@ -35,30 +35,9 @@ def correos(tipo: str, *, proyecto_id=None, cliente_id=None) -> list[str]:
     if proyecto_id is None:
         return []
 
-    puntero = (
-        cl_models.ProyectoAreaContacto.objects
-        .filter(proyecto_id=proyecto_id, tipo=tipo)
-        .values_list("cliente_id", flat=True).first()
-    )
-    if puntero:
-        return correos(tipo, cliente_id=puntero)
-
-    hoy = date.today()
-    inversionistas = (
-        py_models.ProyectoInversionista.objects
-        .filter(proyecto_id=proyecto_id)
-        # Vigente = sin fecha de fin, o con una que aún no pasó.
-        .filter(Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=hoy))
-        .values_list("cliente_id", flat=True)
-    )
-
     salida: list[str] = []
-    vistos_cliente: set[int] = set()
-    for cliente in inversionistas:
-        if not cliente or cliente in vistos_cliente:
-            continue
-        vistos_cliente.add(cliente)
-        salida.extend(correos(tipo, cliente_id=cliente))
+    for cliente in clientes(tipo, proyecto_id):
+        salida.extend(correos(tipo, cliente_id=cliente["id"]))
 
     # Un mismo correo puede llegar por dos inversionistas distintos.
     vistos: set[str] = set()
@@ -66,6 +45,43 @@ def correos(tipo: str, *, proyecto_id=None, cliente_id=None) -> list[str]:
         e for e in salida
         if e and not (e in vistos or vistos.add(e))
     ]
+
+
+def clientes(tipo: str, proyecto_id: int) -> list[dict]:
+    """Los clientes que son fuente de contacto de ese tipo para el proyecto,
+    `[{id, nombre}]`, con la misma regla que `correos`: el puntero de área si
+    lo hay, si no los inversionistas VIGENTES.
+
+    Lo usa el Reporte CGM, que le escribe a cada cliente por separado y no a la
+    unión de correos. Al portarlo de FastAPI (2026-09-04) esa lista se armó solo
+    con el puntero de área: un proyecto sin puntero salía "Sin inversionistas"
+    aunque los tuviera, y sus inversionistas no aparecían para enviarles el
+    reporte. Una sola regla para los dos usos es lo que evita que se separen.
+    """
+    puntero = (
+        cl_models.ProyectoAreaContacto.objects
+        .filter(proyecto_id=proyecto_id, tipo=tipo)
+        .values_list("cliente_id", "cliente__razon_social_nombre").first()
+    )
+    if puntero:
+        return [{"id": puntero[0], "nombre": puntero[1]}]
+
+    hoy = date.today()
+    inversionistas = (
+        py_models.ProyectoInversionista.objects
+        .filter(proyecto_id=proyecto_id, cliente_id__isnull=False)
+        # Vigente = sin fecha de fin, o con una que aún no pasó.
+        .filter(Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=hoy))
+        .values_list("cliente_id", "cliente__razon_social_nombre")
+    )
+    salida: list[dict] = []
+    vistos: set[int] = set()
+    for cliente_id, nombre in inversionistas:
+        if cliente_id in vistos:
+            continue
+        vistos.add(cliente_id)
+        salida.append({"id": cliente_id, "nombre": nombre})
+    return salida
 
 
 def proyecto_ids_por_cliente(tipo: str, cliente_id: int) -> list[int]:

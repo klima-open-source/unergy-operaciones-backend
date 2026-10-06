@@ -14,8 +14,7 @@ import logging
 from apps.comun.nombre_matching import mejor_candidato
 from apps.proyectos.models import Proyecto
 
-# `ponytail: el cliente de SolarView sigue en app/services/mgs/`. Es HTTP puro.
-from app.services.mgs.solarview_client import SolarViewClient
+from apps.comun.integraciones.solarview_client import SolarViewClient
 
 logger = logging.getLogger("operaciones.proyectos.solarview")
 

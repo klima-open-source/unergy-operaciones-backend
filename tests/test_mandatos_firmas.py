@@ -5,7 +5,7 @@ CMU1287-Mandato-Costos-Minigranja Solar Joropo.pdf (firmado, 2026-08-13). El
 documento no se versiona -- trae valores y nombres reales -- así que lo que se
 conserva es su geometría, que es lo que el detector necesita.
 """
-from app.services.mandatos.firmas import (
+from apps.mandatos.services.firmas import (
     lineas_firmadas,
     resumir_firmas,
     verificar_firmas,
@@ -114,7 +114,7 @@ def test_verificar_firmas_con_none():
 # porque un lote de autoconsumo trae ingresos y costos con la MISMA convención
 # de nombre, y el tipo es parte de la identidad única del mandato.
 
-from app.services.mandatos.firmas import tipo_por_contenido
+from apps.mandatos.services.firmas import tipo_por_contenido
 
 
 def test_la_leyenda_de_iva_marca_ingreso():

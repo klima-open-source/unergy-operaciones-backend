@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from app.services.mgs.solarview_client import SolarViewClient
+from apps.comun.integraciones.solarview_client import SolarViewClient
 from apps.energia.services.reporte import historial
 from apps.energia.services.reporte.utils import (
     HORAS_RECONECTADOR, HORAS_SOLARES, escalar_curva, limite_plausible_kwh,

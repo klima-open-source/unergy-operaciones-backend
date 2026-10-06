@@ -66,3 +66,19 @@ def test_en_vivo_enhebra_el_corte_al_precio_y_al_balance(monkeypatch):
     # el corte se enhebró a ambas dependencias
     assert visto["precio_hasta"] == corte
     assert visto["balance_cortes"] and all(c == corte for c in visto["balance_cortes"])
+
+
+def test_el_precio_de_bolsa_sin_fecha_usa_el_hoy_de_bogota(monkeypatch):
+    """El contenedor corre en UTC: entre las 19:00 y la medianoche de Bogotá,
+    `date.today()` ya es mañana. La ventana de 7 días tiene que cerrar en el
+    día de Colombia."""
+    from apps.comun.integraciones import simem_bolsa
+    from apps.garantias.services import proyecciones as svc
+
+    pedidos = []
+    monkeypatch.setattr(svc, "hoy_col", lambda: date(2026, 10, 5))
+    monkeypatch.setattr(simem_bolsa, "precio_bolsa_prom_7d",
+                        lambda desde, hasta: pedidos.append((desde, hasta)) or 300.0)
+
+    assert svc._precio_bolsa() == 300.0
+    assert pedidos[0][1] == "2026-10-05"

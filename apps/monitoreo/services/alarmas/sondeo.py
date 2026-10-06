@@ -1,8 +1,8 @@
 """El ciclo de monitoreo de MGS: evalúa los nodos de Quoia y persiste alarmas.
 
-Puerto de `app/services/mgs/scheduler.py`. El motor (`AlarmEngine`) y los
-clientes (`GaiaClient`, `SoleniumClient`, `SoleniumChecker`) se reusan de
-`app/services/mgs/` tal cual: no tocan la base y no saben de framework. Lo que
+Puerto de `app/services/mgs/scheduler.py`. El motor (`AlarmEngine`, en
+`alarm_engine.py` al lado) y `GaiaClient` (en `apps/comun/integraciones/`) se
+copiaron tal cual de `app/services/mgs/`: no tocan la base y no saben de framework. Lo que
 vive acá es lo que sí la toca — resolver qué proyecto es cada nodo, guardar las
 alarmas y cerrar las que se superaron.
 
@@ -33,24 +33,20 @@ TIPOS_GENERACION = ["generacion", "generacion_consumo"]
 TIPOS_MONITOREADOS = ["minigranja", "gd"]
 
 _motor = None
-_solenium_checker = None
 
 
-def _motor_y_checker():
-    """El motor y el checker, creados una sola vez por proceso.
+def _motor_de_alarmas():
+    """El motor, creado una sola vez por proceso.
 
-    Perezoso a propósito: importarlos arrastra los clientes HTTP, y el arranque
+    Perezoso a propósito: importarlo arrastra los clientes HTTP, y el arranque
     de Django no tiene por qué pagarlo si nadie va a sondear.
     """
-    global _motor, _solenium_checker
+    global _motor
     if _motor is None:
-        from app.services.mgs.alarm_engine import AlarmEngine
-        from app.services.mgs.solenium_checker import SoleniumChecker
-        from app.services.mgs.solenium_client import SoleniumClient
+        from apps.monitoreo.services.alarmas.alarm_engine import AlarmEngine
 
         _motor = AlarmEngine()
-        _solenium_checker = SoleniumChecker(SoleniumClient())
-    return _motor, _solenium_checker
+    return _motor
 
 
 def _resolver_mapa_proyectos(gaia) -> tuple[dict[int, int], dict[int, str]]:
@@ -70,7 +66,7 @@ def _resolver_mapa_proyectos(gaia) -> tuple[dict[int, int], dict[int, str]]:
     frontera de generación vinculada quedan fuera y se reportan aparte — antes
     desaparecían sin ningún aviso.
     """
-    from app.services.mgs.gaia_client import (
+    from apps.comun.integraciones.gaia_client import (
         build_db_proyecto_frt_map, find_gaia_node_pair,
     )
 
@@ -113,18 +109,21 @@ def _resolver_mapa_proyectos(gaia) -> tuple[dict[int, int], dict[int, str]]:
 
 def sondear() -> dict:
     """Un ciclo completo de monitoreo. Devuelve el resumen de lo que hizo."""
-    from app.services.mgs.gaia_client import GaiaClient
+    from apps.comun.integraciones.gaia_client import GaiaClient
+
+    # Un solo cliente para toda la corrida: las alarmas de desconexión usan el
+    # mismo, así Quoia ve una sesión por sondeo y no dos.
+    gaia = GaiaClient()
 
     # Alarmas de desconexión (inversores contra medidor): aislado, un fallo suyo
     # no puede tumbar el ciclo de MGS.
     try:
         from apps.monitoreo.services.alarmas.desconexion import evaluar_desconexiones
 
-        evaluar_desconexiones()
+        evaluar_desconexiones(gaia)
     except Exception:
         logger.exception("evaluar_desconexiones falló (no afecta a MGS)")
 
-    gaia = GaiaClient()
     if not gaia.enabled:
         logger.warning("GAIA_USER/GAIA_PASS sin configurar — monitoreo desactivado")
         return {"omitido": "gaia_sin_credenciales"}
@@ -139,24 +138,29 @@ def sondear() -> dict:
         logger.warning("Quoia devolvió una lista de nodos vacía")
         return {"omitido": "sin_nodos"}
 
-    motor, checker = _motor_y_checker()
+    motor = _motor_de_alarmas()
 
     # Foto ANTES de evaluar, para poder cerrar en la base los tipos que el motor
     # descarta internamente sin emitir una alarma explícita — ver `_superadas`.
     activas_antes = {k: set(v) for k, v in motor.active_alarms.items()}
     alarmas = motor.evaluate(nodos, nodo_a_proyecto, nombres)
 
-    resumen = motor.get_summary(nodos, nodo_a_proyecto, nombres)
+    # La nota de inversores solo se pide para las plantas con alarma en este
+    # ciclo: es lo único que la usa. Un ciclo sin alarmas no llama a SolarView.
+    con_alarma = {
+        a.proyecto_id for a in alarmas
+        if a.proyecto_id is not None and a.alarm_type.value != "RECUPERACION"
+    }
     try:
-        observaciones = checker.get_inverter_observations(
-            [p["name"] for p in resumen.get("projects", [])]
-        )
+        from apps.monitoreo.services.alarmas import inversores as notas_inversores
+
+        observaciones = notas_inversores.observaciones(con_alarma)
     except Exception:
         logger.exception("La revisión de inversores falló — se sigue sin ella")
         observaciones = {}
 
     for alarma in alarmas:
-        nota = observaciones.get(alarma.proyecto_nombre)
+        nota = observaciones.get(alarma.proyecto_id)
         if nota and alarma.alarm_type.value != "RECUPERACION":
             alarma.details += f" | Inversores: {nota}"
 
@@ -177,7 +181,7 @@ def guardar_alarmas(alarmas, activas_antes: dict | None = None,
     if not alarmas and not activas_antes:
         return
 
-    from app.services.mgs.alarm_engine import AlarmType
+    from apps.monitoreo.services.alarmas.alarm_engine import AlarmType
 
     try:
         with transaction.atomic():
@@ -205,7 +209,7 @@ def guardar_alarmas(alarmas, activas_antes: dict | None = None,
         return
 
     if activas_antes is not None:
-        motor, _ = _motor_y_checker()
+        motor = _motor_de_alarmas()
         try:
             cerrar_superadas(activas_antes, motor.active_alarms,
                              motor.previous_states, nombres or {})

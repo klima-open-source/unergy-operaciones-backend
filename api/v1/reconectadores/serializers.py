@@ -6,7 +6,7 @@ from apps.monitoreo.services import reconectadores as relay_service
 
 
 class RelayEstadoSerializer(serializers.Serializer):
-    """Estado y telemetría de un relay. No hay modelo: el dato vive en Solenium."""
+    """Estado y telemetría de un relay. No hay modelo: el dato vive en SolarView."""
 
     proyecto_id = serializers.IntegerField()
     nombre = serializers.CharField(allow_null=True)
@@ -14,6 +14,8 @@ class RelayEstadoSerializer(serializers.Serializer):
     # True=ON, False=OFF, None=sin dato.
     active = serializers.BooleanField(allow_null=True)
     ultima_actualizacion = serializers.CharField(allow_null=True)
+    # True: SolarView no respondió en esta lectura y esto es la última buena.
+    lectura_fallida = serializers.BooleanField(required=False, default=False)
 
     def get_fields(self):
         campos = super().get_fields()
@@ -24,10 +26,18 @@ class RelayEstadoSerializer(serializers.Serializer):
         return campos
 
 
-class ComandoSerializer(serializers.Serializer):
-    """Las credenciales van en el cuerpo, se validan en Solenium y no se guardan."""
+class InterruptorSerializer(serializers.Serializer):
+    habilitado = serializers.BooleanField()
+    forzado_por_servidor = serializers.BooleanField(read_only=True)
+    actualizado_por = serializers.CharField(read_only=True, allow_null=True)
+    actualizado_en = serializers.DateTimeField(read_only=True, allow_null=True)
 
-    username = serializers.CharField()
-    password = serializers.CharField(write_only=True)
+
+class ComandoSerializer(serializers.Serializer):
+    """El comando sale con el token del servidor, pero lo confirma una persona
+    con su usuario y contraseña de SolarView. Se verifican contra sole.tech y
+    no se guardan; el usuario queda en el log."""
+
     accion = serializers.ChoiceField(choices=["ON", "OFF"])
-    is_interrogating = serializers.BooleanField(default=True)
+    username = serializers.CharField()
+    password = serializers.CharField(write_only=True, trim_whitespace=False)

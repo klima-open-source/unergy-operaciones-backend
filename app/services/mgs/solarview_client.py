@@ -36,6 +36,9 @@ logger = logging.getLogger("mgs.solarview")
 
 RETRY_MAX = 2
 TIMEOUT = 30.0
+# Lo que se pide con alguien mirando la pantalla (relays, POA): un intento
+# corto. Si no llega, se muestra lo ultimo conocido. Ver `_get_con_estado`.
+TIMEOUT_EN_PANTALLA = 6.0
 BACKOFF_SECONDS = 2.0
 
 
@@ -82,14 +85,37 @@ class SolarViewClient:
         return {"Authorization": f"Token {self._token}"}
 
     def _get(self, url: str, params: dict | None = None) -> dict | list | None:
-        for attempt in range(1, RETRY_MAX + 1):
+        return self._get_con_estado(url, params)[1]
+
+    def _get_con_estado(
+        self, url: str, params: dict | None = None, *,
+        timeout: float | None = None, intentos: int = RETRY_MAX,
+    ) -> tuple[str, dict | list | None]:
+        """Como `_get`, pero dice POR QUÉ no hay datos.
+
+        `_get` devuelve None tanto si SolarView respondió 404 (el recurso no
+        existe: la planta no tiene estación o relay) como si la llamada falló
+        (timeout, 5xx). Quien cachea necesita distinguirlos: lo primero no
+        cambia en el día, lo segundo se debe reintentar pronto. Estados:
+        `"ok"`, `"no_existe"` (404) y `"error"` (sin token, timeout o 5xx).
+
+        `timeout` e `intentos` acortan la espera para lo que se pide mientras
+        alguien mira la pantalla (reconectadores, POA). Con los valores por
+        defecto (30 s x 2 intentos) un endpoint colgado de SolarView retiene un
+        proceso web ~60 s, y con pocos procesos la plataforma entera queda en
+        fila: el 2026-10-02 SolarView dejo de responder a ratos (40 s sin
+        respuesta en /recloser/ y /weather/) y hasta la campana tardaba 28 s.
+        """
+        for attempt in range(1, intentos + 1):
             if not self._token:
-                return None
+                return "error", None
             try:
-                resp = self._http.get(url, headers=self._headers(), params=params)
+                # Sin `timeout` explicito, la llamada es identica a la de siempre.
+                extra = {"timeout": timeout} if timeout is not None else {}
+                resp = self._http.get(url, headers=self._headers(), params=params, **extra)
                 if resp.status_code == 404:
-                    return None
-                if resp.status_code in (429, 503) and attempt < RETRY_MAX:
+                    return "no_existe", None
+                if resp.status_code in (429, 503) and attempt < intentos:
                     # Reintentar de inmediato ante rate limiting no sirve de
                     # nada -- con ~37 fronteras y hasta 2 llamadas cada una en
                     # la corrida diaria, un 429 sin espera probablemente
@@ -105,12 +131,12 @@ class SolarViewClient:
                     time.sleep(espera)
                     continue
                 resp.raise_for_status()
-                return resp.json()
-            except (httpx.HTTPError, httpx.TimeoutException) as exc:
+                return "ok", resp.json()
+            except (httpx.HTTPError, httpx.TimeoutException, ValueError) as exc:
                 logger.warning("solarview request failed url=%s attempt=%d: %s", url, attempt, exc)
-                if attempt == RETRY_MAX:
-                    return None
-        return None
+                if attempt >= intentos:
+                    return "error", None
+        return "error", None
 
     def get_availability(self) -> dict[int, dict]:
         """Disponibilidad de toda la flota en una sola llamada, agrupada por
@@ -291,6 +317,24 @@ class SolarViewClient:
         data = self._get(url, params=params)
         _avisar_si_la_forma_no_es_la_esperada(data, total_power, project_id)
         return data
+
+    def get_weather_con_estado(
+        self, project_id: int, date_from: str, date_to: str,
+    ) -> tuple[str, dict | None]:
+        """Estación meteorológica -- GET /solarview/measurements/weather/.
+
+        `results` trae una serie {timestamp: valor} por variable
+        (`irradiation`, `irradiation_POA`, `temperature`, `temperature_POA`,
+        `wind_speed`, `wind_direction`) y sus unidades en `unit`. Una variable
+        que la estación no mide llega en -1 en todos los puntos, no ausente
+        (verificado el 2026-10-01: Valencia Oriente no tiene POA). Sin
+        estación: 404 -> `("no_existe", None)` (ver `_get_con_estado`).
+        """
+        url = f"{self._base_url}/solarview/measurements/weather/"
+        return self._get_con_estado(url, params={"project_id": project_id,
+                                                 "date_from": date_from,
+                                                 "date_to": date_to},
+                                    timeout=TIMEOUT_EN_PANTALLA, intentos=1)
 
     def get_relay_historical(self, project_id: int, start_date: str, end_date: str,
                               variables: str = "kw") -> dict | None:

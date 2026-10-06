@@ -66,6 +66,14 @@ def build_workbook(periodo, lineas, despacho_dia, compromisos, bolsa, *, techo=N
     techo_cell = wsb.cell(r_techo, 2, techo if techo is not None else "")
     techo_cell.font = _BOLD
     techo_ref = f"$B${r_techo}"
+    # Las horas que XM publica como PTB y no como PB_Nal: el precio superó el de
+    # escasez de activación. Se dice en la hoja porque antes esas horas salían en
+    # blanco y parecían un fallo de la descarga.
+    ptb = int(bolsa.get("horas_ptb") or 0)
+    if ptb:
+        wsb.cell(r_techo, 4,
+                 f"{ptb} hora(s) tomadas del PTB (precio sobre el de escasez)"
+                 ).font = _BOLD
     hdr = 4
     _hcell(wsb, hdr, 1, "Fecha")
     for h in range(24):
@@ -182,6 +190,13 @@ def build_workbook(periodo, lineas, despacho_dia, compromisos, bolsa, *, techo=N
 
     rr = rhdr + 1
     total_row_refs = []
+    # Filas que se muestran pero NO suman al total: su indemnización no se cobra.
+    # El import va acá dentro: `cumplimiento` carga modelos de Django y a nivel de
+    # módulo rompe a quien importe este archivo sin settings configurados.
+    from apps.facturacion.services.cumplimiento import (
+        PPAS_INDEMNIZACION_INFORMATIVA, _clave_ppa,
+    )
+    informativas = []
     for pid, g in por_ppa.items():
         minimo_mwh = compromisos.get(pid)
         if minimo_mwh is None:
@@ -199,14 +214,28 @@ def build_workbook(periodo, lineas, despacho_dia, compromisos, bolsa, *, techo=N
         dif = wsr.cell(rr, 7, f"=F{rr}-E{rr}"); dif.font = _BASE; dif.number_format = _PRICE
         inc = wsr.cell(rr, 8, f"=MAX(0,C{rr}-D{rr})"); inc.font = _BASE; inc.number_format = _KWH
         val = wsr.cell(rr, 9, f"=MAX(0,H{rr}*G{rr})"); val.font = _BOLD; val.number_format = _MONEY
-        total_row_refs.append(rr)
+        if _clave_ppa(g["ppa"]) in PPAS_INDEMNIZACION_INFORMATIVA:
+            # El cálculo se deja a la vista, pero fuera del total y dicho con
+            # todas las letras: si solo se omitiera, el Excel no cuadraría y
+            # nadie sabría por qué.
+            wsr.cell(rr, 1, f'{g["ppa"] or "—"} (informativo)').font = _BASE
+            val.font = Font(name=FONT, size=9, italic=True, color="808080")
+            informativas.append(rr)
+        else:
+            total_row_refs.append(rr)
         rr += 1
 
     if total_row_refs:
         wsr.cell(rr, 8, "TOTAL").font = _BOLD
         wsr.cell(rr, 8).alignment = Alignment(horizontal="right")
-        t = wsr.cell(rr, 9, f"=SUM(I{rhdr+1}:I{rr-1})")
+        # Suma solo las filas que se cobran, no el rango entero.
+        t = wsr.cell(rr, 9, "=" + "+".join(f"I{n}" for n in total_row_refs))
         t.font = _BOLD; t.number_format = _MONEY
+    if informativas:
+        wsr.cell(rr + 1, 1,
+                 "Las filas «(informativo)» no suman al total: ese PPA no cobra "
+                 "indemnización.").font = Font(
+                     name=FONT, italic=True, size=9, color="808080")
     widths_r = [22, 34, 15, 16, 15, 15, 15, 18, 20]
     for j, w in enumerate(widths_r, 1):
         wsr.column_dimensions[get_column_letter(j)].width = w

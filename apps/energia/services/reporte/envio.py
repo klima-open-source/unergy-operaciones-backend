@@ -1,6 +1,6 @@
-"""El envío del reporte a Quoia y el estado de aprobación de XM.
+"""El envío del reporte a Quoia y su resumen.
 
-Puerto de `/enviar` y `/estado-quoia` de `app/api/v1/reporte_energia.py`.
+Puerto de `/enviar` de `app/api/v1/reporte_energia.py`.
 
 **Enviar está bloqueado si queda UNA sola frontera marcada para revisar.** El
 reporte es del día completo: mandar la mitad deja a XM con un día incoherente.
@@ -12,22 +12,34 @@ que ya estaba bien. `'excluida'` también se salta — su `curva_final` es None
 mientras dure la exclusión, y sin ese chequeo se mandaría una curva de 0 kWh
 FABRICADA para una frontera que justamente no debe reportar nada.
 
-`estado_reporte` y el estado de XM son cosas distintas: el primero se llena UNA
-vez al clasificar, ANTES de enviar, y sirve para decidir si el CGM automático es
-válido como fuente.
+**El envío corre en un hilo aparte** (`enviar_background`), igual que la
+clasificación. Con ~100 fronteras llamando a Quoia una por una pasa de 2 min, y
+el `--timeout 120` de gunicorn mataba el proceso a media lista: Generación (que
+va primero) llegaba a Quoia, Consumo no, y como el resultado se guardaba todo
+AL FINAL, no quedaba registro de nada (2026-09-29: `estado-quoia` en 0 con las
+de Generación ya enviadas). Con uvicorn, antes del 2026-09-04, no había límite
+y el mismo código terminaba. Ahora además cada fila se guarda apenas se envía:
+si algo corta la corrida, queda escrito lo que sí salió.
 """
 
 from __future__ import annotations
 
+import time
+import traceback
 from datetime import date, datetime, timezone
+
+from django.core.cache import cache
+from django.db import close_old_connections
 
 from apps.energia.models import ReporteEnergiaConsumo, ReporteEnergiaGeneracion
 from apps.energia.services.reporte.borders import resolver_borders
+# Las mismas claves y lecturas "que nunca lanzan" que usa la clasificación
+# para su `en_curso`/`ultima_corrida` -- ver el bloque de caché del orquestador.
+from apps.energia.services.reporte.orquestador import _cache_borrar, _cache_leer, _cache_escribir, _clave
 from apps.energia.services.reporte.utils import curva_respaldo_a_reportar, reporte_ya_valido
 from apps.energia.services.reporte.vistas import _nombre_frontera
 
-# `ponytail: el cliente de Quoia sigue en app/services/mgs/`.
-from app.services.mgs.gaia_client import GaiaClient
+from apps.comun.integraciones.gaia_client import GaiaClient
 
 
 def _enviar_a_quoia(rep, front, es_generacion: bool, gaia: GaiaClient, borders: dict) -> tuple[bool | None, str | None]:
@@ -84,18 +96,21 @@ def _enviar_a_quoia(rep, front, es_generacion: bool, gaia: GaiaClient, borders: 
     return ok, motivo
 
 
-def _etiqueta_xm(rep) -> str:
-    """Traduce xm_exitoso/xm_estado (o su ausencia) a la misma etiqueta que
-    muestra el dashboard de Quoia. xm_exitoso=None (sin respuesta todavía
-    de get_border_report_status) es 'en_espera' -- así se ve en Quoia antes
-    de que XM lo resuelva. Mapeo de 'exitoso_con_alerta' inferido (no
-    confirmado con un caso real 2026-08-21): xm_exitoso=True pero
-    xm_estado distinto de 'OK' (ej. 'WARNING')."""
-    if rep.xm_exitoso is None:
-        return "en_espera"
-    if rep.xm_exitoso is False:
-        return "error"
-    return "exitoso" if (rep.xm_estado or "").upper() == "OK" else "exitoso_con_alerta"
+MOTIVO_BLOQUEO = "Quedan fronteras con horas sin fuente (Revisar Manualmente) sin validar."
+
+CAMPOS_ENVIO = ["enviado_quoia_en", "enviado_quoia_ok", "enviado_quoia_error"]
+
+_TTL_ENVIO_EN_CURSO = 60 * 60       # 1h: un envío tarda minutos; es la red si el proceso muere
+_TTL_ULTIMO_ENVIO = 60 * 60 * 48    # 48h, igual que ultima_corrida de la clasificación
+
+
+def hay_pendientes(fecha: date) -> bool:
+    return (
+        ReporteEnergiaGeneracion.objects.filter(
+            fecha=fecha, revisar_manualmente=True).exists()
+        or ReporteEnergiaConsumo.objects.filter(
+            fecha=fecha, revisar_manualmente=True).exists()
+    )
 
 
 def enviar(fecha: date) -> dict:
@@ -103,23 +118,51 @@ def enviar(fecha: date) -> dict:
     frontera con 'Revisar Manualmente' pendiente (huecos sin fuente).
 
     Solo se envían las fronteras donde tuvimos que sustituir el dato de
-    Quoia (medidor_usado != 'cgm' / caso != 'CGM') -- si el CGM de Quoia ya
-    reportó válido por su cuenta, no se toca.
+    Quoia (utils.reporte_ya_valido) -- si el CGM de Quoia ya reportó válido
+    por su cuenta, no se toca.
+
+    Síncrona: la llama `enviar_background`, no el endpoint.
     """
-    hay_pendientes = (
-        ReporteEnergiaGeneracion.objects.filter(
-            fecha=fecha, revisar_manualmente=True).exists()
-        or ReporteEnergiaConsumo.objects.filter(
-            fecha=fecha, revisar_manualmente=True).exists()
-    )
-    if hay_pendientes:
+    if hay_pendientes(fecha):
         return {
             "fecha": fecha, "enviados": 0, "fallidos": [], "bloqueado": True,
-            "motivo_bloqueo": (
-                "Quedan fronteras con horas sin fuente (Revisar Manualmente) sin validar."
-            ),
+            "motivo_bloqueo": MOTIVO_BLOQUEO,
         }
 
+    gen_filas, con_filas = _filas_del_dia(fecha)
+    gaia = GaiaClient()
+    borders = _borders(gaia, gen_filas + con_filas)
+
+    enviados = 0
+    fallidos: list[str] = []
+
+    def _procesar(rep, front, es_generacion: bool) -> None:
+        nonlocal enviados
+        resultado, motivo = _enviar_a_quoia(rep, front, es_generacion, gaia, borders)
+        if resultado is None:
+            return  # ya era válido en Quoia, no hacía falta nada
+        # Se guarda YA, fila por fila, incluidas las que fallaron
+        # (`enviado_quoia_error` es lo que después explica el fallo). Antes era
+        # un bulk_update al final, y una corrida cortada a la mitad no dejaba
+        # rastro de las que sí habían llegado a Quoia.
+        rep.save(update_fields=CAMPOS_ENVIO)
+        if resultado:
+            enviados += 1
+        else:
+            fallidos.append(f"{_nombre_frontera(front)} — {motivo}")
+
+    for rep, front in gen_filas:
+        _procesar(rep, front, es_generacion=True)
+    for rep, front in con_filas:
+        _procesar(rep, front, es_generacion=False)
+
+    return {
+        "fecha": fecha, "enviados": enviados, "fallidos": fallidos, "bloqueado": False,
+    }
+
+
+def _filas_del_dia(fecha: date) -> tuple[list[tuple], list[tuple]]:
+    """(rep, frontera) de Generación y de Consumo, en el orden en que se envían."""
     gen_filas = [
         (rep, rep.frontera)
         for rep in ReporteEnergiaGeneracion.objects
@@ -130,119 +173,115 @@ def enviar(fecha: date) -> dict:
         for rep in ReporteEnergiaConsumo.objects
         .filter(fecha=fecha).select_related("frontera")
     ]
-
-    frt_codes = {f.codigo_frontera for _, f in gen_filas + con_filas if f.codigo_frontera}
-    gaia = GaiaClient()
-    borders = resolver_borders(gaia, frt_codes) if frt_codes else {}
-
-    enviados = 0
-    fallidos: list[str] = []
-
-    def _procesar(rep, front, es_generacion: bool) -> None:
-        nonlocal enviados
-        resultado, motivo = _enviar_a_quoia(rep, front, es_generacion, gaia, borders)
-        if resultado is True:
-            enviados += 1
-        elif resultado is False:
-            fallidos.append(f"{_nombre_frontera(front)} — {motivo}")
-        # resultado is None: ya era válido en Quoia, no hacía falta nada
-
-    for rep, front in gen_filas:
-        _procesar(rep, front, es_generacion=True)
-    for rep, front in con_filas:
-        _procesar(rep, front, es_generacion=False)
-
-    # Se guarda el resultado del envío de CADA fila, incluidas las que
-    # fallaron: `enviado_quoia_error` es lo que después explica el fallo.
-    CAMPOS = ["enviado_quoia_en", "enviado_quoia_ok", "enviado_quoia_error"]
-    for filas, Modelo in ((gen_filas, ReporteEnergiaGeneracion),
-                          (con_filas, ReporteEnergiaConsumo)):
-        tocadas = [rep for rep, _ in filas if rep.enviado_quoia_en is not None]
-        if tocadas:
-            Modelo.objects.bulk_update(tocadas, CAMPOS)
-
-    return {
-        "fecha": fecha, "enviados": enviados, "fallidos": fallidos, "bloqueado": False,
-    }
+    return gen_filas, con_filas
 
 
-def _fronteras_enviadas(fecha: date) -> list[tuple]:
-    """(rep, front, tipo) de toda fila con enviado_quoia_en no nulo para la
-    fecha -- las que de verdad se intentaron mandar a Quoia."""
-    gen_filas = list(
-        ReporteEnergiaGeneracion.objects
-        .filter(fecha=fecha, enviado_quoia_en__isnull=False)
-        .select_related("frontera")
-    )
-    con_filas = list(
-        ReporteEnergiaConsumo.objects
-        .filter(fecha=fecha, enviado_quoia_en__isnull=False)
-        .select_related("frontera")
-    )
-    return ([(rep, rep.frontera, "generacion") for rep in gen_filas]
-            + [(rep, rep.frontera, "consumo") for rep in con_filas])
+def _borders(gaia: GaiaClient, filas: list[tuple]) -> dict:
+    frt_codes = {f.codigo_frontera for _, f in filas if f.codigo_frontera}
+    return resolver_borders(gaia, frt_codes) if frt_codes else {}
 
 
-def _conteos(filas) -> tuple[dict, list[dict]]:
-    conteos = {"en_espera": 0, "exitoso": 0, "exitoso_con_alerta": 0, "error": 0}
+def tomar_envio(fecha: date) -> bool:
+    """Marca "hay un envío andando" para la fecha; False si ya había otro.
+
+    La marca se toma en el ENDPOINT, antes de lanzar el hilo, y la libera el
+    hilo al terminar: así, en cuanto `envio_en_curso()` vuelve a None, el
+    resultado nuevo ya está escrito, y el front no puede leer el del envío
+    anterior por llegar antes que el hilo. `cache.add` es SETNX: dos clics
+    simultáneos no pasan los dos. Falla hacia "seguir" si Redis no responde,
+    mismo criterio que orquestador._tomar_en_curso.
+    """
+    valor = {"desde": datetime.now(timezone.utc).isoformat()}
+    try:
+        return bool(cache.add(_clave("envio_en_curso", fecha), valor, _TTL_ENVIO_EN_CURSO))
+    except Exception as exc:
+        print(f"[reporte_energia] cache no disponible al marcar envio_en_curso fecha={fecha}: {exc}")
+        return True
+
+
+def envio_en_curso(fecha: date) -> dict | None:
+    return _cache_leer("envio_en_curso", fecha)
+
+
+def ultimo_envio(fecha: date) -> dict | None:
+    return _cache_leer("ultimo_envio", fecha)
+
+
+def enviar_background(fecha: date) -> None:
+    """`enviar()` en un hilo aparte, con el resultado a la caché. Quien la
+    llama ya tomó la marca con `tomar_envio()`; acá solo se libera."""
+    close_old_connections()
+    inicio = time.monotonic()
+    try:
+        resultado = enviar(fecha)
+        print(
+            f"[reporte_energia] enviar_background fecha={fecha} "
+            f"enviados={resultado['enviados']} fallidos={len(resultado['fallidos'])} "
+            f"bloqueado={resultado['bloqueado']}"
+        )
+        _cache_escribir("ultimo_envio", fecha, {
+            **resultado, "fecha": str(fecha),
+            "duracion_s": round(time.monotonic() - inicio, 1),
+            "terminado_en": datetime.now(timezone.utc).isoformat(),
+        }, _TTL_ULTIMO_ENVIO)
+    except Exception:
+        print(f"[reporte_energia] enviar_background fecha={fecha} FALLÓ:")
+        print(traceback.format_exc())
+        _cache_escribir("ultimo_envio", fecha, {
+            "fecha": str(fecha),
+            "enviados": 0, "fallidos": [], "bloqueado": False,
+            "duracion_s": round(time.monotonic() - inicio, 1),
+            "terminado_en": datetime.now(timezone.utc).isoformat(),
+            "error_general": (
+                "El envío se interrumpió. Lo que alcanzó a salir quedó registrado "
+                "en cada frontera; ver logs."
+            ),
+        }, _TTL_ULTIMO_ENVIO)
+    finally:
+        _cache_borrar("envio_en_curso", fecha)
+        close_old_connections()
+
+
+def resumen_envio(fecha: date) -> dict:
+    """Qué pasó con cada frontera del día en el envío: enviada, fallida, sin
+    enviar todavía, o que no se envía (automática o excluida).
+
+    Sale de las filas, no de la caché: cada fila se guarda apenas se envía, así
+    que contado mientras corre el envío da el avance en vivo, y después sigue
+    disponible al volver a abrir el día. Mientras hay un envío en curso, una
+    fila con `enviado_quoia_en` de ANTES de que arrancara es de un envío
+    anterior: cuenta como "por enviar" hasta que esta corrida llegue a ella.
+
+    "Automáticas" son las que el CGM de Quoia ya reportó bien por su cuenta, y
+    "excluidas" las que tienen una exclusión vigente. Las dos salen de
+    `reporte_ya_valido`, la misma regla que decide no enviarlas: el conteo
+    coincide siempre con lo que de verdad hizo `enviar()`.
+    """
+    en_curso = envio_en_curso(fecha)
+    desde = None
+    if en_curso and en_curso.get("desde"):
+        desde = datetime.fromisoformat(en_curso["desde"])
+
+    gen_filas, con_filas = _filas_del_dia(fecha)
+    conteos = {"enviadas": 0, "fallidas": 0, "por_enviar": 0, "automaticas": 0, "excluidas": 0}
     fallidas: list[dict] = []
+    filas = ([(rep, front, "generacion") for rep, front in gen_filas]
+             + [(rep, front, "consumo") for rep, front in con_filas])
     for rep, front, tipo in filas:
-        etiqueta = _etiqueta_xm(rep)
-        conteos[etiqueta] += 1
-        if etiqueta == "error":
+        if rep.medidor_usado == "excluida":
+            conteos["excluidas"] += 1
+        elif reporte_ya_valido(rep, tipo == "generacion"):
+            conteos["automaticas"] += 1
+        elif rep.enviado_quoia_en is None or (desde and rep.enviado_quoia_en < desde):
+            conteos["por_enviar"] += 1
+        elif rep.enviado_quoia_ok:
+            conteos["enviadas"] += 1
+        else:
+            conteos["fallidas"] += 1
             fallidas.append({
                 "frontera_id": front.id,
                 "nombre_proyecto": _nombre_frontera(front),
                 "tipo": tipo,
+                "motivo": rep.enviado_quoia_error,
             })
-    return conteos, fallidas
-
-
-def estado_quoia_actual(fecha: date) -> dict:
-    """El estado de XM YA GUARDADO, sin volver a consultar Quoia.
-
-    Rápido y seguro de llamar al abrir la vista; para forzar una revisión en
-    vivo está `estado_quoia_revisar`.
-    """
-    filas = _fronteras_enviadas(fecha)
-    conteos, fallidas = _conteos(filas)
-    return {"fecha": fecha, "total": len(filas), "fallidas": fallidas, **conteos}
-
-
-def estado_quoia_revisar(fecha: date) -> dict:
-    """Consulta Quoia para las filas enviadas que aún no tienen respuesta.
-
-    Solo vuelve a golpear Quoia para las que están en espera (`xm_exitoso is
-    None`): está pensado para dispararse justo después de `/enviar` y llamarse
-    cada tanto hasta que nadie quede en espera.
-    """
-    filas = _fronteras_enviadas(fecha)
-    pendientes = [f for f in filas if f[0].xm_exitoso is None]
-
-    if pendientes:
-        gaia = GaiaClient()
-        frt_codes = {f.codigo_frontera for _, f, _ in pendientes if f.codigo_frontera}
-        borders = resolver_borders(gaia, frt_codes) if frt_codes else {}
-        ahora = datetime.now(timezone.utc)
-        por_modelo: dict = {}
-        for rep, front, tipo in pendientes:
-            meta = borders.get((front.codigo_frontera or "").strip().lower())
-            border_id = meta.get("id") if meta else None
-            estado = gaia.get_border_report_status(border_id, str(fecha)) if border_id else None
-            rep.xm_verificado_en = ahora
-            if estado:
-                rep.xm_process_id = estado.get("xm_process_id")
-                rep.xm_estado = estado.get("status")
-                rep.xm_exitoso = estado.get("success")
-            Modelo = (
-                ReporteEnergiaGeneracion if tipo == "generacion"
-                else ReporteEnergiaConsumo
-            )
-            por_modelo.setdefault(Modelo, []).append(rep)
-
-        campos = ["xm_verificado_en", "xm_process_id", "xm_estado", "xm_exitoso"]
-        for Modelo, reps in por_modelo.items():
-            Modelo.objects.bulk_update(reps, campos)
-
-    conteos, fallidas = _conteos(filas)
-    return {"fecha": fecha, "total": len(filas), "fallidas": fallidas, **conteos}
+    return {"total": len(filas), **conteos, "fallidas_detalle": fallidas}

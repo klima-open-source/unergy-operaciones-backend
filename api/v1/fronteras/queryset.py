@@ -68,22 +68,10 @@ def clientes_cgm(proyecto_ids: list[int]) -> dict[int, list[dict]]:
     proyecto —generación y consumo de la misma planta es lo habitual— repetían
     exactamente la misma consulta por cada fila.
     """
-    from apps.clientes import models as cl_models
-
-    salida: dict[int, list[dict]] = {}
-    for proyecto_id in {p for p in proyecto_ids if p is not None}:
-        punteros = cl_models.ProyectoAreaContacto.objects.filter(
-            proyecto_id=proyecto_id, tipo="cgm"
-        ).select_related("cliente")
-        clientes = [
-            {"id": p.cliente_id, "nombre": p.cliente.razon_social_nombre}
-            for p in punteros if p.cliente
+    return {
+        proyecto_id: [
+            {**c, "correos": contactos_service.correos("cgm", cliente_id=c["id"])}
+            for c in contactos_service.clientes("cgm", proyecto_id)
         ]
-        salida[proyecto_id] = [
-            {
-                **c,
-                "correos": contactos_service.correos("cgm", cliente_id=c["id"]),
-            }
-            for c in clientes
-        ]
-    return salida
+        for proyecto_id in {p for p in proyecto_ids if p is not None}
+    }

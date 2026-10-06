@@ -1,4 +1,4 @@
-"""ViewSet del Reporte de Energía — 24 rutas.
+"""ViewSet del Reporte de Energía — 25 rutas.
 
 El reporte diario al ASIC: clasifica cada frontera contra su medidor, sus
 inversores y su histórico, deja lo dudoso marcado para revisión y, cuando no
@@ -39,17 +39,6 @@ def _fecha(request, nombre: str = "fecha") -> date:
         raise NoProcesable(f"'{nombre}' es obligatorio y debe tener formato YYYY-MM-DD")
 
 
-def _frontera_id_opcional(request) -> int | None:
-    """El parámetro `frontera_id`, opcional. Ausente o vacío = sin filtro."""
-    crudo = (request.query_params.get("frontera_id") or "").strip()
-    if not crudo:
-        return None
-    try:
-        return int(crudo)
-    except ValueError:
-        raise NoProcesable("'frontera_id' debe ser un número entero")
-
-
 @class_logger_wrapper(name="Operaciones | Reporte de Energía")
 class ReporteEnergiaViewSet(viewsets.GenericViewSet):
     """Reporte diario de energía al ASIC.
@@ -68,8 +57,7 @@ class ReporteEnergiaViewSet(viewsets.GenericViewSet):
     GET  /api/v1/reporte-energia/excel?fecha=
     POST /api/v1/reporte-energia/ejecutar · /ejecutar/cancelar
     GET  /api/v1/reporte-energia/ejecutar/estado
-    POST /api/v1/reporte-energia/enviar?fecha=
-    GET|POST /api/v1/reporte-energia/estado-quoia?fecha=
+    POST /api/v1/reporte-energia/enviar?fecha= · GET /enviar/estado?fecha=
 
     **`/enviar` está bloqueado mientras quede una frontera sin validar.** El
     reporte es del día completo.
@@ -89,10 +77,7 @@ class ReporteEnergiaViewSet(viewsets.GenericViewSet):
 
     @action(detail=False, methods=["get"], url_path="resumen-historico")
     def resumen_historico(self, request):
-        return Response(vistas.resumen_historico(
-            _fecha(request, "desde"), _fecha(request, "hasta"),
-            frontera_id=_frontera_id_opcional(request),
-        ))
+        return Response(vistas.resumen_ventana(_fecha(request, "desde"), _fecha(request, "hasta")))
 
     @action(detail=False, methods=["get"], url_path="fronteras")
     def fronteras(self, request):
@@ -296,13 +281,48 @@ class ReporteEnergiaViewSet(viewsets.GenericViewSet):
 
     @action(detail=False, methods=["post"], url_path="enviar")
     def enviar(self, request):
-        return Response(envio.enviar(_fecha(request)))
+        """Lanza el envío a Quoia en un hilo aparte y responde de inmediato;
+        el resultado se consulta en `/enviar/estado`. Con ~100 fronteras pasa
+        del `--timeout 120` de gunicorn (ver el docstring de envio.py).
 
-    @action(detail=False, methods=["get", "post"], url_path="estado-quoia")
-    def estado_quoia(self, request):
-        """GET devuelve lo YA guardado; POST fuerza una revisión en vivo contra
-        Quoia, solo para las que siguen en espera."""
+        El bloqueo por fronteras sin validar se responde ACÁ, sin hilo: es
+        instantáneo y el front lo muestra como hasta ahora. Tampoco se envía
+        mientras se clasifica la misma fecha: se mandarían filas a medio
+        reescribir.
+        """
         fecha = _fecha(request)
-        if request.method == "GET":
-            return Response(envio.estado_quoia_actual(fecha))
-        return Response(envio.estado_quoia_revisar(fecha))
+        if envio.hay_pendientes(fecha):
+            return Response({
+                "fecha": fecha, "status": "bloqueado", "enviados": 0, "fallidos": [],
+                "bloqueado": True, "motivo_bloqueo": envio.MOTIVO_BLOQUEO,
+            })
+        if orquestador.corrida_en_curso(fecha):
+            raise NoProcesable(
+                "Hay una clasificación en curso para esa fecha. Espera a que "
+                "termine antes de enviar."
+            )
+        if not envio.tomar_envio(fecha):
+            raise NoProcesable("Ya hay un envío en curso para esa fecha.")
+        threading.Thread(
+            target=envio.enviar_background, args=(fecha,), daemon=True,
+        ).start()
+        return Response({"fecha": fecha, "status": "iniciado", "bloqueado": False})
+
+    @action(detail=False, methods=["get"], url_path="enviar/estado")
+    def enviar_estado(self, request):
+        """`en_curso` mientras el hilo corre; al terminar, el resultado del
+        último envío (`enviados`, `fallidos`, `terminado_en`, y
+        `error_general` si se cayó entero). `fallidos` va siempre, por el
+        mismo motivo que en `/ejecutar/estado`.
+
+        `resumen` cuenta, frontera por frontera, qué pasó en el envío (ver
+        `envio.resumen_envio`): el front lo consulta cada pocos segundos
+        mientras corre, y es lo que muestra el panel del envío."""
+        fecha = _fecha(request)
+        en_curso = envio.envio_en_curso(fecha)
+        return Response({
+            "fecha": fecha, "fallidos": [], **(envio.ultimo_envio(fecha) or {}),
+            "en_curso": en_curso is not None,
+            "en_curso_desde": (en_curso or {}).get("desde"),
+            "resumen": envio.resumen_envio(fecha),
+        })

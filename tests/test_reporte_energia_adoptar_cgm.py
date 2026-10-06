@@ -91,6 +91,20 @@ def test_paso_norte_como_estaba_si_se_enviaba():
     assert reporte_ya_valido(_rep(), es_generacion=False) is False
 
 
+# ── El caso inverso: una fila CGM corregida a mano con otra fuente ───────────
+
+@pytest.mark.parametrize("fuente", ["historico", "ceros", "editado_manualmente"])
+def test_consumo_cgm_editado_a_mano_si_se_envia(fuente):
+    """Reportado 2026-09-30: el clasificador deja Consumo en caso 'CGM', alguien
+    lo corrige a mano con una estimacion o celda por celda, y editar_curva
+    cambia `medidor_usado` pero NO `caso`. Con el criterio de solo `caso`, la
+    fila se saltaba en silencio y el envio mandaba unicamente Generacion."""
+    from apps.energia.services.reporte.utils import reporte_ya_valido
+
+    rep = _rep(caso="CGM", medidor_usado=fuente)
+    assert reporte_ya_valido(rep, es_generacion=False) is False
+
+
 # ── Lo que no se toco ────────────────────────────────────────────────────────
 
 def test_una_frontera_excluida_sigue_sin_enviarse():

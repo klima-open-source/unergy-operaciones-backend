@@ -61,7 +61,6 @@ def kpis() -> dict:
     datos.update(_desglose_de_fallas(hoy))
     datos.update(_compromisos_ppa(hoy))
     datos["liquidaciones_pendientes"] = _liquidaciones_pendientes(hoy)
-    datos.update(_frescura_de_generacion())
     datos["precio_bolsa_cop_kwh"] = _precio_bolsa()
     return datos
 
@@ -126,22 +125,6 @@ def _liquidaciones_pendientes(hoy: date) -> int:
     except Exception:
         logger.debug("liquidaciones_pendientes no disponible", exc_info=True)
         return 0
-
-
-def _frescura_de_generacion() -> dict:
-    """Hasta qué día llegó el sync de Solenium y cuántos proyectos trajo."""
-    salida = {"gen_solenium_last_date": None, "gen_solenium_projects": 0}
-    try:
-        de_solenium = py_models.GeneracionDiaria.objects.filter(fuente="solenium")
-        ultima = de_solenium.order_by("-fecha").values_list("fecha", flat=True).first()
-        salida["gen_solenium_last_date"] = ultima.isoformat() if ultima else None
-        salida["gen_solenium_projects"] = (
-            de_solenium.filter(fecha__gte=date.today() - timedelta(days=7))
-            .values("proyecto_id").distinct().count()
-        )
-    except Exception:
-        logger.debug("frescura de generación no disponible", exc_info=True)
-    return salida
 
 
 def _precio_bolsa() -> float | None:

@@ -101,10 +101,33 @@ PREFIJOS_RETIRADOS = [
 #       (la API Key "Api Fallas", usada el 2026-08-20) solo crea y consulta
 #       fallas. El de impacto ademas ESCRIBIA en un GET, congelando un numero
 #       provisional calculado con `now()` (§5.9 de ARQUITECTURA_MONITOREO.md).
+#
+#   GET /generacion-solar/generacion-hoy
+#       2026-09-30  Ninguna vista del front la llamaba (sus ultimos consumidores
+#       se fueron con ec26398f y 148fdf37); solo la app vieja de Vue (`legacy/`,
+#       en Vercel), que ya no usa nadie. Hacia 40-80 llamadas a SolarView por
+#       carga.
+#
+#   GET /reporte-energia/estado-quoia, POST /reporte-energia/estado-quoia
+#       2026-10-02  El panel de estados de XM (en espera/exitoso/error) se
+#       cambio por el resumen del envio, que viaja en GET /enviar/estado.
+#       Decision de Sara: quitarlo del todo, back y front.
+#
+#   POST /liquidaciones/cargar-excel
+#       2026-10-05  Jessica quito el boton del front el 2026-07-06 (0e66ffe6,
+#       "quitar carga Excel"); la ultima liquidacion, mandato, linea, costo o
+#       factura que creo el cargador es del 2026-07-02, y en la copia de la base
+#       al 2026-10-01 no hay ninguna posterior. Liquidaciones vive ahora en el
+#       servicio externo (`/liquidaciones-api`). Era la ultima puerta a
+#       SQLAlchemy de la plataforma: el cargador (966 lineas) queda en `app/`.
 RUTAS_RETIRADAS = {
     ("/api/v1/fallas/sla-dashboard", "GET"),
     ("/api/v1/fallas/stats/resumen", "GET"),
     ("/api/v1/fallas/{}/impacto", "GET"),
+    ("/api/v1/generacion-solar/generacion-hoy", "GET"),
+    ("/api/v1/reporte-energia/estado-quoia", "GET"),
+    ("/api/v1/reporte-energia/estado-quoia", "POST"),
+    ("/api/v1/liquidaciones/cargar-excel", "POST"),
 }
 
 
@@ -134,7 +157,21 @@ RUTAS_RETIRADAS = {
 #               (`xm_invoice_duplication_to_settlement`) no existia, y sin el
 #               reliquidar era imposible: FTP y Liquidar aceptaban la version
 #               nueva pero Repartir daba 400 por falta de facturas en ella.
+#   2026-09-30  GET /reporte-energia/enviar/estado. El envio a Quoia pasa a
+#               correr en un hilo: con ~100 fronteras superaba el --timeout 120
+#               de gunicorn (uvicorn no tenia limite) y el proceso moria a
+#               media lista. El front consulta aqui como termino.
+#   2026-10-01  GET|POST /reconectadores/interruptor. El interruptor del ON/OFF
+#               solo vivia en el .env (que se reescribe desde un secret); ahora
+#               un admin lo enciende desde la plataforma. No existia en FastAPI.
+#   2026-10-01  GET /generacion-solar/monitoring/{id}/irradiancia. Irradiancia
+#               POA de la estacion de SolarView para la grafica de potencia. No
+#               existia en FastAPI.
 RUTAS_NUEVAS = {
+    ("/api/v1/generacion-solar/monitoring/{}/irradiancia", "GET"),
+    ("/api/v1/reconectadores/interruptor", "GET"),
+    ("/api/v1/reconectadores/interruptor", "POST"),
+    ("/api/v1/reporte-energia/enviar/estado", "GET"),
     ("/api/v1/liquidaciones-api/ciclo/reliquidar", "POST"),
     ("/api/v1/liquidaciones-api/contratos-energia/{}", "PATCH"),
     ("/api/v1/liquidaciones-api/ipp/sincronizar", "POST"),

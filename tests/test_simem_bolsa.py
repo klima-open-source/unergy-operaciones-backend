@@ -1,6 +1,6 @@
 """Conector SIMEM del precio de bolsa. Funciones puras: sin BD, sin red, sin reloj.
 El fetch se prueba con httpx.MockTransport (sin red real)."""
-from app.services.simem_bolsa import (
+from apps.comun.integraciones.simem_bolsa import (
     _version_rank,
     promedio_diario_max_version,
     promedio_ultimos_n_dias,
@@ -64,7 +64,7 @@ def test_promedio_ultimos_n_dias_vacio_devuelve_none():
 
 
 import httpx
-from app.services.simem_bolsa import fetch_records, DATASET_PRECIO_BOLSA
+from apps.comun.integraciones.simem_bolsa import fetch_records, DATASET_PRECIO_BOLSA
 
 
 def test_fetch_records_arma_url_y_parsea_result_records():
@@ -91,7 +91,7 @@ def test_fetch_records_sin_records_devuelve_lista_vacia():
     assert fetch_records("2026-08-01", "2026-08-14", client=client) == []
 
 
-from app.services.simem_bolsa import precio_bolsa_prom_7d
+from apps.comun.integraciones.simem_bolsa import precio_bolsa_prom_7d
 
 
 def test_precio_bolsa_prom_7d_integra_fetch_agregado_y_promedio():

@@ -19,6 +19,7 @@ Django reemplazó a FastAPI el 2026-09-04. Lo que corre en producción es
 | Endpoints | `api/v1/<recurso>/` — `urls.py`, `views.py`, `serializers.py` |
 | Cambios de esquema | una migración de Django en `apps/<app>/migrations/` |
 | Una franja horaria para una tarea | `config/horarios.py` |
+| Un cliente de un servicio externo (HTTP, SMTP, IMAP) | `apps/comun/integraciones/` |
 
 **Prohibido**, sin excepciones:
 
@@ -27,17 +28,21 @@ Django reemplazó a FastAPI el 2026-09-04. Lo que corre en producción es
 - escribir una revisión de Alembic.
 
 `tests/test_solo_django.py` recorre los `.py` de `apps/`, `api/` y `config/` y
-falla si alguno importa `fastapi` o `sqlalchemy`. No es prosa: es un test.
+falla si alguno importa `fastapi` o `sqlalchemy`, o algo de `app/` que no esté
+en su lista `PRESTADOS_DE_APP`. No es prosa: es un test.
 
-**Qué es `app/`.** Es el árbol FastAPI **apagado**. Sigue en la imagen por una
-sola razón: `apps/` todavía le importa 21 módulos de integración —los clientes de
-MGS (Gaia, SolarView, Solenium), el `AlarmEngine`, SMTP, los parsers de correo de
-mandatos, `liquidaciones_loader`. Se lee, no se extiende. **Un archivo nuevo en
-`app/` es un error, no una opción.** Tiene 266 archivos y parece vivo; no lo está,
-nada de ahí se sirve.
+**Qué es `app/`.** Es el árbol FastAPI **apagado**: una copia congelada. Desde el
+2026-10-05 lo que corre en producción ya no lo usa, salvo un diccionario
+(`app.models.proyectos`, en `apps/comercial`), que se va con la reconstrucción de
+Comercial. Lo que antes se le tomaba prestado ya vive en `apps/`: los clientes de
+Gaia, SolarView, Solenium, SIMEM y SMTP en `apps/comun/integraciones/`; el
+`AlarmEngine` en `apps/monitoreo/services/alarmas/`; los parsers de correo de
+mandatos en `apps/mandatos/services/`. Se lee, no se extiende. **Un archivo nuevo
+en `app/` es un error, no una opción.** Tiene 266 archivos y parece vivo; no lo
+está.
 
-Portar esos 21 módulos (y reapuntar los tests que miran `app/`) es otro proyecto,
-no una tarea que se cuele en un cambio de negocio.
+Lo que todavía mira `app/` —los `scripts/` de una sola vez y los tests del árbol
+viejo— se borra junto con `app/` el día que se retire.
 
 ## Por dónde empezar según la tarea
 

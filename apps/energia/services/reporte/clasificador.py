@@ -44,8 +44,8 @@ from datetime import date
 
 import pandas as pd
 
-from app.services.mgs.gaia_client import GaiaClient
-from app.services.mgs.solarview_client import SolarViewClient
+from apps.comun.integraciones.gaia_client import GaiaClient
+from apps.comun.integraciones.solarview_client import SolarViewClient
 from apps.energia.services.reporte import curvas, datos_crudos, solarview as solarview_svc, reconectador, historial
 from apps.energia.services.reporte.utils import (
     CURVA_CERO, CURVA_VACIA, HORAS_SOLARES, escalar_curva, escalar_curva_con_huecos, curva_a_lista,
@@ -656,7 +656,7 @@ def clasificar_generacion(
     # decidir -- pero SÍ se sigue trayendo la lectura PASIVA (recuperar=False),
     # porque el histórico de Factor de Pérdida necesita medidor de TODOS los
     # días con dato, sin importar qué Caso ganó (ver historial.py). Motivado
-    # por Bongos/Paso Norte: la recuperación activa a las 3:30am no siempre
+    # por Bongos/Paso Norte: la recuperación activa de la madrugada no siempre
     # alcanza a estabilizar el dato de todas formas (ver conversación de
     # sesión), así que gastarla en fronteras que ni la necesitan es puro
     # costo sin beneficio.

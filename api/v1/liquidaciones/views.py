@@ -15,7 +15,6 @@ from api.logging import class_logger_wrapper, log_endpoint
 from api.pagination import recortar
 from api.permissions import RolePermission
 from apps.liquidaciones import models as lq_models
-from apps.liquidaciones.services import excel as excel_service
 from apps.liquidaciones.services import impuestos, panel, resumen_panel
 from apps.mandatos import models as md_models
 
@@ -57,7 +56,6 @@ class LiquidacionViewSet(viewsets.GenericViewSet):
     GET|PUT /api/v1/liquidaciones/{id}/informe      HTML del PDF
     DELETE /api/v1/liquidaciones/{id}/limpiar       borra el detalle operativo
     GET  /api/v1/liquidaciones/catalogos/tipos
-    POST /api/v1/liquidaciones/cargar-excel
 
     **Escribir exige rol `admin` o `liquidaciones`**; leer, solo estar
     autenticado.
@@ -76,7 +74,6 @@ class LiquidacionViewSet(viewsets.GenericViewSet):
 
     ESCRITURAS = (
         "create", "partial_update", "destroy", "limpiar", "informe",
-        "cargar_excel",
     )
 
     def get_permissions(self):
@@ -317,50 +314,8 @@ class LiquidacionViewSet(viewsets.GenericViewSet):
             ).delete()
         return Response(status=204)
 
-    # ── Catálogos y carga ─────────────────────────────────────────────────
+    # ── Catálogos ─────────────────────────────────────────────────
 
     @action(detail=False, methods=["get"], url_path="catalogos/tipos")
     def catalogos(self, request):
         return Response(CATALOGOS)
-
-    @action(detail=False, methods=["post"], url_path="cargar-excel")
-    @log_endpoint(name="Operaciones | Liquidaciones | Cargar Excel")
-    def cargar_excel(self, request):
-        """Carga el panel de seguimiento contable desde un Excel.
-
-        `dry_run=true` devuelve la vista previa sin escribir; `limpiar=true`
-        borra el detalle existente antes de reimportar.
-        """
-        archivo = request.FILES.get("file")
-        if archivo is None:
-            raise ValidationError({"file": "Falta el archivo."})
-        hoja = request.data.get("hoja")
-        if not hoja:
-            raise ValidationError({"hoja": "Requerido."})
-
-        try:
-            _, periodo_fecha = panel.normalizar_periodo(
-                request.data.get("periodo") or ""
-            )
-        except Exception:
-            raise NoProcesable(
-                "El período debe tener formato YYYY-MM"
-            )
-
-        try:
-            return Response(excel_service.cargar(
-                archivo.read(), hoja, periodo_fecha.isoformat(),
-                tipo_venta=request.data.get("tipo_venta", "ppa"),
-                limpiar=request.data.get("limpiar", "false"),
-                dry_run=request.data.get("dry_run", "false"),
-                usuario_id=request.user.id,
-            ))
-        except excel_service.TipoVentaInvalido as exc:
-            raise NoProcesable(str(exc))
-        except ValueError as exc:
-            raise NoProcesable(str(exc))
-        except Exception as exc:
-            logger.exception("Error procesando Excel de liquidaciones")
-            return Response(
-                {"detail": f"Error procesando el archivo: {exc}"}, status=500
-            )

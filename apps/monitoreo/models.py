@@ -233,3 +233,23 @@ class AlarmaMonitoreo(models.Model):
 
     class Meta:
         db_table = "alarmas_monitoreo"
+
+
+class InterruptorReconectadores(models.Model):
+    """El interruptor general del ON/OFF de reconectadores. Una sola fila (id=1).
+
+    Antes vivía solo en `RECONECTADORES_COMANDOS_HABILITADOS` del `.env`, que en
+    producción se reescribe desde un secret de GitHub: encenderlo exigía tener
+    ese archivo. Ahora un `admin` lo enciende o apaga desde la plataforma, y
+    queda quién y cuándo. Apagado por defecto. La variable de entorno sigue
+    sirviendo: si dice `true`, los comandos quedan encendidos aunque esta fila
+    diga lo contrario (ver `services/reconectadores.py::comandos_habilitados`).
+    """
+
+    id = models.SmallIntegerField(primary_key=True, default=1)
+    habilitado = models.BooleanField(default=False)
+    actualizado_por = models.CharField(max_length=255, null=True, blank=True)
+    actualizado_en = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "interruptor_reconectadores"

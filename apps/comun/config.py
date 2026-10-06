@@ -30,7 +30,7 @@ DEFECTOS = {
     "UNERGY_API_URL": "https://api.unergy.io",
     # El default tiene que ser PRODUCCION, no localhost: este valor termina en el
     # boton "Ver detalle de la falla" del correo que se le manda AL CLIENTE
-    # (app/services/email_service.py:483). Con `http://localhost:5173` --el
+    # (apps/comun/integraciones/email_service.py). Con `http://localhost:5173` --el
     # default anterior, heredado de FastAPI-- el cliente recibia un enlace que no
     # lleva a ninguna parte, y del lado de la plataforma no se nota: el correo
     # sale bien y el boton se ve bien. Encima el puerto tambien estaba viejo, de

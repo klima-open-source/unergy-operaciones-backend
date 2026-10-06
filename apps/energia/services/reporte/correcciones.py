@@ -43,9 +43,8 @@ from apps.energia.services.reporte.vistas import (
 )
 from apps.fronteras.models import Frontera
 
-# `ponytail: el cliente de Quoia sigue en app/services/mgs/`.
-from app.services.mgs.gaia_client import GaiaClient
-from app.services.mgs.solarview_client import SolarViewClient
+from apps.comun.integraciones.gaia_client import GaiaClient
+from apps.comun.integraciones.solarview_client import SolarViewClient
 
 
 class _SinFilas(Exception):

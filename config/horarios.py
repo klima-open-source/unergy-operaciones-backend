@@ -8,7 +8,7 @@ salir el mismo segundo).
 **Todo en hora de Bogotá.** `CELERY_TIMEZONE` es `America/Bogota` (UTC−5, sin
 horario de verano) aunque el contenedor corra en UTC, igual que hacía el
 `BackgroundScheduler` de FastAPI con `timezone=settings.TIMEZONE`. Sin eso, la
-clasificación de las 3:30am correría a las 10:30pm del día anterior.
+clasificación de las 3:00am correría a las 10:00pm del día anterior.
 
 `django_celery_beat` guarda el horario en la BASE, pero su `DatabaseScheduler`
 sincroniza este diccionario al arrancar: la fuente de verdad sigue siendo el
@@ -24,7 +24,7 @@ HORARIOS = {
     # ── Reporte de Energía ───────────────────────────────────────────────────
     "reporte-energia-clasificar": {
         "task": "energia.reporte_diario",
-        "schedule": crontab(hour=3, minute=30),
+        "schedule": crontab(hour=3, minute=0),
     },
     # Cada 5 min de 4:00 a 5:30. Dos entradas porque un crontab no expresa
     # minutos distintos según la hora.

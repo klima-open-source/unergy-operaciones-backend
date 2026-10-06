@@ -32,6 +32,9 @@ logger = logging.getLogger("operaciones.simem")
 SIMEM_URL = "https://www.simem.co/backend-files/api/PublicData"
 DATASET_BOLSA = "709b84"
 VARIABLE_NACIONAL = "PB_Nal"
+# Precio de las transacciones en bolsa. XM lo publica EN LUGAR del nacional en
+# las horas en que la bolsa supera el precio de escasez de activación.
+VARIABLE_TRANSACCIONES = "PTB"
 _TIMEOUT = httpx.Timeout(10.0, read=60.0)
 
 # Definitividad de las liquidaciones XM (menor = más preliminar; TXF es la
@@ -66,16 +69,30 @@ def fetch_records(start: str, end: str, *, client: httpx.Client | None = None) -
     return []
 
 
-def bolsa_horaria(records: list[dict], variable: str = VARIABLE_NACIONAL) -> dict[tuple[str, str], float]:
+def bolsa_horaria(
+    records: list[dict], variable: str = VARIABLE_NACIONAL,
+) -> dict[tuple[str, str], float]:
     """{records SIMEM} -> {('YYYY-MM-DD', 'HH'): precio_hora (COP/kWh, 2 dec)}.
 
     Por cada (día, hora) usa la versión más nueva disponible (TXF gana; si no está,
     TXR) y redondea a 2 decimales, igual que el Excel.
+
+    **Las horas sin `PB_Nal` se toman del `PTB`.** En esas horas el precio de bolsa
+    superó el de escasez de activación y XM publica el precio de las transacciones
+    en bolsa en vez del nacional: son dos nombres del mismo dato según el régimen,
+    no dos datos distintos. En 2026-09 fueron 18 horas —todas en el pico de la
+    noche— y dejarlas fuera sesgaba el promedio del mes hacia abajo, justo por lo
+    caro. Ver :func:`bolsa_mensual`.
+
+    Si una hora trae las dos, manda `PB_Nal`.
     """
-    mejor: dict[tuple[str, str], int] = {}
+    mejor: dict[tuple[str, str], tuple[int, int]] = {}
     valor: dict[tuple[str, str], float] = {}
+    # (prioridad de variable, …): PB_Nal pisa a PTB venga en el orden que venga.
+    prioridad = {variable: 1, VARIABLE_TRANSACCIONES: 0}
     for r in records:
-        if r.get("CodigoVariable") != variable:
+        pri = prioridad.get(r.get("CodigoVariable"))
+        if pri is None:
             continue
         fh = str(r.get("FechaHora", ""))
         dia, hora = fh[:10], fh[11:13]
@@ -85,13 +102,30 @@ def bolsa_horaria(records: list[dict], variable: str = VARIABLE_NACIONAL) -> dic
         if rk < 0:
             continue
         clave = (dia, hora)
-        if clave not in mejor or rk > mejor[clave]:
+        if clave not in mejor or (pri, rk) > mejor[clave]:
             try:
                 valor[clave] = round(float(r["Valor"]), 2)
-                mejor[clave] = rk
+                mejor[clave] = (pri, rk)
             except (TypeError, ValueError, KeyError):
                 continue
     return valor
+
+
+def horas_de_transacciones(
+    records: list[dict], variable: str = VARIABLE_NACIONAL,
+) -> set[tuple[str, str]]:
+    """Las (día, hora) que solo existen como `PTB`: precio sobre el de escasez."""
+    con_nal = {
+        (str(r.get("FechaHora", ""))[:10], str(r.get("FechaHora", ""))[11:13])
+        for r in records if r.get("CodigoVariable") == variable
+    }
+    return {
+        clave for r in records
+        if r.get("CodigoVariable") == VARIABLE_TRANSACCIONES
+        and (clave := (str(r.get("FechaHora", ""))[:10],
+                       str(r.get("FechaHora", ""))[11:13])) not in con_nal
+        and all(clave)
+    }
 
 
 def bolsa_mensual(anio: int, mes: int, *, techo: float | None = None,
@@ -102,18 +136,20 @@ def bolsa_mensual(anio: int, mes: int, *, techo: float | None = None,
     reconstruir la hoja Bolsa del export. `precio_bolsa=None` si SIMEM no trae datos.
     """
     horaria: dict[tuple[str, str], float] = {}
+    del_ptb: set[tuple[str, str]] = set()
     try:
         ultimo = calendar.monthrange(anio, mes)[1]
         registros = fetch_records(
             f"{anio}-{mes:02d}-01", f"{anio}-{mes:02d}-{ultimo:02d}", client=client
         )
         horaria = bolsa_horaria(registros)
+        del_ptb = horas_de_transacciones(registros)
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("SIMEM bolsa no disponible para %s-%02d: %s", anio, mes, exc)
 
     if not horaria:
         return {"precio_bolsa": None, "horas": 0, "dias": 0, "techo": techo,
-                "horas_techadas": 0, "detalle": {}}
+                "horas_techadas": 0, "horas_ptb": 0, "detalle": {}}
 
     detalle: dict[str, dict[str, float]] = defaultdict(dict)
     valores, horas_techadas = [], 0
@@ -130,5 +166,8 @@ def bolsa_mensual(anio: int, mes: int, *, techo: float | None = None,
         "dias": len(detalle),
         "techo": techo,
         "horas_techadas": horas_techadas,
+        # Horas tomadas del PTB por no haber PB_Nal: la vista las nombra, porque
+        # son horas con el precio por encima del de escasez.
+        "horas_ptb": len(del_ptb),
         "detalle": {d: dict(sorted(h.items())) for d, h in sorted(detalle.items())},
     }

@@ -8,7 +8,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
-from api.exceptions import NoProcesable
+from api.exceptions import NoProcesable, ServicioNoDisponible
 from api.logging import class_logger_wrapper, log_endpoint
 from api.permissions import RolePermission
 from apps.mandatos import models as md_models
@@ -140,14 +140,18 @@ class FinanzasMandatoViewSet(viewsets.GenericViewSet):
         archivo = request.FILES.get("file")
         drive_id = drive_url = None
         if archivo is not None and estado == "firmado":
-            from app.services.finanzas_mandatos_drive import subir_pdf
+            from apps.comun.drive_evidencia import DriveNoConfigurado
+            from apps.mandatos.services.drive import subir_pdf
 
             cmu = datos.get("cmu")
-            subido = subir_pdf(
-                archivo.read(),
-                archivo.name or f'{cmu or "mandato"}.pdf',
-                f'{periodo.strftime("%Y-%m")}-{datos.get("tipo")}',
-            )
+            try:
+                subido = subir_pdf(
+                    archivo.read(),
+                    archivo.name or f'{cmu or "mandato"}.pdf',
+                    f'{periodo.strftime("%Y-%m")}-{datos.get("tipo")}',
+                )
+            except DriveNoConfigurado as exc:
+                raise ServicioNoDisponible(str(exc))
             drive_id, drive_url = subido["id"], subido["url"]
 
         cmu_crudo = datos.get("cmu")

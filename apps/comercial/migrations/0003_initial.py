@@ -46,14 +46,15 @@ class Migration(migrations.Migration):
             name='oferta',
             field=models.ForeignKey(blank=True, db_column='oferta_id', null=True, on_delete=django.db.models.deletion.CASCADE, related_name='oportunidad_estado_historial_por_oferta_id', to='comercial.oportunidadoferta'),
         ),
-        migrations.AddField(
-            model_name='oportunidadofertaproyecto',
-            name='oferta',
-            field=models.ForeignKey(db_column='oferta_id', on_delete=django.db.models.deletion.CASCADE, related_name='proyectos_declarados', to='comercial.oportunidadoferta'),
-        ),
-        migrations.AddField(
-            model_name='oportunidadofertaproyecto',
-            name='proyecto',
-            field=models.ForeignKey(db_column='proyecto_id', on_delete=django.db.models.deletion.CASCADE, related_name='oportunidad_oferta_proyectos_por_proyecto_id', to='proyectos.proyecto'),
+        migrations.CreateModel(
+            name='OportunidadOfertaProyecto',
+            fields=[
+                ('pk', models.CompositePrimaryKey('oferta_id', 'proyecto_id', blank=True, editable=False, primary_key=True, serialize=False)),
+                ('oferta', models.ForeignKey(db_column='oferta_id', on_delete=django.db.models.deletion.CASCADE, related_name='proyectos_declarados', to='comercial.oportunidadoferta')),
+                ('proyecto', models.ForeignKey(db_column='proyecto_id', on_delete=django.db.models.deletion.CASCADE, related_name='oportunidad_oferta_proyectos_por_proyecto_id', to='proyectos.proyecto')),
+            ],
+            options={
+                'db_table': 'oportunidad_oferta_proyectos',
+            },
         ),
     ]

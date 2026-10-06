@@ -10,7 +10,7 @@ import types
 
 import pytest
 
-from app.services.mgs.gaia_client import GaiaClient
+from apps.comun.integraciones.gaia_client import GaiaClient
 
 
 def _client_con_http(get_fn):
