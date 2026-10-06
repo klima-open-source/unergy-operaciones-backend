@@ -105,6 +105,13 @@ def borrar(cliente: Cliente) -> None:
     cliente.save(update_fields=["deleted_at"])
 
 
+#: Las columnas de `contratos` que apuntan a un cliente como parte del contrato.
+CAMPOS_PARTE_CONTRATO = (
+    "comprador_id", "vendedor_id",                          # PPA
+    "contratante_id", "prestador_id", "inversionista_id",   # servicio
+)
+
+
 def _escalar(cur, sql: str, params: dict) -> int:
     cur.execute(sql, params)
     fila = cur.fetchone()
@@ -137,27 +144,18 @@ def reporte_merge(ganador: Cliente, perdedor: Cliente) -> tuple[list[dict], list
                 "tabla": t, "a_mover": n - coli, "descartadas_por_colision": coli,
             })
 
-        # ppa_contratos: doble FK (comprador/vendedor), sin unicidad por cliente.
-        ppa = sum(
-            _escalar(cur, f"SELECT count(*) FROM ppa_contratos WHERE {campo} = %(loser)s", p)
-            for campo in ("comprador_id", "vendedor_id")
+        # contratos: las partes de PPA (comprador/vendedor) y de servicio
+        # (contratante/prestador/inversionista), todas en la tabla única desde el
+        # corte (plan 08). Sin unicidad por cliente. Las de servicio faltaban acá
+        # hasta la auditoría de Clientes 2026-08-27: fusionar un cliente que fuera
+        # parte de un contrato de servicio lo dejaba apuntando al perdedor.
+        n = sum(
+            _escalar(cur, f"SELECT count(*) FROM contratos WHERE {campo} = %(loser)s", p)
+            for campo in CAMPOS_PARTE_CONTRATO
         )
-        if ppa:
+        if n:
             movimientos.append({
-                "tabla": "ppa_contratos", "a_mover": ppa, "descartadas_por_colision": 0,
-            })
-
-        # contratos_servicio: triple FK, tampoco con unicidad por cliente.
-        # Faltaba acá (auditoría de Clientes 2026-08-27): fusionar un cliente que
-        # fuera parte de algún contrato de servicio lo dejaba apuntando al
-        # perdedor, ya dado de baja e invisible en la UI.
-        cs = sum(
-            _escalar(cur, f"SELECT count(*) FROM contratos_servicio WHERE {campo} = %(loser)s", p)
-            for campo in ("contratante_id", "prestador_id", "inversionista_id")
-        )
-        if cs:
-            movimientos.append({
-                "tabla": "contratos_servicio", "a_mover": cs, "descartadas_por_colision": 0,
+                "tabla": "contratos", "a_mover": n, "descartadas_por_colision": 0,
             })
 
     campos_copiados = [
@@ -187,15 +185,11 @@ def ejecutar_merge(ganador: Cliente, perdedor: Cliente, movimientos: list[dict],
         })
 
         with connection.cursor() as cur:
-            # 1) FKs múltiples: ppa_contratos y contratos_servicio.
-            for tabla, campos in (
-                ("ppa_contratos", ("comprador_id", "vendedor_id")),
-                ("contratos_servicio", ("contratante_id", "prestador_id", "inversionista_id")),
-            ):
-                for campo in campos:
-                    cur.execute(
-                        f"UPDATE {tabla} SET {campo} = %(keeper)s WHERE {campo} = %(loser)s", p
-                    )
+            # 1) Las cinco columnas de parte de `contratos`.
+            for campo in CAMPOS_PARTE_CONTRATO:
+                cur.execute(
+                    f"UPDATE contratos SET {campo} = %(keeper)s WHERE {campo} = %(loser)s", p
+                )
 
             # 2) Colisión por clave compuesta: se descarta la del perdedor.
             for t, claves in MERGE_COMPUESTO:

@@ -63,7 +63,7 @@ TABLAS_CASCADE_SIN_RELACION = [
 #                      descarta la del perdedor.
 MERGE_SIMPLE = [
     "proyecto_inversores", "proyecto_inversionistas", "fronteras", "fallas",
-    "contratos_servicio", "asic_solicitudes", "rec_procesos",
+    "contratos", "asic_solicitudes", "rec_procesos",  # contratos: su FK `proyecto_id` (servicio)
     "costos_variables", "gestion_registros", "cumplimiento_mensual",
 ]
 MERGE_COMPUESTO = [
@@ -73,7 +73,7 @@ MERGE_COMPUESTO = [
     ("clasificacion_liquidacion", ["periodo"]),
     ("mapeo_celda_concepto", ["concepto"]),
     ("alias_fuente_ingreso", ["columna_origen"]),
-    ("ppa_contrato_proyectos", ["contrato_id"]),
+    ("contrato_proyectos", ["contrato_id"]),
     # UNIQUE (proyecto_id, tipo): si el ganador ya tiene puntero para ese tipo,
     # se descarta el del perdedor.
     ("proyecto_area_contacto", ["tipo"]),
