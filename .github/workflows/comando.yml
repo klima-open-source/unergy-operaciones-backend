@@ -36,6 +36,8 @@ on:
           - "revisar_servicios_banderas (solo lee)"
           - "registrar_partes_contratos (solo lee)"
           - "registrar_partes_contratos --aplicar"
+          - "revisar_partes_contratos (solo lee)"
+          - "revisar_partes_contratos --aplicar"
           - "DESHACER paso 2 (corte de contratos)"
           - "DESHACER paso 0 (diagnostico)"
       confirmar:
@@ -90,6 +92,8 @@ jobs:
             "revisar_servicios_banderas (solo lee)")     manage revisar_servicios_banderas ;;
             "registrar_partes_contratos (solo lee)")     manage registrar_partes_contratos ;;
             "registrar_partes_contratos --aplicar")      manage registrar_partes_contratos --aplicar ;;
+            "revisar_partes_contratos (solo lee)")       manage revisar_partes_contratos ;;
+            "revisar_partes_contratos --aplicar")        manage revisar_partes_contratos --aplicar ;;
             "DESHACER paso 2 (corte de contratos)")
               confirmado
               manage migrate contratos 0008
