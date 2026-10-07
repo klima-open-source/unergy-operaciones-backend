@@ -24,12 +24,13 @@ inversionista lo hace hoy-- y `partes.sincronizar` tiene que seguir resolviendo
 al vuelo en cada guardado. Este comando es lo que permite retirar esa adivinanza:
 se corre UNA vez, se revisa lo que no emparejó, y el vínculo queda escrito.
 
-Cómo empareja. Reutiliza `partes.resolver_cliente_id`, que es la única
-definición: primero NIT exacto normalizado, y si no, nombre parecido **que
-además comparta tokens**. Ese requisito no es decorativo: el backfill manual del
-2026-08-27 emparejó "BALI ENERGY S.A.S." con "INENERGY S.A.S." --cero palabras
-en común, solo letras parecidas--. Un NIT que casa con dos clientes no resuelve
-nada y pasa al nombre.
+Cómo empareja. Reutiliza `partes.emparejar_cliente`, la única definición, y
+**solo escribe lo seguro**: NIT exacto, o el mismo nombre (mismas palabras, en
+cualquier orden). Lo que solo se PARECE a un cliente sale como "revisar a mano"
+con el cliente sugerido, y no se escribe: el 2026-10-07, contra datos de
+producción, 11 de 12 parecidos eran OTRA empresa ("Bia Energy" → "BALI ENERGY",
+cinco PPA). Y un vínculo malo no se queda quieto: el siguiente guardado del
+contrato copia el nombre del cliente encima del de la parte.
 
 Lo que NO hace. No inventa clientes: una parte cuyo nombre no corresponde a
 ningún cliente registrado sale en el informe como pendiente, para darla de alta
@@ -42,6 +43,7 @@ import csv
 from django.core.management.base import BaseCommand
 
 from apps.arriendos.models import ArrArrendador
+from apps.clientes.models import Cliente
 from apps.contratos.models import ContratoServicio
 from apps.contratos.services import partes as partes_service
 from apps.facturacion.models import ContratoFactura
@@ -75,7 +77,11 @@ def _vivos(modelo):
     consulta = modelo.objects.all()
     return consulta.filter(deleted_at__isnull=True) if "deleted_at" in campos else consulta
 
-CABECERA = ["tabla", "contrato_id", "rol", "nombre", "nit", "resultado", "cliente_id"]
+CABECERA = ["tabla", "contrato_id", "rol", "nombre", "nit", "resultado", "cliente_id",
+            "cliente_nombre"]
+
+#: Lo que se escribe sin que nadie lo mire. El parecido, no.
+SEGUROS = (partes_service.POR_NIT, partes_service.POR_NOMBRE)
 
 
 class Command(BaseCommand):
@@ -94,7 +100,9 @@ class Command(BaseCommand):
     def handle(self, *args, **opciones):
         aplicar = opciones["aplicar"]
         filas = []
-        resumen = {"ya_vinculadas": 0, "resueltas": 0, "sin_candidato": 0, "sin_nombre": 0}
+        resumen = {"ya_vinculadas": 0, "resueltas": 0, "a_revisar": 0,
+                   "sin_candidato": 0, "sin_nombre": 0}
+        nombres = dict(Cliente.objects.values_list("id", "razon_social_nombre"))
 
         for modelo, tabla, roles in OBJETIVOS:
             for contrato in _vivos(modelo):
@@ -111,16 +119,20 @@ class Command(BaseCommand):
                         resumen["sin_nombre"] += 1
                         continue
 
-                    cliente_id = partes_service.resolver_cliente_id(nombre, nit)
-                    if cliente_id:
+                    cliente_id, como = partes_service.emparejar_cliente(nombre, nit)
+                    if como in SEGUROS:
                         resumen["resueltas"] += 1
                         cambios.append((rol, cliente_id))
+                        resultado = f"resuelta_por_{como}"
+                    elif como == partes_service.PARECIDO:
+                        resumen["a_revisar"] += 1
+                        resultado = "revisar_a_mano"
                     else:
                         resumen["sin_candidato"] += 1
+                        resultado = "sin_candidato"
                     filas.append([
-                        tabla, contrato.id, rol, nombre, nit or "",
-                        "resuelta" if cliente_id else "sin_candidato",
-                        cliente_id or "",
+                        tabla, contrato.id, rol, nombre, nit or "", resultado,
+                        cliente_id or "", nombres.get(cliente_id, ""),
                     ])
 
                 if cambios and aplicar:
@@ -129,6 +141,7 @@ class Command(BaseCommand):
                     contrato.save(update_fields=[rol for rol, _ in cambios])
 
         self._informar(resumen, aplicar)
+        self._listar(filas)
         if opciones["csv_path"]:
             self._escribir_csv(opciones["csv_path"], filas)
 
@@ -137,8 +150,9 @@ class Command(BaseCommand):
         escribir("")
         escribir(self.style.MIGRATE_HEADING("Partes de contratos"))
         escribir(f"  Ya vinculadas, sin tocar : {resumen['ya_vinculadas']}")
-        escribir(f"  Emparejadas              : {resumen['resueltas']}")
-        escribir(f"  Sin cliente que empareje : {resumen['sin_candidato']}")
+        escribir(f"  Emparejadas (NIT o mismo nombre): {resumen['resueltas']}")
+        escribir(f"  Parecidas, a revisar a mano     : {resumen['a_revisar']}  (no se escriben)")
+        escribir(f"  Sin cliente que empareje        : {resumen['sin_candidato']}")
         escribir(f"  Sin nombre que buscar    : {resumen['sin_nombre']}")
         escribir("")
         if aplicar:
@@ -155,6 +169,24 @@ class Command(BaseCommand):
                 "  o que se revise el nombre a mano. Usa --csv para verlas."
             )
         escribir("")
+
+    def _listar(self, filas):
+        """Lo que pide a una persona, en la salida: desde el workflow de comandos
+        no se puede bajar el CSV del servidor."""
+        for resultado, titulo in (
+            ("revisar_a_mano", "Parecidas a un cliente: revisar a mano (NO se escriben)"),
+            ("sin_candidato", "Sin cliente: darlo de alta o corregir el nombre"),
+        ):
+            propias = [f for f in filas if f[5] == resultado]
+            if not propias:
+                continue
+            self.stdout.write(self.style.MIGRATE_HEADING(f"{titulo} ({len(propias)})"))
+            for tabla, cid, rol, nombre, nit, _r, sugerido_id, sugerido in propias:
+                sugerencia = f"  ->  ¿{sugerido} (cliente {sugerido_id})?" if sugerido_id else ""
+                self.stdout.write(
+                    f"  {tabla} {cid} {rol}: {nombre}{f' (NIT {nit})' if nit else ''}{sugerencia}"
+                )
+            self.stdout.write("")
 
     def _escribir_csv(self, ruta, filas):
         with open(ruta, "w", newline="", encoding="utf-8") as f:
