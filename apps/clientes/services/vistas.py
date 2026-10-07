@@ -25,6 +25,7 @@ from apps.clientes.services.panel import (
 )
 from apps.contratos.models import ContratoServicio
 from apps.contratos.services import grupos as grupos_servicio
+from apps.contratos.services.contrato_partes import ROLES_PPA, ROLES_SERVICIO, contratos_de
 from apps.plataforma.services.fechas import hoy_col
 from apps.ppa.models import PpaContrato, PpaContratoProyecto
 from apps.proyectos.models import Proyecto, ProyectoInversionista
@@ -101,7 +102,7 @@ def _contratos_del_cliente(cliente_id: int, plant_ids: set[int]):
     motivó: Quantum es inversionista de GD Sirius y GD Elektra, cuyos contratos
     de representación no lo tienen como contratante.
     """
-    criterio = Q(contratante_id=cliente_id) | Q(prestador_id=cliente_id)
+    criterio = Q(pk__in=contratos_de({cliente_id}, ROLES_SERVICIO))
     if plant_ids:
         criterio |= Q(proyecto_id__in=plant_ids)
     return list(
@@ -199,7 +200,7 @@ def panel_360(cliente: Cliente, hoy: date | None = None) -> dict:
     ppas = list(
         PpaContrato.objects
         .filter(deleted_at__isnull=True)
-        .filter(Q(comprador_id=cliente_id) | Q(vendedor_id=cliente_id))
+        .filter(pk__in=contratos_de({cliente_id}, ROLES_PPA))
         .prefetch_related("documentos_comerciales")
     )
     participaciones = list(

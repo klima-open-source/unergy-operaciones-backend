@@ -19,11 +19,10 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date
 
-from django.db.models import Q
 
 from apps.clientes.models import Contacto
-from apps.contratos.models import ContratoServicio
-from apps.ppa.models import PpaContrato, PpaContratoProyecto
+from apps.contratos.models import ContratoParte, ContratoServicio, GrupoContrato
+from apps.contratos.services.contrato_partes import ROLES_PPA, ROLES_SERVICIO
 from apps.proyectos.models import ProyectoInversionista
 
 UMBRAL_POR_VENCER_DIAS = 90
@@ -69,27 +68,35 @@ def proyectos_por_cliente(cliente_ids: set[int]) -> dict[int, set[int]]:
 
     # Contratante y prestador: un cliente que PRESTA el servicio también tiene
     # esa planta "con nosotros" (mismo criterio que `servicios_por_cliente`).
-    for campo in ("contratante_id", "prestador_id"):
-        for cid, pid in ContratoServicio.objects.filter(
-            **{f"{campo}__in": cliente_ids}, proyecto_id__isnull=False
-        ).values_list(campo, "proyecto_id"):
-            res[cid].add(pid)
+    for cid, pid in _partes_de_servicio(cliente_ids).filter(
+        contrato__proyecto_id__isnull=False
+    ).values_list("cliente_id", "contrato__proyecto_id"):
+        res[cid].add(pid)
 
-    filas_ppa = (
-        PpaContratoProyecto.objects
-        .filter(contrato__deleted_at__isnull=True)
-        .filter(
-            Q(contrato__comprador_id__in=cliente_ids)
-            | Q(contrato__vendedor_id__in=cliente_ids)
-        )
-        .values_list("contrato__comprador_id", "contrato__vendedor_id", "proyecto_id")
-    )
-    for comprador_id, vendedor_id, pid in filas_ppa:
-        if comprador_id in cliente_ids:
-            res[comprador_id].add(pid)
-        if vendedor_id in cliente_ids:
-            res[vendedor_id].add(pid)
+    # Comprador o vendedor de un PPA: las plantas que el PPA cubre.
+    for cid, pid in _partes_de_ppa(cliente_ids).filter(
+        contrato__proyectos_vinculados__proyecto_id__isnull=False
+    ).values_list("cliente_id", "contrato__proyectos_vinculados__proyecto_id"):
+        res[cid].add(pid)
     return res
+
+
+def _partes_de_servicio(cliente_ids):
+    """Las filas de `contrato_partes` de esos clientes como contratante o prestador
+    de un contrato de servicio."""
+    return (
+        ContratoParte.objects
+        .filter(cliente_id__in=cliente_ids, rol__in=ROLES_SERVICIO)
+        .exclude(contrato__grupo=GrupoContrato.PPA)
+    )
+
+
+def _partes_de_ppa(cliente_ids):
+    """Las de esos clientes como comprador o vendedor de un PPA no borrado."""
+    return ContratoParte.objects.filter(
+        cliente_id__in=cliente_ids, rol__in=ROLES_PPA,
+        contrato__grupo=GrupoContrato.PPA, contrato__deleted_at__isnull=True,
+    )
 
 
 def _proyecto_a_clientes(plantas: dict[int, set[int]]) -> dict[int, set[int]]:
@@ -106,11 +113,10 @@ def servicios_por_cliente(cliente_ids: set[int],
     if not cliente_ids:
         return res
 
-    for campo in ("contratante_id", "prestador_id"):
-        for cid, tipo in ContratoServicio.objects.filter(
-            **{f"{campo}__in": cliente_ids}
-        ).values_list(campo, "servicio_aplica"):
-            res[cid].add(tipo)
+    for cid, tipo in _partes_de_servicio(cliente_ids).values_list(
+        "cliente_id", "contrato__servicio_aplica"
+    ):
+        res[cid].add(tipo)
 
     plantas = plantas if plantas is not None else proyectos_por_cliente(cliente_ids)
     por_proyecto = _proyecto_a_clientes(plantas)
@@ -121,17 +127,8 @@ def servicios_por_cliente(cliente_ids: set[int],
             for cid in por_proyecto[pid]:
                 res[cid].add(tipo)
 
-    filas_ppa = (
-        PpaContrato.objects
-        .filter(deleted_at__isnull=True)
-        .filter(Q(comprador_id__in=cliente_ids) | Q(vendedor_id__in=cliente_ids))
-        .values_list("comprador_id", "vendedor_id")
-    )
-    for comprador_id, vendedor_id in filas_ppa:
-        if comprador_id in cliente_ids:
-            res[comprador_id].add("ppa")
-        if vendedor_id in cliente_ids:
-            res[vendedor_id].add("ppa")
+    for cid in _partes_de_ppa(cliente_ids).values_list("cliente_id", flat=True):
+        res[cid].add("ppa")
     return res
 
 
@@ -174,17 +171,11 @@ def alerta_contratos_por_cliente(cliente_ids: set[int], hoy: date,
         if fecha_fin and fecha_fin >= hoy:
             vencimientos[cid].append(fecha_fin)
 
-    filas_serv = (
-        ContratoServicio.objects
-        .filter(Q(contratante_id__in=cliente_ids) | Q(prestador_id__in=cliente_ids))
-        .values_list("contratante_id", "prestador_id", "fecha_fin", "estado")
-    )
-    for contratante_id, prestador_id, fecha_fin, estado in filas_serv:
-        if estado == "terminado":
-            continue
-        for cid in (contratante_id, prestador_id):
-            if cid in cliente_ids:
-                _anotar(cid, fecha_fin)
+    for cid, fecha_fin, estado in _partes_de_servicio(cliente_ids).values_list(
+        "cliente_id", "contrato__fecha_fin", "contrato__estado"
+    ):
+        if estado != "terminado":
+            _anotar(cid, fecha_fin)
 
     plantas = plantas if plantas is not None else proyectos_por_cliente(cliente_ids)
     por_proyecto = _proyecto_a_clientes(plantas)
@@ -197,16 +188,10 @@ def alerta_contratos_por_cliente(cliente_ids: set[int], hoy: date,
             for cid in por_proyecto[pid]:
                 _anotar(cid, fecha_fin)
 
-    filas_ppa = (
-        PpaContrato.objects
-        .filter(deleted_at__isnull=True)
-        .filter(Q(comprador_id__in=cliente_ids) | Q(vendedor_id__in=cliente_ids))
-        .values_list("comprador_id", "vendedor_id", "fecha_fin")
-    )
-    for comprador_id, vendedor_id, fecha_fin in filas_ppa:
-        for cid in (comprador_id, vendedor_id):
-            if cid in cliente_ids:
-                _anotar(cid, fecha_fin)
+    for cid, fecha_fin in _partes_de_ppa(cliente_ids).values_list(
+        "cliente_id", "contrato__fecha_fin"
+    ):
+        _anotar(cid, fecha_fin)
 
     return {
         cid: {

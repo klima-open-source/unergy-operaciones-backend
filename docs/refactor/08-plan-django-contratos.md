@@ -38,7 +38,7 @@ eso **cada deploy es su propio PR**, y se junta a `master` cuando se quiere ejec
 |---|---|
 | Inversionistas | `contrato_proyectos` pasa a apuntar a `proyecto_inversionistas` (diagrama de Sara); el proyecto de los contratos de servicio deja su campo directo y entra a `contrato_proyectos` (hoy se lee así en ~20 archivos) |
 | Tarifas | Plantillas (`servicio_plantillas`, `tarifa_plantillas`) y `tarifas` colgando de `servicios`. Es el modelo del commit `3dd6bb50`, que Camilo revirtió |
-| Clientes | `contrato_partes`, ya con quién la escribe y quién la lee |
+| Clientes | `contrato_partes`, ya con quién la escribe y quién la lee. **En curso: rama `contratos-partes` (2026-10-07)** — cuatro papeles para todos los contratos (comprador, vendedor, contratante, prestador); el inversionista NO es una parte, va a `contrato_proyectos` con la rama de inversionistas. Paso 1: la tabla derivada de las columnas en `Contrato.save()` y leída por las consultas de «contratos de un cliente». Paso 2: las pantallas escriben las partes y se quitan las columnas |
 
 ## 3 · El modelo al terminar
 
