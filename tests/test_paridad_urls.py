@@ -167,7 +167,12 @@ RUTAS_RETIRADAS = {
 #   2026-10-01  GET /generacion-solar/monitoring/{id}/irradiancia. Irradiancia
 #               POA de la estacion de SolarView para la grafica de potencia. No
 #               existia en FastAPI.
+#   2026-10-07  GET /facturacion/bolsa-simem. Expone el precio de bolsa del mes
+#               (SIMEM 709b84) que ya calculaba la indemnizacion, para la vista
+#               SIMEM de Comercializacion. Se expone en vez de recalcularlo
+#               para que los dos numeros no se separen.
 RUTAS_NUEVAS = {
+    ("/api/v1/facturacion/bolsa-simem", "GET"),
     ("/api/v1/generacion-solar/monitoring/{}/irradiancia", "GET"),
     ("/api/v1/reconectadores/interruptor", "GET"),
     ("/api/v1/reconectadores/interruptor", "POST"),
