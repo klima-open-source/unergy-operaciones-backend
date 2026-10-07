@@ -14,23 +14,52 @@ siempre el último recurso.
 """
 
 from apps.clientes import models as cl_models
-from apps.comun.nombre_matching import core_tokens, mejor_candidato
+from apps.comun.nombre_matching import core_tokens, mejor_candidato, normalizar
 
 
 def _solo_alfanumerico(texto: str) -> str:
     return "".join(c for c in (texto or "") if c.isalnum())
 
 
-def resolver_cliente_id(nombre: str | None, nit: str | None) -> int | None:
-    """Primero por NIT exacto normalizado; si no, por nombre parecido.
+#: Palabras que comparten demasiados clientes para decir quién es quién. Compartir
+#: SOLO una de estas no es parecido: el 2026-10-07, con datos de producción,
+#: "Bia Energy" casaba con "BALI ENERGY", "NITRO ENERGY COLOMBIA" con "CSCI
+#: COLOMBIA SOLAR CORP" y "PROMOTORA DE ENERGIA ELECTRICA DE CARTAGENA" con "SOL Y
+#: CIELO ENERGIA", cada uno por una sola palabra de esta lista.
+PALABRAS_GENERICAS = frozenset({
+    "energy", "energia", "energias", "energetica", "energeticas", "electrica",
+    "electricas", "power", "solar", "solares", "renovable", "renovables",
+    "sostenible", "sostenibles", "verde", "green", "colombia", "colombiana",
+    "inversiones", "inversion", "investment", "grupo", "group", "holding",
+    "capital", "activos", "servicios", "soluciones", "digital", "comercializadora",
+    "promotora", "desarrollos", "proyectos", "internacional", "andina",
+})
 
-    El nombre parecido exige ADEMÁS solapamiento real de tokens, no solo
-    similitud de caracteres: el backfill manual encontró casos reales como
-    "BALI ENERGY S.A.S." emparejando con "INENERGY S.A.S." — cero tokens en
-    común, solo letras parecidas.
+#: Cómo se emparejó. Solo los dos primeros son seguros para escribir sin que una
+#: persona lo mire (`vincular_partes_contratos`).
+POR_NIT = "nit"
+POR_NOMBRE = "nombre"
+PARECIDO = "parecido"
 
-    Un NIT que casa con DOS clientes no resuelve nada: se ignora y se pasa al
-    nombre, porque elegir uno al azar ataría el contrato al cliente equivocado.
+
+def _palabras(nombre: str | None) -> frozenset:
+    return frozenset(normalizar(nombre or "").split())
+
+
+def emparejar_cliente(nombre: str | None, nit: str | None) -> tuple[int | None, str | None]:
+    """`(cliente_id, cómo)`: por NIT exacto, por el mismo nombre, o solo parecido.
+
+    1. **NIT** exacto, normalizado. Un NIT que casa con DOS clientes no resuelve
+       nada: se pasa al nombre, porque elegir uno al azar ataría el contrato al
+       cliente equivocado.
+    2. **El mismo nombre**: las mismas palabras, sin tildes, puntuación ni sufijo
+       societario, en cualquier orden ("Beatriz Rodriguez Velez" = "RODRIGUEZ
+       VELEZ BEATRIZ"). Si dos clientes se llaman igual, no resuelve.
+    3. **Parecido**: el mejor candidato por similitud, que además comparta al
+       menos una palabra PROPIA (`PALABRAS_GENERICAS` no cuentan) — sin eso,
+       "BALI ENERGY S.A.S." casaba con "INENERGY S.A.S." por letras parecidas.
+       Es una sugerencia: puede ser otra empresa de la misma familia
+       ("Mauricio Estrada Arbelaez" → "INVERSIONES ESTRADA ARBELAEZ").
     """
     if nit:
         clave = _solo_alfanumerico(nit)
@@ -41,20 +70,37 @@ def resolver_cliente_id(nombre: str | None, nit: str | None) -> int | None:
                 if _solo_alfanumerico(c.nit_cedula) == clave
             ]
             if len(iguales) == 1:
-                return iguales[0].id
+                return iguales[0].id, POR_NIT
 
-    if nombre:
-        clientes = list(
-            cl_models.Cliente.objects.filter(deleted_at__isnull=True)
-        )
-        candidato, _score = mejor_candidato(
-            nombre, [(c, [c.razon_social_nombre]) for c in clientes]
-        )
-        if candidato and (
-            core_tokens(nombre) & core_tokens(candidato.razon_social_nombre)
-        ):
-            return candidato.id
-    return None
+    if not (nombre or "").strip():
+        return None, None
+    clientes = list(cl_models.Cliente.objects.filter(deleted_at__isnull=True))
+
+    palabras = _palabras(nombre)
+    iguales = [c for c in clientes if palabras and _palabras(c.razon_social_nombre) == palabras]
+    if len(iguales) == 1:
+        return iguales[0].id, POR_NOMBRE
+
+    candidato, _score = mejor_candidato(
+        nombre, [(c, [c.razon_social_nombre]) for c in clientes]
+    )
+    if candidato and (
+        (core_tokens(nombre) - PALABRAS_GENERICAS)
+        & core_tokens(candidato.razon_social_nombre)
+    ):
+        return candidato.id, PARECIDO
+    return None, None
+
+
+def resolver_cliente_id(nombre: str | None, nit: str | None) -> int | None:
+    """El cliente de una parte, incluido el solo parecido (ver `emparejar_cliente`).
+
+    Lo usa `sincronizar` al guardar un contrato que llega SIN vínculo — hoy la
+    pantalla y la API ya lo exigen al crear, así que es la red para lo que entra
+    por otros caminos—. El backfill masivo NO acepta el parecido: lo deja para
+    revisar a mano.
+    """
+    return emparejar_cliente(nombre, nit)[0]
 
 
 # El inversionista entra a la lista aunque no tenga columna de NIT: es el que

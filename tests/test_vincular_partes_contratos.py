@@ -148,7 +148,7 @@ def test_sin_candidato_se_reporta_y_no_inventa_cliente(entorno):
 
     assert ContratoServicio.objects.get(pk=contrato.id).contratante_id is None
     assert Cliente.objects.count() == cuantos, "no debe crear clientes"
-    assert "Sin cliente que empareje : 1" in salida
+    assert "Sin cliente que empareje        : 1" in salida
 
 
 def test_tambien_recorre_las_partes_del_ppa(entorno):
@@ -162,3 +162,78 @@ def test_tambien_recorre_las_partes_del_ppa(entorno):
     _correr("--aplicar")
 
     assert PpaContrato.objects.get(pk=contrato.id).vendedor_id == vendedor.id
+
+
+# ── Solo lo seguro se escribe (casos reales del 2026-10-07) ─────────────────
+
+
+def test_una_palabra_generica_en_comun_no_es_parecido(entorno):
+    """ "Bia Energy" casaba con "BALI ENERGY" (cinco PPA) por la palabra "energy"."""
+    from apps.ppa.models import PpaContrato
+
+    _cliente("BALI ENERGY S.A.S.")
+    _cliente("CSCI COLOMBIA SOLAR CORP")
+    bia = PpaContrato.objects.create(comprador_nombre=" Bia Energy S.A.S.",
+                                     comprador_nit="901588412", tipo_contrato="venta")
+    nitro = PpaContrato.objects.create(comprador_nombre="NITRO ENERGY COLOMBIA S A S E S P",
+                                       tipo_contrato="venta")
+
+    salida = _correr("--aplicar")
+
+    for ppa in (bia, nitro):
+        ppa.refresh_from_db()
+        assert ppa.comprador_id is None
+    assert "Sin cliente que empareje        : 2" in salida
+
+
+def test_lo_parecido_se_lista_para_revisar_y_no_se_escribe(entorno):
+    """Una persona y la empresa de su familia comparten apellidos: puede ser o no."""
+    from apps.arriendos.models import ArrArrendador
+
+    empresa = _cliente("INVERSIONES ESTRADA ARBELAEZ Y CIA S. EN C")
+    arrendador = ArrArrendador.objects.create(
+        contrato=_contrato(servicio_aplica="arriendo"), nombre="Mauricio Estrada Arbelaez")
+
+    salida = _correr("--aplicar")
+
+    arrendador.refresh_from_db()
+    assert arrendador.cliente_id is None
+    assert "Parecidas, a revisar a mano     : 1" in salida
+    assert f"(cliente {empresa.id})" in salida and "Mauricio Estrada Arbelaez" in salida
+
+
+def test_el_mismo_nombre_en_otro_orden_si_se_escribe(entorno):
+    from apps.arriendos.models import ArrArrendador
+
+    cliente = _cliente("RODRIGUEZ VELEZ BEATRIZ")
+    arrendador = ArrArrendador.objects.create(
+        contrato=_contrato(servicio_aplica="arriendo"), nombre="Beatriz Rodriguez Velez")
+
+    _correr("--aplicar")
+
+    arrendador.refresh_from_db()
+    assert arrendador.cliente_id == cliente.id
+
+
+def test_por_nit_se_escribe_aunque_el_nombre_difiera(entorno):
+    from apps.contratos.models import ContratoServicio
+
+    cliente = _cliente("Razon Social Nueva S.A.S.", "900111222-3")
+    contrato = _contrato(contratante_nombre="Nombre Viejo", contratante_nit="900.111.222-3")
+
+    _correr("--aplicar")
+
+    assert ContratoServicio.objects.get(pk=contrato.id).contratante_id == cliente.id
+
+
+def test_al_guardar_un_contrato_tampoco_casa_por_una_palabra_generica(entorno):
+    """`resolver_cliente_id` es la red de `partes.sincronizar` en cada guardado:
+    la misma exclusión. El parecido con palabras propias sí lo sugiere ahí."""
+    from apps.contratos.services import partes
+
+    _cliente("BALI ENERGY S.A.S.")
+    empresa = _cliente("INVERSIONES ESTRADA ARBELAEZ Y CIA S. EN C")
+
+    assert partes.resolver_cliente_id("Bia Energy S.A.S.", None) is None
+    assert partes.emparejar_cliente("Mauricio Estrada Arbelaez", None) == (
+        empresa.id, partes.PARECIDO)
