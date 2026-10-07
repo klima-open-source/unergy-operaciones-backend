@@ -137,9 +137,9 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
     class Meta:
         model = ppa_models.PpaContrato
         fields = [
+            # Las partes, solo por su cliente: nombre y NIT son los de la ficha.
             "numero_codigo_contrato", "nombre_interno", "responsable_id",
-            "comprador_id", "vendedor_id", "comprador_nombre", "comprador_nit",
-            "vendedor_nombre", "vendedor_nit", "fecha_inicio", "fecha_fin",
+            "comprador_id", "vendedor_id", "fecha_inicio", "fecha_fin",
             "tarifa_base", "indice_indexacion", "periodicidad_indexacion",
             "periodo_indexacion_base", "valor_indexacion_base",
             "cantidad_minima_kwh_mes", "cantidad_maxima_kwh_mes",

@@ -124,10 +124,9 @@ def borrar(cliente: Cliente) -> None:
 
 
 #: Las columnas de `contratos` que apuntan a un cliente como parte del contrato.
-CAMPOS_PARTE_CONTRATO = (
-    "comprador_id", "vendedor_id",                          # PPA
-    "contratante_id", "prestador_id", "inversionista_id",   # servicio
-)
+#: Comprador, vendedor, contratante y prestador están en `contrato_partes`, que la
+#: fusión mueve en `MERGE_COMPUESTO`. Queda el inversionista, hasta su rama.
+CAMPOS_PARTE_CONTRATO = ("inversionista_id",)
 
 
 def _escalar(cur, sql: str, params: dict) -> int:

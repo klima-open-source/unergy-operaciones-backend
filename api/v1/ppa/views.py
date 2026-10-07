@@ -189,7 +189,6 @@ class PpaViewSet(
                 )
             if proyecto_ids is not None:
                 contratos_service.fijar_proyectos(contrato, proyecto_ids)
-            contratos_service.sincronizar_partes(contrato)
             self._validar(contrato)
 
         return Response(

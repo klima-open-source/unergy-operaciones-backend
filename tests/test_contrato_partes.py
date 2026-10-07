@@ -1,12 +1,10 @@
 """Las partes de cada contrato: la tabla `contrato_partes` y quién la escribe.
 
-La escribe SOLO `apps/contratos/services/contrato_partes.py`, desde `Contrato.save()`,
-derivándola de las columnas comprador/vendedor/contratante/prestador. Los dos caminos
-que no pasan por `save()` se ocupan de ella por su cuenta: la fusión de clientes y el
-comando `registrar_partes_contratos`.
+Las partes se escriben asignando en el contrato (`contrato.contratante_id = 5`) y
+guardándolo: `Contrato.save()` las pasa a `contrato_partes`. El nombre y el NIT NO se
+guardan en el contrato: son los de la ficha del cliente, y escribirlos da error. La
+fusión de clientes, que no pasa por `save()`, mueve la tabla por su cuenta.
 """
-from io import StringIO
-from types import SimpleNamespace
 
 import pytest
 
@@ -75,22 +73,40 @@ def _partes(contrato):
                   .values_list("rol", "cliente_id"))
 
 
-# ── La regla (pura) ──────────────────────────────────────────────────────────
+# ── Nombre y NIT salen de la ficha ───────────────────────────────────────────
 
 
-def test_las_partes_salen_de_las_columnas_con_cliente():
-    from apps.contratos.services import contrato_partes
+def test_nombre_y_nit_son_los_de_la_ficha(datos):
+    from apps.contratos.models import ContratoServicio
 
-    c = SimpleNamespace(comprador_id=None, vendedor_id=None, contratante_id=7, prestador_id=3)
-    assert contrato_partes.deseadas(c) == {("contratante", 7), ("prestador", 3)}
+    datos["solenium"].nit_cedula = "9010972445"
+    datos["solenium"].save()
+    c = ContratoServicio.objects.create(
+        servicio_aplica="mantenimiento", prestador_id=datos["solenium"].id,
+    )
+    c = ContratoServicio.objects.get(pk=c.pk)
+    assert c.prestador_nombre == "Solenium"
+    assert c.prestador_nit == "9010972445"
+    assert c.contratante_nombre is None
 
 
-def test_el_inversionista_no_es_una_parte():
-    from apps.contratos.services import contrato_partes
+def test_el_nombre_y_el_nit_no_se_escriben_en_el_contrato(datos):
+    from apps.contratos.models import ContratoServicio
 
-    c = SimpleNamespace(comprador_id=None, vendedor_id=None, contratante_id=None,
-                        prestador_id=None, inversionista_id=9)
-    assert contrato_partes.deseadas(c) == set()
+    c = ContratoServicio(servicio_aplica="mantenimiento")
+    with pytest.raises(AttributeError):
+        c.prestador_nombre = "Texto suelto"
+    with pytest.raises(AttributeError):
+        c.prestador_nit = "900"
+
+
+def test_el_inversionista_no_es_una_parte(datos):
+    from apps.contratos.models import ContratoServicio
+
+    c = ContratoServicio.objects.create(
+        servicio_aplica="representacion", inversionista_id=datos["bia"].id,
+    )
+    assert _partes(c) == []
 
 
 # ── Contrato.save() la mantiene al día ───────────────────────────────────────
@@ -164,31 +180,37 @@ def test_contratos_de_filtra_por_papel(datos):
     assert solo_ppa == {ppa.id}
 
 
-# ── El comando que la llena y la verifica ────────────────────────────────────
+# ── Escrituras parciales y listados ──────────────────────────────────────────
 
 
-def test_el_comando_llena_lo_que_falta_y_despues_cuadra(datos):
-    from django.core.management import call_command
+def test_guardar_solo_la_parte_con_update_fields(datos):
+    from apps.contratos.models import ContratoServicio
 
-    from apps.contratos.models import ContratoParte, ContratoServicio
+    c = ContratoServicio.objects.create(servicio_aplica="mantenimiento")
+    c.prestador_id = datos["solenium"].id
+    c.save(update_fields=["prestador_id"])
+    assert _partes(c) == [("prestador", datos["solenium"].id)]
 
-    c = ContratoServicio.objects.create(
-        servicio_aplica="arriendo",
-        contratante_id=datos["unergy"].id, prestador_id=datos["bia"].id,
-    )
-    ContratoParte.objects.all().delete()  # como queda la tabla justo tras la migración
 
-    salida = StringIO()
-    call_command("registrar_partes_contratos", stdout=salida)
-    assert "Filas que faltan en la tabla    : 2" in salida.getvalue()
-    assert _partes(c) == [], "sin --aplicar no escribe"
+def test_un_listado_precargado_no_consulta_por_contrato(datos):
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
 
-    call_command("registrar_partes_contratos", "--aplicar", stdout=StringIO())
-    assert len(_partes(c)) == 2
+    from apps.contratos.models import ContratoServicio
+    from apps.contratos.services import contrato_partes
 
-    salida = StringIO()
-    call_command("registrar_partes_contratos", stdout=salida)
-    assert "La tabla cuadra con las columnas." in salida.getvalue()
+    for _ in range(5):
+        ContratoServicio.objects.create(
+            servicio_aplica="mantenimiento",
+            contratante_id=datos["unergy"].id, prestador_id=datos["solenium"].id,
+        )
+    with CaptureQueriesContext(connection) as consultas:
+        nombres = [
+            (c.contratante_nombre, c.prestador_nombre)
+            for c in ContratoServicio.objects.prefetch_related(contrato_partes.CON_PARTES)
+        ]
+    assert nombres == [("Unergy", "Solenium")] * 5
+    assert len(consultas) == 2, "el contrato y sus partes, no una consulta por contrato"
 
 
 # ── La fusión de clientes las mueve ──────────────────────────────────────────

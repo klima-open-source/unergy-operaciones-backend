@@ -18,6 +18,7 @@ from apps.monitoreo.services import inversores_en_vivo
 from apps.proyectos import models as py_models
 from apps.proyectos.services import portafolios as portafolios_service
 from apps.plataforma.services.fechas import hoy_col
+from apps.contratos.services import contrato_partes
 
 logger = logging.getLogger("operaciones.monitoreo")
 
@@ -115,6 +116,7 @@ def build_all_contratos() -> dict:
         .filter(vigencia_service.filtro_vivos(hoy_col()))
         .filter(servicio_aplica=SERVICIO_OM)
         .select_related("proyecto")
+        .prefetch_related(contrato_partes.CON_PARTES)
     )
     for contrato in consulta:
         proyecto = contrato.proyecto

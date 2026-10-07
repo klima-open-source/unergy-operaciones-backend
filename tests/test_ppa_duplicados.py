@@ -137,7 +137,7 @@ def test_el_numero_se_compara_normalizado(datos):
 def test_sin_numero_avisa_por_contraparte_y_planta(datos):
     planta = _planta()
     vendedor = _cliente("Generadora del Cauca")
-    _ppa(plantas=[planta], vendedor=vendedor, vendedor_nombre="Generadora del Cauca")
+    _ppa(plantas=[planta], vendedor=vendedor)
 
     respuesta = _crear(datos, {
         **CUERPO, "proyecto_ids": [planta.id],
@@ -154,7 +154,7 @@ def test_compra_y_venta_sobre_la_misma_planta_conviven(datos):
     planta = _planta()
     vendedor = _cliente("Generadora del Cauca")
     _ppa(plantas=[planta], tipo_contrato="compra",
-         vendedor=vendedor, vendedor_nombre="Generadora del Cauca")
+         vendedor=vendedor)
 
     respuesta = _crear(datos, {
         **CUERPO, "tipo_contrato": "venta", "proyecto_ids": [planta.id],
@@ -191,8 +191,7 @@ def test_un_ppa_borrado_tampoco(datos):
 
 def test_otra_planta_con_la_misma_contraparte_no_avisa(datos):
     vendedor = _cliente("Generadora del Cauca")
-    _ppa(plantas=[_planta("Una")], vendedor=vendedor,
-         vendedor_nombre="Generadora del Cauca")
+    _ppa(plantas=[_planta("Una")], vendedor=vendedor)
 
     respuesta = _crear(datos, {
         **CUERPO, "proyecto_ids": [_planta("Otra").id],

@@ -107,7 +107,10 @@ def resolver_cliente_id(nombre: str | None, nit: str | None) -> int | None:
 # usa el reparto de costos para saber qué tarifa le toca a cada quien
 # (`apps/contabilidad/services/costos.py`), y mientras su vínculo esté vacío ese
 # cálculo no tiene más remedio que emparejar comparando nombres.
-ROLES = ("contratante", "prestador", "inversionista")
+# Comprador, vendedor, contratante y prestador ya no: viven en `contrato_partes` y su
+# nombre y NIT son los de la ficha (`services/contrato_partes.py`). Queda el
+# inversionista, hasta su propia rama.
+ROLES = ("inversionista",)
 
 
 def sincronizar(contrato) -> None:

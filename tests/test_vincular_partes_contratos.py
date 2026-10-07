@@ -91,11 +91,11 @@ def test_sin_aplicar_no_escribe_nada(entorno):
     from apps.contratos.models import ContratoServicio
 
     _cliente("Quantum Energy Ingenieria S.A.S.", "900111222-3")
-    contrato = _contrato(contratante_nombre="Quantum Energy Ingenieria S.A.S.")
+    contrato = _contrato(inversionista_nombre="Quantum Energy Ingenieria S.A.S.")
 
     salida = _correr()
 
-    assert ContratoServicio.objects.get(pk=contrato.id).contratante_id is None
+    assert ContratoServicio.objects.get(pk=contrato.id).inversionista_id is None
     assert "no se escribió nada" in salida
 
 
@@ -103,11 +103,11 @@ def test_aplicar_vincula_por_nombre(entorno):
     from apps.contratos.models import ContratoServicio
 
     cliente = _cliente("Quantum Energy Ingenieria S.A.S.", "900111222-3")
-    contrato = _contrato(contratante_nombre="Quantum Energy Ingenieria S.A.S.")
+    contrato = _contrato(inversionista_nombre="Quantum Energy Ingenieria S.A.S.")
 
     _correr("--aplicar")
 
-    assert ContratoServicio.objects.get(pk=contrato.id).contratante_id == cliente.id
+    assert ContratoServicio.objects.get(pk=contrato.id).inversionista_id == cliente.id
 
 
 def test_aplicar_vincula_el_inversionista(entorno):
@@ -129,11 +129,11 @@ def test_no_pisa_un_vinculo_ya_puesto(entorno):
 
     puesto = _cliente("El Vinculado A Mano")
     _cliente("Otra Empresa S.A.S.", "900999888-7")
-    contrato = _contrato(contratante=puesto, contratante_nombre="Otra Empresa S.A.S.")
+    contrato = _contrato(inversionista=puesto, inversionista_nombre="Otra Empresa S.A.S.")
 
     _correr("--aplicar")
 
-    assert ContratoServicio.objects.get(pk=contrato.id).contratante_id == puesto.id
+    assert ContratoServicio.objects.get(pk=contrato.id).inversionista_id == puesto.id
 
 
 def test_sin_candidato_se_reporta_y_no_inventa_cliente(entorno):
@@ -141,27 +141,14 @@ def test_sin_candidato_se_reporta_y_no_inventa_cliente(entorno):
     from apps.contratos.models import ContratoServicio
 
     _cliente("Nada Que Ver S.A.S.")
-    contrato = _contrato(contratante_nombre="Empresa Inexistente Del Valle")
+    contrato = _contrato(inversionista_nombre="Empresa Inexistente Del Valle")
     cuantos = Cliente.objects.count()
 
     salida = _correr("--aplicar")
 
-    assert ContratoServicio.objects.get(pk=contrato.id).contratante_id is None
+    assert ContratoServicio.objects.get(pk=contrato.id).inversionista_id is None
     assert Cliente.objects.count() == cuantos, "no debe crear clientes"
     assert "Sin cliente que empareje        : 1" in salida
-
-
-def test_tambien_recorre_las_partes_del_ppa(entorno):
-    from apps.ppa.models import PpaContrato
-
-    vendedor = _cliente("Generadora del Cauca S.A.S.", "901222333-4")
-    contrato = PpaContrato.objects.create(
-        vendedor_nombre="Generadora del Cauca S.A.S.", tipo_contrato="compra",
-    )
-
-    _correr("--aplicar")
-
-    assert PpaContrato.objects.get(pk=contrato.id).vendedor_id == vendedor.id
 
 
 # ── Solo lo seguro se escribe (casos reales del 2026-10-07) ─────────────────
@@ -169,20 +156,16 @@ def test_tambien_recorre_las_partes_del_ppa(entorno):
 
 def test_una_palabra_generica_en_comun_no_es_parecido(entorno):
     """ "Bia Energy" casaba con "BALI ENERGY" (cinco PPA) por la palabra "energy"."""
-    from apps.ppa.models import PpaContrato
-
     _cliente("BALI ENERGY S.A.S.")
     _cliente("CSCI COLOMBIA SOLAR CORP")
-    bia = PpaContrato.objects.create(comprador_nombre=" Bia Energy S.A.S.",
-                                     comprador_nit="901588412", tipo_contrato="venta")
-    nitro = PpaContrato.objects.create(comprador_nombre="NITRO ENERGY COLOMBIA S A S E S P",
-                                       tipo_contrato="venta")
+    bia = _contrato(inversionista_nombre=" Bia Energy S.A.S.")
+    nitro = _contrato(inversionista_nombre="NITRO ENERGY COLOMBIA S A S E S P")
 
     salida = _correr("--aplicar")
 
-    for ppa in (bia, nitro):
-        ppa.refresh_from_db()
-        assert ppa.comprador_id is None
+    for contrato in (bia, nitro):
+        contrato.refresh_from_db()
+        assert contrato.inversionista_id is None
     assert "Sin cliente que empareje        : 2" in salida
 
 
@@ -215,15 +198,16 @@ def test_el_mismo_nombre_en_otro_orden_si_se_escribe(entorno):
     assert arrendador.cliente_id == cliente.id
 
 
-def test_por_nit_se_escribe_aunque_el_nombre_difiera(entorno):
-    from apps.contratos.models import ContratoServicio
+def test_por_nit_empareja_aunque_el_nombre_difiera(entorno):
+    """El NIT manda sobre el nombre. Ninguna parte que queda en este comando tiene
+    columna de NIT (comprador, vendedor, contratante y prestador viven en
+    `contrato_partes`): se prueba en `emparejar_cliente`, que es la regla."""
+    from apps.contratos.services import partes as partes_service
 
     cliente = _cliente("Razon Social Nueva S.A.S.", "900111222-3")
-    contrato = _contrato(contratante_nombre="Nombre Viejo", contratante_nit="900.111.222-3")
-
-    _correr("--aplicar")
-
-    assert ContratoServicio.objects.get(pk=contrato.id).contratante_id == cliente.id
+    assert partes_service.emparejar_cliente("Nombre Viejo", "900.111.222-3") == (
+        cliente.id, partes_service.POR_NIT,
+    )
 
 
 def test_al_guardar_un_contrato_tampoco_casa_por_una_palabra_generica(entorno):

@@ -41,7 +41,7 @@ from datetime import date
 
 from django.db.models import Q
 
-from apps.contratos.services import vigencia
+from apps.contratos.services import contrato_partes, vigencia
 from apps.contratos.services.representacion_dedup import norm
 from apps.ppa.models import PpaContrato, PpaContratoProyecto
 
@@ -60,7 +60,8 @@ def _plantas_de(contrato_ids) -> dict:
 def _misma_contraparte(datos: dict, existente) -> bool:
     """La parte que NO es Unergy, comparada por cliente y si no por nombre."""
     for rol in ("comprador", "vendedor"):
-        nuevo_id = datos.get(f"{rol}_id")
+        # La API manda el cliente (`comprador`); el CRM y los comandos, el id.
+        nuevo_id = datos.get(f"{rol}_id") or getattr(datos.get(rol), "id", None)
         viejo_id = getattr(existente, f"{rol}_id", None)
         if nuevo_id and viejo_id and nuevo_id == viejo_id:
             return True
@@ -81,7 +82,7 @@ def buscar_duplicado(*, datos: dict, proyecto_ids, hoy: date, excluir_id=None):
     """
     vivos = PpaContrato.objects.filter(
         vigencia.filtro_ppa_vivos(hoy), deleted_at__isnull=True,
-    )
+    ).prefetch_related(contrato_partes.CON_PARTES)
     if excluir_id:
         vivos = vivos.exclude(pk=excluir_id)
 

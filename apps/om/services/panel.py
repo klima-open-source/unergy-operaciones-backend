@@ -14,6 +14,7 @@ from apps.om import models as om_models
 from apps.om.services.calculadora import calcular_proyecto, serie_indexacion
 from apps.plataforma.services.fechas import hoy_col
 from apps.proyectos import models as py_models
+from apps.contratos.services import contrato_partes
 
 SERVICIO_OM = "mantenimiento"
 
@@ -30,7 +31,8 @@ def _contrato_por_proyecto() -> dict[int, object]:
     consulta = (
         ct_models.ContratoServicio.objects
         .filter(servicio_aplica=SERVICIO_OM, proyecto__isnull=False)
-        .select_related("proyecto").order_by("id")
+        .select_related("proyecto").prefetch_related(contrato_partes.CON_PARTES)
+        .order_by("id")
     )
     for contrato in consulta:
         contratos.setdefault(contrato.proyecto_id, contrato)

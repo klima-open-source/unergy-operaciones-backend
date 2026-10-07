@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from apps.ppa.models import PpaCompromisoEnergia, PpaContrato
+from apps.contratos.services import contrato_partes
 
 from .consultas import _asc_nulls_last, _contratos_vigentes, _filtro_responsable_relevante
 from .periodos import _contrato_vigente_en_mes, _responsable_payload
@@ -20,6 +21,7 @@ def listar_contratos(incluir_todos: bool = False) -> list[dict]:
     qs = (
         PpaContrato.objects
         .select_related("responsable")
+        .prefetch_related(contrato_partes.CON_PARTES)
         .filter(deleted_at__isnull=True)
     )
     if not incluir_todos:

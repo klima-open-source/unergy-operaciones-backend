@@ -28,6 +28,7 @@ from django.db.models.functions import ExtractMonth, ExtractYear
 from apps.comun.nombre_matching import mejor_candidato
 from apps.comun.series_mensuales import serie_mensual_kwh
 from apps.plataforma.services.fechas import hoy_col
+from apps.contratos.services import contrato_partes
 
 ETAPAS = ("oportunidad", "oferta", "contrato", "firmado", "operando", "terminado")
 ETAPA_ORDEN = {e: i for i, e in enumerate(ETAPAS)}
@@ -1535,7 +1536,7 @@ def _ppas_por_id(ids: set[int]) -> dict:
     return {
         c.id: c for c in PpaContrato.objects.filter(
             id__in=ids, deleted_at__isnull=True,
-        )
+        ).prefetch_related(contrato_partes.CON_PARTES)
     }
 
 

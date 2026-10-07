@@ -1,56 +1,44 @@
-"""Las partes de cada contrato (tabla `contrato_partes`): quién las escribe y cómo se consultan.
+"""Las partes de cada contrato (tabla `contrato_partes`): cómo se escriben y cómo se consultan.
 
-Lo llama `Contrato.save()`, así que cualquier camino que guarde un contrato —la API de
-servicios, la de PPA, la firma del CRM, el admin, los comandos— las deja al día sin
-acordarse. Es el mismo mecanismo que mantiene `servicios`.
+Una fila por contrato, papel y cliente. El nombre y el NIT de cada parte son los de la
+ficha del cliente: no se guardan en el contrato (decisión de Sara, 2026-10-07; las
+columnas `comprador_*`, `vendedor_*`, `contratante_*` y `prestador_*` de `contratos`
+se retiraron).
 
-Por ahora las partes se DERIVAN de las columnas comprador/vendedor/contratante/prestador
-del contrato: esas columnas siguen siendo lo que escriben las pantallas. Cuando las
-pantallas escriban aquí directamente, esta derivación desaparece junto con las columnas.
-
-Dos caminos no pasan por `save()` y por eso se ocupan ellos mismos de esta tabla: la
-fusión de clientes (`apps/clientes/services/gestion.py`, SQL directo) y la copia inicial
-(`manage.py registrar_partes_contratos`).
+Se escriben asignando en el contrato y guardándolo —`contrato.contratante_id = 5;
+contrato.save()`—: `Contrato.save()` llama a `asignar`. Así la API de contratos, la de
+PPA, la firma del CRM y el admin escriben por el mismo camino.
 """
 from __future__ import annotations
 
-from apps.contratos.models import RolParte
+from django.db.models import Prefetch
+
+from apps.contratos.models import ContratoParte, RolParte
 
 #: Las partes de un PPA y las de un contrato de servicio.
 ROLES_PPA = (RolParte.COMPRADOR, RolParte.VENDEDOR)
 ROLES_SERVICIO = (RolParte.CONTRATANTE, RolParte.PRESTADOR)
 ROLES = ROLES_PPA + ROLES_SERVICIO
 
-
-def deseadas(contrato) -> set[tuple[str, int]]:
-    """Las partes `(rol, cliente_id)` que el contrato debe tener. Puro: no toca la base."""
-    return {
-        (str(rol), cliente_id)
-        for rol in ROLES
-        if (cliente_id := getattr(contrato, f"{rol}_id", None))
-    }
+#: Para un listado: `Contrato.objects.prefetch_related(CON_PARTES)` trae las partes y
+#: sus fichas en dos consultas, en vez de una por contrato.
+CON_PARTES = Prefetch(
+    "partes", queryset=ContratoParte.objects.select_related("cliente").order_by("id"),
+)
 
 
-def registrar(contrato) -> set[tuple[str, int]]:
-    """Deja en `contrato_partes` exactamente las de este contrato. Devuelve las que quedan."""
-    from apps.contratos.models import ContratoParte
+def asignar(contrato, partes: dict) -> None:
+    """Deja como única parte de cada papel la que se indica (`None` la quita).
 
-    actuales = set(
-        ContratoParte.objects.filter(contrato_id=contrato.pk).values_list("rol", "cliente_id")
-    )
-    objetivo = deseadas(contrato)
-    for rol, cliente_id in actuales - objetivo:
-        ContratoParte.objects.filter(
-            contrato_id=contrato.pk, rol=rol, cliente_id=cliente_id
-        ).delete()
-    faltan = objetivo - actuales
-    if faltan:
-        ContratoParte.objects.bulk_create([
-            ContratoParte(contrato_id=contrato.pk, rol=rol, cliente_id=cliente_id)
-            for rol, cliente_id in sorted(faltan)
-        ])
+    `partes` es `{rol: Cliente | None}`. Un papel que no aparece no se toca. Hoy cada
+    papel tiene una sola parte; cuando un arriendo admita varios arrendadores, esto
+    recibirá listas."""
+    for rol, cliente in partes.items():
+        ContratoParte.objects.filter(contrato_id=contrato.pk, rol=rol).delete()
+        if cliente is not None:
+            ContratoParte.objects.create(contrato_id=contrato.pk, rol=rol, cliente=cliente)
+    contrato.__dict__.pop("_partes_cache", None)
     getattr(contrato, "_prefetched_objects_cache", {}).pop("partes", None)
-    return objetivo
 
 
 def contratos_de(cliente_ids, roles=ROLES):
@@ -59,8 +47,6 @@ def contratos_de(cliente_ids, roles=ROLES):
 
     Es una subconsulta y no un join para que un contrato donde el cliente tiene dos
     papeles (contratante Y prestador) no salga repetido."""
-    from apps.contratos.models import ContratoParte
-
     return (
         ContratoParte.objects
         .filter(cliente_id__in=list(cliente_ids), rol__in=list(roles))

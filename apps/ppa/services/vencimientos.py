@@ -26,6 +26,7 @@ from datetime import timedelta
 from apps.monitoreo.models import Alerta
 from apps.plataforma.services.fechas import hoy_col
 from apps.ppa.models import PpaContrato
+from apps.contratos.services import contrato_partes
 
 logger = logging.getLogger("operaciones.ppa.vencimientos")
 
@@ -136,7 +137,7 @@ def revisar_vencimientos() -> list[int]:
         PpaContrato.objects.filter(
             fecha_fin__isnull=False, fecha_fin__gte=hoy, fecha_fin__lte=horizonte,
             deleted_at__isnull=True,
-        ).prefetch_related("proyectos_vinculados__proyecto")
+        ).prefetch_related("proyectos_vinculados__proyecto", contrato_partes.CON_PARTES)
     )
     if not contratos:
         return []

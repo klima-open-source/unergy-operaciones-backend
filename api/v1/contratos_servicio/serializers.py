@@ -13,8 +13,13 @@ from apps.proyectos import models as py_models
 
 class ContratoSerializer(serializers.ModelSerializer):
     proyecto_id = serializers.IntegerField(allow_null=True)
-    contratante_id = serializers.IntegerField(allow_null=True)
-    prestador_id = serializers.IntegerField(allow_null=True)
+    # Las partes salen de `contrato_partes`; nombre y NIT, de la ficha del cliente.
+    contratante_id = serializers.IntegerField(read_only=True, allow_null=True)
+    contratante_nombre = serializers.CharField(read_only=True, allow_null=True)
+    contratante_nit = serializers.CharField(read_only=True, allow_null=True)
+    prestador_id = serializers.IntegerField(read_only=True, allow_null=True)
+    prestador_nombre = serializers.CharField(read_only=True, allow_null=True)
+    prestador_nit = serializers.CharField(read_only=True, allow_null=True)
     inversionista_id = serializers.IntegerField(allow_null=True)
     portafolio_id = serializers.IntegerField(allow_null=True)
     nombre_proyecto = serializers.SerializerMethodField()
@@ -35,8 +40,7 @@ class ContratoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ct_models.ContratoServicio
-        exclude = ["contratante", "prestador", "inversionista", "portafolio",
-                   *ct_models.COLUMNAS_SOLO_PPA]
+        exclude = ["inversionista", "portafolio", *ct_models.COLUMNAS_SOLO_PPA]
 
     def get_nombre_proyecto(self, obj) -> str | None:
         return obj.proyecto.nombre_comercial if obj.proyecto else None
@@ -104,6 +108,7 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
     # que `contratante_id`/`prestador_id` "casi nunca se pueblen" pese a que la
     # pantalla tiene autocompletado desde hace tiempo, y que el cálculo de
     # costos por inversionista tenga que emparejar por nombre.
+    # Se escribe SOLO el cliente: el nombre y el NIT son los de su ficha.
     contratante_id = serializers.PrimaryKeyRelatedField(
         source="contratante", queryset=cl_models.Cliente.objects.all(),
         allow_null=True, required=False,
@@ -122,8 +127,7 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
         # `grupo` lo fija el `save()` desde `servicio_aplica`: no se escribe. Las
         # partes viajan como `*_id` (arriba), no como la relación.
         exclude = [
-            "proyecto", "contratante", "prestador", "inversionista", "grupo",
-            *ct_models.COLUMNAS_SOLO_PPA,
+            "proyecto", "inversionista", "grupo", *ct_models.COLUMNAS_SOLO_PPA,
         ]
         extra_kwargs = {"servicio_aplica": {"required": False}}
 
