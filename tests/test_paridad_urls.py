@@ -370,6 +370,9 @@ def test_las_rutas_portadas_coinciden_con_las_de_fastapi():
         ("/api/v1/contratos-servicio/{}/pagos", "POST"),
         ("/api/v1/contratos-servicio/{}/pagos/{}", "PATCH"),
         ("/api/v1/contratos-servicio/{}/pagos/{}", "DELETE"),
+        # Los servicios de una planta ya no se prenden a mano: salen de sus
+        # contratos vigentes (rama `retiro-banderas`, 2026-10-07).
+        ("/api/v1/proyectos/{}/servicios", "PATCH"),
     }
 
     faltan = fastapi - django_ - RETIRADAS
