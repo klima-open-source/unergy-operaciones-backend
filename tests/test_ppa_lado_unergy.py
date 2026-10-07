@@ -156,3 +156,21 @@ def test_con_dos_clientes_con_el_mismo_nit_no_elige_ninguno(entorno, settings_un
 
     assert resultado.contrato.comprador_id is None
     assert any("sin comprador" in a for a in resultado.avisos)
+
+
+def test_sin_configurar_nada_unergy_es_la_esp(entorno):
+    """El NIT de UNERGY ENERGÍA DIGITAL S.A.S. E.S.P. viene por defecto en
+    `config/settings.py`: el lado de Unergy no depende del secret ENV_FILE. Se
+    reconoce como se cargó en la plataforma, con puntos y dígito de verificación."""
+    from django.conf import settings
+
+    from apps.clientes.models import Cliente
+
+    assert settings.UNERGY_NIT == "901497656-2"
+    esp = Cliente.objects.create(
+        razon_social_nombre="UNERGY ENERGIA DIGITAL S.A.S E.S.P", nit_cedula="901.497.656-2",
+    )
+
+    resultado = _crear("compra")
+
+    assert resultado.contrato.comprador_id == esp.id
