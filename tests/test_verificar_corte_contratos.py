@@ -123,3 +123,22 @@ def test_sin_correspondencia_no_se_pueden_traducir_los_ids_de_servicio():
 def test_fotos_en_el_orden_equivocado():
     antes, despues = _fotos()
     assert v.comparar(despues, antes)[0].startswith("Las fotos no son antes/después")
+
+
+def test_sin_rutas_compara_las_ultimas_fotos_de_la_carpeta(tmp_path):
+    for nombre in ("foto_antes_20261006_100000.json", "foto_antes_20261007_090000.json",
+                   "foto_despues_20261007_100000.json", "otra_cosa.json"):
+        (tmp_path / nombre).write_text("{}", encoding="utf-8")
+
+    antes, despues = v.ultimas_fotos(str(tmp_path))
+
+    assert antes.endswith("foto_antes_20261007_090000.json")
+    assert despues.endswith("foto_despues_20261007_100000.json")
+
+
+def test_sin_foto_de_despues_lo_dice(tmp_path):
+    from django.core.management.base import CommandError
+
+    (tmp_path / "foto_antes_20261007_090000.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(CommandError, match="despues"):
+        v.ultimas_fotos(str(tmp_path))

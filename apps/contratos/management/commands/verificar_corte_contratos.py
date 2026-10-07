@@ -1,8 +1,11 @@
 """Foto de los contratos antes y después del corte (deploy 2), y su comparación.
 
     docker compose exec operaciones python manage.py verificar_corte_contratos foto
-    docker compose exec operaciones python manage.py verificar_corte_contratos comparar \\
-        uploads/corte_contratos/foto_antes_<...>.json uploads/corte_contratos/foto_despues_<...>.json
+    docker compose exec operaciones python manage.py verificar_corte_contratos comparar
+
+Sin rutas, `comparar` toma la última foto "antes" y la última "después" de la
+carpeta (las que deja `foto`); con dos rutas, compara esas. Desde GitHub se corre
+con el workflow `comando.yml`, sin entrar al servidor.
 
 Cuándo (`docs/refactor/08-plan-django-contratos.md`, §6):
 
@@ -154,6 +157,24 @@ def _comparar_mapas(que: str, antes: dict, despues: dict, diferencias: list) -> 
 # ── Foto (lee la base) ───────────────────────────────────────────────────────
 
 
+def ultimas_fotos(carpeta: str) -> tuple[str, str]:
+    """La última foto "antes" y la última "después" de la carpeta.
+
+    El nombre lleva la fecha y hora (`foto_antes_20261006_171621.json`), así que
+    la última en orden alfabético es la más reciente.
+    """
+    def ultima(momento):
+        nombres = sorted(
+            n for n in (os.listdir(carpeta) if os.path.isdir(carpeta) else [])
+            if n.startswith(f"foto_{momento}_") and n.endswith(".json")
+        )
+        if not nombres:
+            raise CommandError(f"No hay ninguna foto «{momento}» en {carpeta}.")
+        return os.path.join(carpeta, nombres[-1])
+
+    return ultima("antes"), ultima("despues")
+
+
 def _momento(connection) -> str:
     from django.db.migrations.recorder import MigrationRecorder
 
@@ -248,18 +269,20 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("accion", choices=["foto", "comparar"])
         parser.add_argument("rutas", nargs="*",
-                            help="comparar: la foto de antes y la de después.")
+                            help="comparar: la foto de antes y la de después. Sin "
+                                 "ellas, las últimas de la carpeta.")
         parser.add_argument("--periodo", action="append", dest="periodos",
                             help="foto: período de facturación YYYY-MM (repetible). "
                                  "Por defecto, los dos meses cerrados anteriores.")
         parser.add_argument("--carpeta", default=CARPETA,
-                            help=f"foto: dónde escribirla (por defecto {CARPETA}).")
+                            help=f"dónde escribe `foto` y dónde busca `comparar` "
+                                 f"sin rutas (por defecto {CARPETA}).")
 
     def handle(self, *args, accion, rutas, periodos, carpeta, **opts):
         if accion == "foto":
             self._foto(periodos, carpeta)
         else:
-            self._comparar(rutas)
+            self._comparar(rutas or list(ultimas_fotos(carpeta)))
 
     def _foto(self, periodos, carpeta):
         from apps.facturacion.services.calculo import periodo_valido
@@ -304,6 +327,7 @@ class Command(BaseCommand):
                 self.stdout.write(f"  - {d}")
             raise CommandError(f"El corte cambió algo: {len(diferencias)} diferencias.")
         antes = fotos[0]
+        self.stdout.write(f"Comparadas: {rutas[0]} y {rutas[1]}")
         self.stdout.write(self.style.SUCCESS(
             f"Sin diferencias: {len(antes['fks'])} llaves foráneas con sus valores, "
             f"{antes['n_ppa']} PPA, {antes['n_servicio']} contratos de servicio, "
