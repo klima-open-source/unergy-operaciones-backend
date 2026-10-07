@@ -92,11 +92,11 @@ class AlertaAniversario(Timer):
 # (`contrato_proyectos`) y qué servicios cubre cada uno (`servicios`).
 #
 # Fuera de este alcance, a propósito (decisión de Sara, 2026-10-06): las tarifas
-# siguen en las columnas del contrato y en `ppa_tarifas`; las partes, en
-# comprador/vendedor/contratante/prestador; el proyecto de un contrato de servicio,
-# en su FK directa. `contrato_partes` y `contrato_tarifas` entran en sus propias
-# ramas, ya con quién las escribe y quién las lee: una tabla llenada una sola vez
-# por el backfill se desactualiza con la primera edición.
+# siguen en las columnas del contrato y en `ppa_tarifas`; el proyecto de un contrato
+# de servicio, en su FK directa. `contrato_tarifas` entra en su propia rama, ya con
+# quién la escribe y quién la lee: una tabla llenada una sola vez por el backfill se
+# desactualiza con la primera edición. Las partes llegaron así (`ContratoParte`,
+# rama `contratos-partes`, 2026-10-07).
 # =====================================================================================
 
 
@@ -120,6 +120,19 @@ class ServicioContrato(models.TextChoices):
     MANTENIMIENTO = grupos.MANTENIMIENTO, "Mantenimiento"
     ARRIENDO = grupos.ARRIENDO, "Arriendo"
     INTERNET = grupos.INTERNET, "Internet"
+
+
+class RolParte(models.TextChoices):
+    """El papel de un cliente en un contrato. Los mismos cuatro para todos los
+    contratos (decisión de Sara, 2026-10-07); la pantalla los nombra según el tipo
+    (en un arriendo, el prestador es el arrendador y el contratante el arrendatario).
+    El inversionista NO es una parte: es de quién es la planta, y va a
+    `contrato_proyectos` en la rama de inversionistas."""
+
+    COMPRADOR = "comprador", "Comprador"
+    VENDEDOR = "vendedor", "Vendedor"
+    CONTRATANTE = "contratante", "Contratante"
+    PRESTADOR = "prestador", "Prestador"
 
 
 class EstadoContrato(models.TextChoices):
@@ -296,9 +309,11 @@ class Contrato(Timer):
         # Qué servicios cubre, desde el ÚNICO lugar que los escribe: así ningún
         # camino de escritura (API, CRM, admin) puede dejarlos desalineados con
         # `tipo_contrato` o `servicio_aplica`.
-        from apps.contratos.services import servicios
+        from apps.contratos.services import contrato_partes, servicios
 
         servicios.registrar(self)
+        # Y quiénes son sus partes, por la misma razón.
+        contrato_partes.registrar(self)
 
     class Meta:
         db_table = "contratos"
@@ -359,6 +374,42 @@ class Servicio(Timer):
                 fields=["contrato", "servicio"], name="uq_servicios_contrato_servicio"
             ),
         ]
+
+
+class ContratoParte(Timer):
+    """Un cliente y el papel que juega en un contrato: una fila por parte.
+
+    La misma tabla para todos los contratos — PPA, representación/CGM, operación,
+    arriendo—; lo que cambia por tipo es qué papeles lleva. Un contrato puede tener
+    dos filas del mismo papel (un terreno con varios dueños), así que la unicidad es
+    por contrato, papel y cliente.
+
+    El nombre y el NIT se leen siempre de la ficha del cliente: aquí no se copian.
+
+    Hoy la escribe solo `Contrato.save()`, derivándola de las columnas
+    comprador/vendedor/contratante/prestador (`services/contrato_partes.py`); la leen
+    las consultas de «en qué contratos participa este cliente». Que las pantallas
+    escriban aquí directamente, y quitar esas columnas, es el paso siguiente."""
+
+    id = models.BigAutoField(primary_key=True)
+    contrato = models.ForeignKey(
+        "contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_id",
+        related_name="partes",
+    )
+    cliente = models.ForeignKey(
+        "clientes.Cliente", on_delete=models.CASCADE, db_column="cliente_id",
+        related_name="partes_de_contratos",
+    )
+    rol = models.CharField(max_length=20, choices=RolParte.choices)
+
+    class Meta:
+        db_table = "contrato_partes"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["contrato", "rol", "cliente"], name="uq_contrato_partes",
+            ),
+        ]
+        indexes = [models.Index(fields=["cliente", "rol"], name="ix_contrato_partes_cliente")]
 
 
 class ContratoProyecto(models.Model):

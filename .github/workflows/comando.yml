@@ -34,6 +34,8 @@ on:
           - "verificar_corte_contratos foto"
           - "verificar_corte_contratos comparar"
           - "revisar_servicios_banderas (solo lee)"
+          - "registrar_partes_contratos (solo lee)"
+          - "registrar_partes_contratos --aplicar"
           - "DESHACER paso 2 (corte de contratos)"
           - "DESHACER paso 0 (diagnostico)"
       confirmar:
@@ -86,6 +88,8 @@ jobs:
             "verificar_corte_contratos foto")            manage verificar_corte_contratos foto ;;
             "verificar_corte_contratos comparar")        manage verificar_corte_contratos comparar ;;
             "revisar_servicios_banderas (solo lee)")     manage revisar_servicios_banderas ;;
+            "registrar_partes_contratos (solo lee)")     manage registrar_partes_contratos ;;
+            "registrar_partes_contratos --aplicar")      manage registrar_partes_contratos --aplicar ;;
             "DESHACER paso 2 (corte de contratos)")
               confirmado
               manage migrate contratos 0008

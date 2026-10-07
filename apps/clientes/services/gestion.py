@@ -40,6 +40,10 @@ MERGE_SIMPLE = ["cliente_documentos_comerciales", "oportunidades", "proyecto_are
 MERGE_COMPUESTO = [
     ("contactos", ["email", "tipo"]),               # UNIQUE (cliente_id, email, tipo)
     ("proyecto_inversionistas", ["proyecto_id"]),   # no duplicar al cliente en el mismo proyecto
+    # Las partes de los contratos. La fusión mueve las columnas de `contratos` con SQL
+    # directo, que no pasa por `Contrato.save()`, así que esta tabla se mueve aquí: si
+    # el ganador ya era esa parte de ese contrato, la fila del perdedor sobra.
+    ("contrato_partes", ["contrato_id", "rol"]),
 ]
 # `nit_cedula` es UNIQUE en la base: hay que liberarlo en el perdedor antes de
 # copiarlo al ganador (mismo tratamiento que `sunfactory_project_id` en proyectos).
