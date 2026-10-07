@@ -21,10 +21,12 @@ def _srv(**kw):
 
 
 def test_golden_subservicios_representacion_cgm():
-    # Representación + CGM en la misma fila: dos subservicios (derivados de las tarifas).
+    # Desde el paso 4 los subservicios salen de la tabla `servicios`, no de las
+    # tarifas: un contrato sin guardar cae a `servicio_aplica` aunque tenga las dos
+    # tarifas. Que representación+CGM se registren como dos filas lo prueban
+    # test_contratos_grupos_servicio.py y test_contratos_servicios_registrados.py.
     c = _srv(servicio_aplica="representacion", tarifa_representacion=6.0, tarifa_cgm=5.0)
-    assert grupos.subservicios_de(c) == ["representacion", "cgm"]
-    assert grupos.tarifas_de(c) == {"representacion": 6.0, "cgm": 5.0}
+    assert grupos.subservicios_de(c) == ["representacion"]
     assert grupos.grupo_de_contrato(c) == "representacion_cgm"
 
     # Solo representación cargada.
