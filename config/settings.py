@@ -41,9 +41,14 @@ ENTORNO = os.getenv("ENVIRONMENT", "development").lower()
 
 # El NIT de Unergy, para reconocer cual fila de `clientes` es la propia empresa.
 # En un PPA una de las dos partes es SIEMPRE Unergy --compra o vende-- y sin esto
-# ese lado queda vacio. Ver `apps/clientes/services/unergy.py`. Va en el .env
-# porque es un dato de la empresa, no una regla del codigo.
-UNERGY_NIT = os.getenv("UNERGY_NIT", "")
+# ese lado queda vacio. Ver `apps/clientes/services/unergy.py`.
+#
+# Unergy es UNERGY ENERGIA DIGITAL S.A.S. E.S.P. (decidido con Sara el
+# 2026-10-07). El NIT va escrito aca y no solo en el .env: es el dato que menos
+# cambia de la plataforma, y depender del secret ENV_FILE --que solo se puede
+# reemplazar entero-- dejaba el lado de Unergy vacio en produccion. El .env lo
+# puede sobrescribir; uno vacio (`UNERGY_NIT=`) no lo apaga.
+UNERGY_NIT = os.getenv("UNERGY_NIT") or "901497656-2"
 
 SECRET_KEY = os.getenv("SECRET_KEY", "")
 # La variable se llama ENVIRONMENT, no ENV -- asi la define el .env y asi la lee
