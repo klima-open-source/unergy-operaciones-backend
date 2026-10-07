@@ -36,7 +36,18 @@ TABLAS_BLOQUEAN_BORRADO = [
 # Fusión: mismo patrón que /proyectos/{ganador}/merge/{perdedor}. `dry_run` por
 # defecto, mueve las filas relacionadas, resuelve colisiones quedándose con la
 # del ganador, y NUNCA borra físico.
-MERGE_SIMPLE = ["cliente_documentos_comerciales", "oportunidades", "proyecto_area_contacto"]
+#
+# Toda tabla con FK a `clientes` tiene que estar aquí o en `MERGE_COMPUESTO`: la que
+# falte se queda apuntando a la ficha borrada, sin error. Las tres últimas faltaban
+# hasta el 2026-10-07 (`tests/test_clientes_fusion_completa.py` lo vigila contra el
+# modelo). `email_envios` queda fuera a propósito: es un log de correos.
+MERGE_SIMPLE = [  # (tabla, columna)
+    ("cliente_documentos_comerciales", "cliente_id"),
+    ("oportunidades", "cliente_id"),
+    ("proyecto_area_contacto", "cliente_id"),
+    ("arr_arrendador", "cliente_id"),            # el dueño del terreno; de él sale su IVA
+    ("contrato_factura", "inversionista_id"),    # a quién se le emitió la factura
+]
 MERGE_COMPUESTO = [
     ("contactos", ["email", "tipo"]),               # UNIQUE (cliente_id, email, tipo)
     ("proyecto_inversionistas", ["proyecto_id"]),   # no duplicar al cliente en el mismo proyecto
@@ -44,6 +55,9 @@ MERGE_COMPUESTO = [
     # directo, que no pasa por `Contrato.save()`, así que esta tabla se mueve aquí: si
     # el ganador ya era esa parte de ese contrato, la fila del perdedor sobra.
     ("contrato_partes", ["contrato_id", "rol"]),
+    # IVA y retenciones por servicio (y por planta, o general si `proyecto_id` es
+    # nulo): si las dos fichas tienen tasa para lo mismo, gana la del ganador.
+    ("cliente_tasa_servicio", ["proyecto_id", "servicio"]),
 ]
 # `nit_cedula` es UNIQUE en la base: hay que liberarlo en el perdedor antes de
 # copiarlo al ganador (mismo tratamiento que `sunfactory_project_id` en proyectos).
@@ -128,8 +142,8 @@ def reporte_merge(ganador: Cliente, perdedor: Cliente) -> tuple[list[dict], list
     movimientos: list[dict] = []
 
     with connection.cursor() as cur:
-        for t in MERGE_SIMPLE:
-            n = _escalar(cur, f"SELECT count(*) FROM {t} WHERE cliente_id = %(loser)s", p)
+        for t, col in MERGE_SIMPLE:
+            n = _escalar(cur, f"SELECT count(*) FROM {t} WHERE {col} = %(loser)s", p)
             if n:
                 movimientos.append({"tabla": t, "a_mover": n, "descartadas_por_colision": 0})
 
@@ -137,7 +151,7 @@ def reporte_merge(ganador: Cliente, perdedor: Cliente) -> tuple[list[dict], list
             n = _escalar(cur, f"SELECT count(*) FROM {t} WHERE cliente_id = %(loser)s", p)
             if not n:
                 continue
-            cond = " AND ".join(f"k.{c} = {t}.{c}" for c in claves)
+            cond = " AND ".join(f"k.{c} IS NOT DISTINCT FROM {t}.{c}" for c in claves)
             coli = _escalar(
                 cur,
                 f"SELECT count(*) FROM {t} WHERE cliente_id = %(loser)s AND EXISTS "
@@ -197,7 +211,7 @@ def ejecutar_merge(ganador: Cliente, perdedor: Cliente, movimientos: list[dict],
 
             # 2) Colisión por clave compuesta: se descarta la del perdedor.
             for t, claves in MERGE_COMPUESTO:
-                cond = " AND ".join(f"k.{c} = {t}.{c}" for c in claves)
+                cond = " AND ".join(f"k.{c} IS NOT DISTINCT FROM {t}.{c}" for c in claves)
                 cur.execute(
                     f"DELETE FROM {t} WHERE cliente_id = %(loser)s AND EXISTS "
                     f"(SELECT 1 FROM {t} k WHERE k.cliente_id = %(keeper)s AND {cond})", p
@@ -205,8 +219,8 @@ def ejecutar_merge(ganador: Cliente, perdedor: Cliente, movimientos: list[dict],
                 cur.execute(f"UPDATE {t} SET cliente_id = %(keeper)s WHERE cliente_id = %(loser)s", p)
 
             # 3) Tablas simples.
-            for t in MERGE_SIMPLE:
-                cur.execute(f"UPDATE {t} SET cliente_id = %(keeper)s WHERE cliente_id = %(loser)s", p)
+            for t, col in MERGE_SIMPLE:
+                cur.execute(f"UPDATE {t} SET {col} = %(keeper)s WHERE {col} = %(loser)s", p)
 
             # 4) Escalares únicos: liberar del perdedor y copiar al ganador.
             for f in MERGE_ESCALAR_UNICO:
