@@ -1,0 +1,102 @@
+name: comando en produccion
+
+# Corre UN comando de `manage.py` en el servidor de produccion, sin entrar por SSH.
+# Se lanza a mano:
+#
+#   gh workflow run comando.yml -f comando="verificar_corte_contratos foto"
+#   gh run watch
+#
+# o desde GitHub -> Actions -> "comando en produccion" -> Run workflow.
+#
+# **Lista cerrada a proposito.** El runner vive en el servidor de produccion: un
+# campo de texto libre seria una consola remota para cualquiera con permiso de
+# escritura en el repo. Cada opcion se traduce abajo, en el `case`, a argumentos
+# FIJOS; el valor que llega nunca se interpola en el script (viaja por `env`).
+# Agregar un comando es agregarlo en los dos sitios, con su revision en un PR.
+#
+# Los "DESHACER" son la vuelta atras de un deploy con migraciones: el deploy solo
+# migra hacia adelante, asi que hay que desaplicarlas con el codigo TODAVIA
+# desplegado y despues revertir el merge. Piden escribir CONFIRMAR.
+
+on:
+  workflow_dispatch:
+    inputs:
+      comando:
+        description: "Que correr"
+        type: choice
+        options:
+          - "vincular_partes_contratos (solo lee)"
+          - "vincular_partes_contratos --aplicar"
+          - "revisar_tarifas_por_inversionista (solo lee)"
+          - "backfill_contratos_unificados --dry-run"
+          - "backfill_contratos_unificados"
+          - "backfill_contratos_unificados --reset"
+          - "verificar_corte_contratos foto"
+          - "verificar_corte_contratos comparar"
+          - "revisar_servicios_banderas (solo lee)"
+          - "DESHACER paso 2 (corte de contratos)"
+          - "DESHACER paso 0 (diagnostico)"
+      confirmar:
+        description: "Solo para los DESHACER: escribe CONFIRMAR"
+        required: false
+        default: ""
+
+# El mismo grupo que deploy.yml: un comando no corre en medio de un deploy (que
+# reinicia el contenedor y puede estar migrando), ni dos deploys a la vez.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  correr:
+    # Igual que deploy.yml: solo desde master. Un dispatch con --ref otra-rama
+    # correria la definicion de ESA rama en el servidor de produccion.
+    if: github.ref == 'refs/heads/master'
+    runs-on: [self-hosted, prod]
+    permissions:
+      contents: read
+    steps:
+      - name: Correr el comando
+        env:
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/home/originabot/unergy-operations/unergy-operaciones-backend' }}
+          COMANDO: ${{ inputs.comando }}
+          CONFIRMAR: ${{ inputs.confirmar }}
+        run: |
+          set -euo pipefail
+          cd "$DEPLOY_DIR"
+
+          confirmado() {
+            if [ "$CONFIRMAR" != "CONFIRMAR" ]; then
+              echo "::error::'$COMANDO' deshace migraciones en produccion: escribe CONFIRMAR en el campo 'confirmar'."
+              exit 1
+            fi
+          }
+          manage() {
+            echo "+ manage.py $*"
+            docker compose exec -T operaciones python manage.py "$@"
+          }
+
+          case "$COMANDO" in
+            "vincular_partes_contratos (solo lee)")      manage vincular_partes_contratos ;;
+            "vincular_partes_contratos --aplicar")       manage vincular_partes_contratos --aplicar ;;
+            "revisar_tarifas_por_inversionista (solo lee)") manage revisar_tarifas_por_inversionista ;;
+            "backfill_contratos_unificados --dry-run")   manage backfill_contratos_unificados --dry-run ;;
+            "backfill_contratos_unificados")             manage backfill_contratos_unificados ;;
+            "backfill_contratos_unificados --reset")     manage backfill_contratos_unificados --reset ;;
+            "verificar_corte_contratos foto")            manage verificar_corte_contratos foto ;;
+            "verificar_corte_contratos comparar")        manage verificar_corte_contratos comparar ;;
+            "revisar_servicios_banderas (solo lee)")     manage revisar_servicios_banderas ;;
+            "DESHACER paso 2 (corte de contratos)")
+              confirmado
+              manage migrate contratos 0008
+              ;;
+            "DESHACER paso 0 (diagnostico)")
+              confirmado
+              manage migrate arriendos 0003
+              manage migrate facturacion 0002
+              ;;
+            *)
+              echo "::error::comando no permitido: $COMANDO"
+              exit 1
+              ;;
+          esac
