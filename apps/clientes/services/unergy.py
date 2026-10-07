@@ -10,10 +10,11 @@ cualquier otra contraparte. La tabla ya se describe como "la razón social con l
 que Unergy contrata", así que no hace falta un concepto nuevo; hace falta saber
 CUÁL de esas filas es Unergy, y eso lo dice su NIT.
 
-El NIT va en la configuración (`UNERGY_NIT`) y no en el código, porque es un dato
-de la empresa y no una regla: cambiarlo no debería ser un despliegue. Se compara
-solo por dígitos, igual que `gestion.normalizar_nit`, o "901.234.567-8" y
-"9012345678" serían dos empresas distintas.
+El NIT es `settings.UNERGY_NIT`: el de UNERGY ENERGÍA DIGITAL S.A.S. E.S.P.
+(901.497.656-2), escrito por defecto en `config/settings.py` y sobrescribible
+desde el .env. Se compara solo por dígitos, igual que `gestion.normalizar_nit`,
+o "901.234.567-8" y "9012345678" serían dos empresas distintas. Por eso el
+cliente tiene que tener el NIT CON su dígito de verificación.
 """
 
 from django.conf import settings
