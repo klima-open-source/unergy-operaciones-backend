@@ -77,7 +77,9 @@ class AsicSolicitud(Timer):
     tipo_mercado = models.CharField(max_length=50, null=True, blank=True, default="No regulado")
     tipo_asignacion = models.CharField(max_length=100, null=True, blank=True)
     porcentaje_fncer = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    porcentaje_despacho = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    # Fracción 0-1 (el front manda el % / 100). Con 2 decimales un 33,33 % se
+    # guardaba como 0,33: 4 decimales conservan el % con sus 2 decimales.
+    porcentaje_despacho = models.DecimalField(max_digits=6, decimal_places=4, null=True, blank=True)
     estado_solicitud = models.CharField(max_length=10, choices=[("en_proceso", "en_proceso"), ("publicado", "publicado"), ("rechazado", "rechazado"), ("desistido", "desistido"), ("terminado", "terminado")], default="en_proceso")
     nombre_interno = models.CharField(max_length=200, null=True, blank=True)
     observaciones = models.TextField(null=True, blank=True)

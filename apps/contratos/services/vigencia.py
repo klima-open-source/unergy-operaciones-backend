@@ -75,6 +75,24 @@ def de_contrato(contrato, hoy: date, umbral_dias: int = UMBRAL_POR_VENCER_DIAS) 
     return semaforo_contrato(contrato.fecha_fin, hoy, umbral_dias)
 
 
+def validar_fechas_del_contrato(datos: dict, instancia=None) -> None:
+    """Fecha fin anterior a la de inicio: un 400 con el motivo.
+
+    La base ya lo impide (CHECK `ck_contratos_fechas`), pero sin esto la API
+    respondía 500 —un `IntegrityError` sin explicación— a quien editara solo una
+    de las dos fechas. Se compara sobre los datos YA combinados con la instancia:
+    en un PATCH que solo trae la fecha fin, la de inicio es la guardada.
+    """
+    from rest_framework.exceptions import ValidationError
+
+    inicio = datos.get("fecha_inicio", getattr(instancia, "fecha_inicio", None))
+    fin = datos.get("fecha_fin", getattr(instancia, "fecha_fin", None))
+    if inicio and fin and fin < inicio:
+        raise ValidationError({
+            "fecha_fin": f"La fecha fin ({fin}) no puede ser anterior a la de inicio ({inicio}).",
+        })
+
+
 def esta_vivo(contrato, hoy: date) -> bool:
     """Si el contrato rige hoy. Lo que una bandera `srv_*` debería responder."""
     return de_contrato(contrato, hoy) in VIGENCIAS_VIVAS

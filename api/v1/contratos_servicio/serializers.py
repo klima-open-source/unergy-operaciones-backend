@@ -6,6 +6,7 @@ from apps.clientes import models as cl_models
 from apps.contratos import models as ct_models
 from apps.contratos.services import comunidades as comunidades_service
 from apps.contratos.services import grupos as grupos_service
+from apps.contratos.services import vigencia as vigencia_service
 from apps.plataforma.services.fechas import hoy_col
 from apps.facturacion import models as fa_models
 from apps.proyectos import models as py_models
@@ -180,6 +181,7 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
         Se valida sobre los datos YA combinados con la instancia: en un PATCH
         que solo cambia la planta, `servicio_aplica` no viene en el cuerpo.
         """
+        vigencia_service.validar_fechas_del_contrato(datos, self.instance)
         self._exigir_partes_vinculadas(datos)
 
         proyecto = datos.get("proyecto", getattr(self.instance, "proyecto", None))
