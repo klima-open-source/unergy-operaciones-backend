@@ -152,6 +152,22 @@ class FacturacionViewSet(viewsets.GenericViewSet):
             calculo.periodo(periodo), anio, mes, precio_bolsa=precio_bolsa,
         ))
 
+    @action(detail=False, methods=["get"], url_path="bolsa-simem")
+    def bolsa_simem(self, request):
+        """Precio de bolsa del mes según SIMEM, hora por hora.
+
+        Es EXACTAMENTE el mismo cálculo que usa el valor a indemnizar —mismo
+        dataset (709b84), misma regla de versiones y el mismo PTB cuando no hay
+        PB_Nal—, expuesto para poder verlo. Si la vista lo recalculara por su
+        cuenta, los dos números se separarían el día que cambie una regla.
+
+        No confundir con el precio de bolsa de EVO (`precios_bolsa_diario`), que
+        es otra fuente y alimenta otra pantalla.
+        """
+        periodo = _periodo(request)
+        anio, mes = int(periodo[:4]), int(periodo[5:7])
+        return Response({"periodo": periodo, **simem.bolsa_mensual(anio, mes)})
+
     @action(detail=False, methods=["get"], url_path="cumplimiento/export")
     def cumplimiento_export(self, request):
         """Excel del cálculo de indemnización, todo formulado (3 hojas)."""
