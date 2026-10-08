@@ -22,6 +22,7 @@ from apps.facturacion.services.factura_mensaje import (
 from apps.mercado_xm import models as mx_models
 from apps.mercado_xm.services.gescon_vigencia import resolver_vigencias
 from apps.ppa import models as ppa_models
+from apps.ppa.services import ipp as ipp_svc
 from apps.proyectos import models as py_models
 
 
@@ -160,6 +161,9 @@ def periodo(per: str) -> dict:
     anio, mes = int(per[:4]), int(per[5:7])
     ultimo_dia = date(anio, mes, monthrange(anio, mes)[1])
 
+    # Si falta el IPP del mes lo trae solo de la API de Liquidaciones (solo
+    # crea, nunca pisa). Sin él la vista sigue mostrando su aviso.
+    ipp_svc.asegurar_mes(anio, mes)
     ipp_fila = ppa_models.IppMensual.objects.filter(
         **{"año": anio, "mes": mes}
     ).first()
