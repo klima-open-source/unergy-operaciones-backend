@@ -32,6 +32,8 @@ CAMPOS_CREACION = [
     "p90_mensual_kwh", "p50_mensual_kwh", "p99_mensual_kwh", "codigo_tsf",
     "origina_code", "sunfactory_project_id", "fase_construccion",
     "fecha_estimada_energizacion", "avance_obra_pct", "origen",
+    # La minigranja de originabot: la manda «importar desde TSF».
+    "originabot_minifarm_id",
 ]
 
 

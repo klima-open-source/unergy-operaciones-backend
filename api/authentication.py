@@ -200,4 +200,7 @@ class UnergyAuthAuthentication(authentication.BaseAuthentication):
             raise exceptions.PermissionDenied(
                 "Tu cuenta de Unergy no tiene acceso a Operaciones."
             )
-        return (_usuario_activo(usuario), None)
+        # `request.auth` = el token: quien tenga que hablar con otro servicio de
+        # Unergy en nombre de esta persona (originabot, ver
+        # apps/comun/integraciones/originabot.py) lo reenvía tal cual.
+        return (_usuario_activo(usuario), cabecera[1].decode())

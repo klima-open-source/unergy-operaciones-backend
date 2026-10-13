@@ -41,6 +41,11 @@ class CompromisoEntradaSerializer(serializers.Serializer):
     cantidad_proyectos = serializers.IntegerField(allow_null=True, required=False)
 
 
+class SincronizarOriginabotSerializer(serializers.Serializer):
+    originabot_ppa_id = serializers.IntegerField(required=False, min_value=1)
+    off_taker_id = serializers.IntegerField(required=False, min_value=1)
+
+
 class ContratoSerializer(serializers.ModelSerializer):
     """Lectura. `carpeta_link` sale de los documentos comerciales precargados."""
 
@@ -77,6 +82,9 @@ class ContratoSerializer(serializers.ModelSerializer):
             "fecha_entrada_comunidad", "nombre_comunidad",
             "proyectos", "tarifas", "compromisos_energia", "carpeta_link",
             "estado_cumplimiento", "dias_restantes", "cobertura_actual_pct",
+            # Vínculo con originabot: solo lo escribe `POST /ppa/{id}/originabot`.
+            "originabot_ppa_id", "originabot_sync_estado", "originabot_sync_detalle",
+            "originabot_sync_at", "originabot_pendiente",
             "created_at", "updated_at",
         ]
 

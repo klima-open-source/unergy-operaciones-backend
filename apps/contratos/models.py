@@ -281,6 +281,18 @@ class Contrato(Timer):
     wifi_seguridad = models.CharField(max_length=50, null=True, blank=True)
     wifi_password = models.CharField(max_length=100, null=True, blank=True)
 
+    # --- Vínculo con originabot (TSF). Solo PPA -----------------------------------
+    # Operaciones crea y configura el PPA; originabot (`investment.PPA`) tiene que
+    # saber qué minigranjas cubre. Ver apps/ppa/services/originabot_sync.py.
+    originabot_ppa_id = models.IntegerField(null=True, blank=True)
+    # `sincronizado` | `pendiente` (falta token de Unergy Auth o el off taker) | `error`
+    originabot_sync_estado = models.CharField(max_length=20, null=True, blank=True)
+    originabot_sync_detalle = models.TextField(null=True, blank=True)
+    originabot_sync_at = models.DateTimeField(null=True, blank=True)
+    # Lo que falta llevar a originabot si la última sincronización no pudo:
+    # {"agregar": [proyecto_id, …], "quitar": [proyecto_id, …]}.
+    originabot_pendiente = models.JSONField(null=True, blank=True)
+
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     # --- Las partes: atajos con los nombres de siempre --------------------------
@@ -336,6 +348,13 @@ class Contrato(Timer):
     class Meta:
         db_table = "contratos"
         constraints = [
+            # Un PPA de originabot corresponde a un solo contrato vivo: dos que
+            # apuntaran al mismo se pisarían las minigranjas.
+            models.UniqueConstraint(
+                fields=["originabot_ppa_id"],
+                condition=Q(originabot_ppa_id__isnull=False, deleted_at__isnull=True),
+                name="uq_contratos_originabot_ppa_vivo",
+            ),
             models.CheckConstraint(
                 name="ck_contratos_fechas",
                 condition=(

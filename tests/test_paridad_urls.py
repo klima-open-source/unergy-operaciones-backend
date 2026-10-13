@@ -176,6 +176,9 @@ RUTAS_RETIRADAS = {
 #               TSF mapee su operador por llave. No existia en FastAPI.
 RUTAS_NUEVAS = {
     ("/api/v1/operadores-red/originabot", "POST"),
+    # 2026-10-13: PPAs unidos con originabot (apps/ppa/services/originabot_sync.py).
+    ("/api/v1/ppa/originabot/opciones", "GET"),
+    ("/api/v1/ppa/{}/originabot", "POST"),
     ("/api/v1/facturacion/bolsa-simem", "GET"),
     ("/api/v1/generacion-solar/monitoring/{}/irradiancia", "GET"),
     ("/api/v1/reconectadores/interruptor", "GET"),

@@ -64,6 +64,10 @@ class Proyecto(Timer):
     codigo_tsf = models.CharField(max_length=100, null=True, blank=True)
     origina_code = models.CharField(max_length=100, null=True, blank=True, db_index=True)
     sunfactory_project_id = models.IntegerField(null=True, blank=True)
+    # La minigranja de originabot (`investment.Minifarm.id`). La guarda «importar
+    # desde TSF»; para los demás se resuelve por `origina_code` la primera vez que
+    # hace falta (sincronizar las plantas de un PPA).
+    originabot_minifarm_id = models.IntegerField(null=True, blank=True)
     fase_construccion = models.CharField(max_length=40, null=True, blank=True)
     fecha_estimada_energizacion = models.DateField(null=True, blank=True)
     avance_obra_pct = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
@@ -116,6 +120,11 @@ class Proyecto(Timer):
                 fields=["origina_code"],
                 condition=models.Q(origina_code__isnull=False, deleted_at__isnull=True),
                 name="uq_proyectos_origina_code_vivo",
+            ),
+            models.UniqueConstraint(
+                fields=["originabot_minifarm_id"],
+                condition=models.Q(originabot_minifarm_id__isnull=False, deleted_at__isnull=True),
+                name="uq_proyectos_originabot_minifarm_vivo",
             ),
         ]
 

@@ -29,6 +29,10 @@ class Cliente(Timer):
     reteiva_pct = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     origen_tipo = models.CharField(max_length=30, null=True, blank=True)
     origen_detalle = models.CharField(max_length=255, null=True, blank=True)
+    # El `OffTaker` de originabot que es este cliente. originabot lo exige para
+    # crear un PPA; se fija la primera vez y se reutiliza. Ver
+    # apps/ppa/services/originabot_sync.py.
+    originabot_offtaker_id = models.IntegerField(null=True, blank=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:

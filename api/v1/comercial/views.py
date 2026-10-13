@@ -29,6 +29,7 @@ from apps.comercial.services import (
     versiones,
 )
 from apps.fronteras.models import OperadorRed
+from apps.ppa.services import originabot_sync
 from apps.proyectos.models import Proyecto
 from apps.proyectos.services.unicidad import (
     buscar_duplicado_por_nombre, verificar_unicos,
@@ -530,6 +531,8 @@ class ComercialViewSet(viewsets.GenericViewSet):
         entrada.is_valid(raise_exception=True)
         datos = dict(entrada.validated_data)
         resultado = escritura.firmar(oferta, datos, request.user)
+        # El PPA nace aquí con sus plantas: se crea también en originabot.
+        originabot_sync.sincronizar(resultado.contrato, request.auth)
         return Response({
             "oferta": consultas.oferta_completa(oferta),
             "ppa_contrato_id": resultado.contrato.id,

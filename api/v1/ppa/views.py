@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from django.db import transaction
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.response import Response
 
 from api.exceptions import Conflict, NoProcesable
@@ -16,6 +16,7 @@ from apps.clientes.services import documentos as documentos_service
 from apps.ppa import models as ppa_models
 from apps.ppa.services import contratos as contratos_service
 from apps.ppa.services import escritura as escritura_service
+from apps.ppa.services import originabot_sync
 from apps.ppa.services import responsables as responsables_service
 from apps.ppa.services import unicidad as unicidad_service
 from apps.plataforma.services.fechas import hoy_col
@@ -45,6 +46,13 @@ class PpaViewSet(
     GET|PUT /api/v1/ppa/ipp/mensual
     GET|POST /api/v1/ppa/responsables · PATCH|DELETE /responsables/{rid}
     POST   /api/v1/ppa/responsables/asignar
+    GET    /api/v1/ppa/originabot/opciones      PPAs y off takers de originabot
+    POST   /api/v1/ppa/{id}/originabot          sincroniza; o vincula/crea allá
+
+    **originabot.** Crear un PPA o cambiar sus plantas lleva el cambio a
+    originabot con el token de Unergy Auth de quien lo hizo
+    (`apps/ppa/services/originabot_sync.py`). Si no llega, el contrato queda
+    `pendiente`/`error` y el cambio en Operaciones se mantiene.
 
     **`estado_cumplimiento` y compañía solo viajan en el detalle y en el
     resumen**, no en el listado: se calculan por contrato con dos consultas cada
@@ -163,6 +171,8 @@ class PpaViewSet(
         except ValueError as exc:
             raise NoProcesable(str(exc))
 
+        originabot_sync.sincronizar(resultado.contrato, request.auth)
+
         cuerpo = ppa_serializers.ContratoSerializer(
             self._contrato(resultado.contrato.pk)
         ).data
@@ -178,6 +188,7 @@ class PpaViewSet(
         # Se distingue «no vino» de «vino vacío»: lo segundo BORRA el enlace.
         toca_enlace = "carpeta_link" in datos
         enlace = datos.pop("carpeta_link", None)
+        plantas_antes = originabot_sync.plantas_de(contrato)
 
         with transaction.atomic():
             for campo, valor in datos.items():
@@ -191,9 +202,68 @@ class PpaViewSet(
                 contratos_service.fijar_proyectos(contrato, proyecto_ids)
             self._validar(contrato)
 
+        # Fuera de la transacción: el cambio en Operaciones ya está guardado y
+        # no depende de que originabot responda.
+        if proyecto_ids is not None:
+            originabot_sync.registrar_cambio(
+                contrato, plantas_antes, originabot_sync.plantas_de(contrato)
+            )
+            originabot_sync.sincronizar(contrato, request.auth)
+
         return Response(
             ppa_serializers.ContratoSerializer(self._contrato(contrato.pk)).data
         )
+
+    @action(detail=False, methods=["get"], url_path="originabot/opciones")
+    @log_endpoint(name="Operaciones | PPA | Opciones originabot")
+    def originabot_opciones(self, request):
+        """Los PPAs y off takers de originabot, para vincular un PPA a mano.
+
+        `contrato_id` dice a qué PPA de Operaciones está vinculado ya cada uno.
+        Con el token de Unergy Auth de quien pide: sin él, 403.
+        """
+        if not request.auth:
+            raise PermissionDenied("Para ver los PPAs de originabot entra con Unergy Auth.")
+        ob = originabot_sync.ClienteOriginabot(request.auth)
+        try:
+            ppas, offtakers = ob.ppas(), ob.offtakers()
+        except originabot_sync.OriginabotError as exc:
+            raise NoProcesable(str(exc))
+        vinculados = dict(
+            ppa_models.PpaContrato.objects.filter(
+                originabot_ppa_id__isnull=False, deleted_at__isnull=True,
+            ).values_list("originabot_ppa_id", "id")
+        )
+        return Response({
+            "ppas": [
+                {
+                    "id": p["id"], "nombre": p.get("name"),
+                    "minigranjas": len(p.get("minifarms") or []),
+                    "contrato_id": vinculados.get(p["id"]),
+                }
+                for p in ppas
+            ],
+            "offtakers": offtakers,
+        })
+
+    @action(detail=True, methods=["post"], url_path="originabot")
+    @log_endpoint(name="Operaciones | PPA | Sincronizar originabot")
+    def originabot(self, request, pk=None):
+        """Lleva a originabot lo pendiente del PPA.
+
+        Cuerpo opcional: `originabot_ppa_id` lo vincula a uno que ya existe allá
+        (solo le AGREGA las plantas actuales); `off_taker_id` es el comprador con
+        que se crea allá si aún no existe. Vacío = reintentar.
+        """
+        contrato = self._contrato(pk)
+        entrada = ppa_serializers.SincronizarOriginabotSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        originabot_sync.sincronizar(
+            contrato, request.auth,
+            vincular_a=entrada.validated_data.get("originabot_ppa_id"),
+            off_taker_id=entrada.validated_data.get("off_taker_id"),
+        )
+        return Response(ppa_serializers.ContratoSerializer(self._contrato(contrato.pk)).data)
 
     @staticmethod
     def _validar(contrato):
