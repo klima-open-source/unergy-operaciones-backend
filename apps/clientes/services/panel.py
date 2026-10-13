@@ -62,8 +62,8 @@ def proyectos_por_cliente(cliente_ids: set[int]) -> dict[int, set[int]]:
         return res
 
     for cid, pid in ProyectoInversionista.objects.filter(
-        cliente_id__in=cliente_ids
-    ).values_list("cliente_id", "proyecto_id"):
+        inversionista__cliente_id__in=cliente_ids
+    ).values_list("inversionista__cliente_id", "proyecto_id"):
         res[cid].add(pid)
 
     # Contratante y prestador: un cliente que PRESTA el servicio también tiene

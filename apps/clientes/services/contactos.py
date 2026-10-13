@@ -69,10 +69,10 @@ def clientes(tipo: str, proyecto_id: int) -> list[dict]:
     hoy = date.today()
     inversionistas = (
         py_models.ProyectoInversionista.objects
-        .filter(proyecto_id=proyecto_id, cliente_id__isnull=False)
+        .filter(proyecto_id=proyecto_id)
         # Vigente = sin fecha de fin, o con una que aún no pasó.
         .filter(Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=hoy))
-        .values_list("cliente_id", "cliente__razon_social_nombre")
+        .values_list("inversionista__cliente_id", "inversionista__cliente__razon_social_nombre")
     )
     salida: list[dict] = []
     vistos: set[int] = set()
@@ -101,7 +101,7 @@ def proyecto_ids_por_cliente(tipo: str, cliente_id: int) -> list[int]:
     hoy = date.today()
     inversionista_ids = {
         pid for pid in py_models.ProyectoInversionista.objects
-        .filter(cliente_id=cliente_id)
+        .filter(inversionista__cliente_id=cliente_id)
         .filter(Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=hoy))
         .values_list("proyecto_id", flat=True)
         if pid not in proyectos_con_algun_override

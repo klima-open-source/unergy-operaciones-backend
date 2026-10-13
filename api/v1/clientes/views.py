@@ -406,7 +406,7 @@ class ClienteViewSet(viewsets.GenericViewSet):
 
         anotar(
             ProyectoInversionista.objects
-            .filter(cliente_id=cliente_id, proyecto_id__in=ids)
+            .filter(inversionista__cliente_id=cliente_id, proyecto_id__in=ids)
             .values_list("proyecto_id", flat=True),
             "inversionista",
         )

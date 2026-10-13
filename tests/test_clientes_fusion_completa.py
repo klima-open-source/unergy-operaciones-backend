@@ -188,3 +188,19 @@ def test_si_los_dos_son_inversionistas_queda_el_del_ganador(datos):
     assert del_perdedor.cliente_id == datos["ganador"].id
     assert del_perdedor.inversionista_id == del_ganador.inversionista_id
     assert not Inversionista.objects.filter(cliente=datos["perdedor"]).exists()
+
+
+def test_si_los_dos_participan_en_la_misma_planta_queda_la_del_ganador(datos):
+    from apps.proyectos.models import Proyecto, ProyectoInversionista
+
+    planta = Proyecto.objects.create(nombre_comercial="Planta compartida")
+    del_ganador = ProyectoInversionista.objects.create(
+        proyecto=planta, cliente=datos["ganador"], porcentaje_participacion=0.6)
+    ProyectoInversionista.objects.create(
+        proyecto=planta, cliente=datos["perdedor"], porcentaje_participacion=0.4)
+    movimientos = _fusionar(datos["ganador"], datos["perdedor"])
+
+    assert list(ProyectoInversionista.objects.filter(proyecto=planta)) == [del_ganador]
+    assert movimientos["proyecto_inversionistas"] == {
+        "tabla": "proyecto_inversionistas", "a_mover": 0, "descartadas_por_colision": 1,
+    }

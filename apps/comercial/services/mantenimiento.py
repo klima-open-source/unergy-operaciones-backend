@@ -69,7 +69,7 @@ def ejecutar_backfill(usuario_id: int, dry_run: bool = True,
         for c in a_migrar:
             proyecto_ids = list(
                 ProyectoInversionista.objects
-                .filter(cliente_id=c.id, proyecto__deleted_at__isnull=True)
+                .filter(inversionista__cliente_id=c.id, proyecto__deleted_at__isnull=True)
                 .values_list("proyecto_id", flat=True)
                 .distinct()
             )
@@ -145,7 +145,7 @@ def dedup_clientes(usuario_id: int, dry_run: bool = True, umbral: float = 0.85) 
         if nombre
     ]
     duenos: dict[int, list[int]] = {}
-    for pid, cid in ProyectoInversionista.objects.values_list("proyecto_id", "cliente_id"):
+    for pid, cid in ProyectoInversionista.objects.values_list("proyecto_id", "inversionista__cliente_id"):
         duenos.setdefault(pid, []).append(cid)
     clientes_item = [
         (c.id, [c.razon_social_nombre])

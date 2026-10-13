@@ -92,11 +92,10 @@ def clientes_por_inversionista(pi_ids) -> dict:
     filas = (
         py_models.ProyectoInversionista.objects
         .filter(id__in=pi_ids)
-        .select_related("cliente")
         .values_list(
-            "id", "cliente_id", "cliente__razon_social_nombre",
-            "cliente__iva_pct", "cliente__retencion_pct",
-            "cliente__reteiva_pct", "cliente__reteica_pct",
+            "id", "inversionista__cliente_id", "inversionista__cliente__razon_social_nombre",
+            "inversionista__cliente__iva_pct", "inversionista__cliente__retencion_pct",
+            "inversionista__cliente__reteiva_pct", "inversionista__cliente__reteica_pct",
         )
     )
     for pi_id, cliente_id, razon, iva, retencion, reteiva, reteica in filas:

@@ -172,8 +172,8 @@ def _filas_inversionistas(proyecto_ids) -> list:
     return list(
         ProyectoInversionista.objects
         .filter(proyecto_id__in=list(proyecto_ids))
-        .select_related("cliente")
-        .annotate(razon_social_nombre=F("cliente__razon_social_nombre"))
+        .select_related("inversionista__cliente")
+        .annotate(razon_social_nombre=F("inversionista__cliente__razon_social_nombre"))
     )
 
 
