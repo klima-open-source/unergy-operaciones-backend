@@ -8,6 +8,7 @@ from rest_framework.exceptions import (
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework.settings import api_settings
 
 from api.exceptions import Conflict
 from api.logging import class_logger_wrapper, log_endpoint
@@ -80,7 +81,11 @@ class AuthViewSet(viewsets.GenericViewSet):
 
     @action(
         detail=False, methods=["get"], url_path="me",
-        permission_classes=[RolePermission], authentication_classes=None,
+        permission_classes=[RolePermission],
+        # Las del settings, explícitas: el ViewSet declara `[]` (los login son
+        # públicos) y `None` no "vuelve al default" en DRF, revienta con
+        # TypeError al iterarlo. Ver tests/test_unergy_auth.py.
+        authentication_classes=api_settings.DEFAULT_AUTHENTICATION_CLASSES,
     )
     def me(self, request):
         return Response(
