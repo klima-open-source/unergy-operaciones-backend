@@ -44,7 +44,8 @@ DROP TABLE contratos_corte_fk_respaldo;
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("contratos", "0011_corte_fachada_servicio"),
+        # Después de borrar las columnas de las partes: van en el mismo despliegue de limpieza.
+        ("contratos", "0014_borrar_columnas_partes"),
         ("ppa", "0003_corte_estado"),
     ]
 

@@ -141,11 +141,23 @@ del monitoreo sin aviso (eran ~36 en septiembre).
 
 ### Deploy 3 — limpieza, al menos dos semanas después del deploy 2
 
+Migraciones, en orden: `0014_borrar_columnas_partes`, `0015_borrar_tablas_viejas`,
+`0016_quitar_cgm_codigo_sic` (renumeradas el 2026-10-13: las dos de la limpieza chocaban con
+`0012_contrato_partes` y `0013_partes_fuera_del_estado`, ya desplegadas).
+
+- **Antes, en producción:** `manage.py exportar_partes_sin_cliente` (en `comando.yml`, solo lee).
+  Tiene que estar desplegado ANTES de este deploy: las partes con solo el nombre escrito viven
+  únicamente en las columnas que se borran, y el CSV es lo que queda para vincularlas a un
+  cliente (decisión de Sara, 2026-10-13). Más el respaldo de las 12 columnas (comando en el
+  docstring de `0014`).
+- Se borran las 12 columnas de las partes de `contratos` (`comprador_*`, `vendedor_*`,
+  `contratante_*`, `prestador_*`): salieron del modelo en `0013` y viven en `contrato_partes`.
+  La migración se detiene si alguna parte con cliente no está en `contrato_partes`.
 - `pg_dump` de `ppa_contratos`, `contratos_servicio` y `ppa_contrato_proyectos` a un archivo fuera de la
   base.
 - Migración con el `DROP` de las tres.
 - Se borran `backfill_contratos_unificados` y `verificar_corte_contratos`.
-- Se borra la columna `contratos.cgm_codigo_sic` (`0013`): nadie la leía y el único contrato que la
+- Se borra la columna `contratos.cgm_codigo_sic` (`0016`): nadie la leía y el único contrato que la
   tenía guardaba ahí su mismo número de contrato. El front dejó de pedirla.
 - **Rollback:** restaurar del dump. Es el único paso sin vuelta atrás por deploy.
 
