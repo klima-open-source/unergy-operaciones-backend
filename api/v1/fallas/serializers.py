@@ -13,7 +13,7 @@ leen.
 from rest_framework import serializers
 
 from apps.monitoreo import models as mo_models
-from apps.monitoreo.services.fallas import dominio, sla_contractual
+from apps.monitoreo.services.fallas import dominio, impacto, sla_contractual
 
 
 class FallaCatEstadoSerializer(serializers.ModelSerializer):
@@ -130,6 +130,11 @@ class FallaListaSerializer(serializers.ModelSerializer):
     tiempo_afectacion_horas = serializers.SerializerMethodField()
     tiene_fotos = serializers.SerializerMethodField()
     fotos_lista = serializers.SerializerMethodField()
+    # Impacto: % de la planta afectada, la prioridad que le corresponde y la
+    # energía perdida con la simulación P90. Ver `fallas/impacto.py`.
+    pct_afectado = serializers.SerializerMethodField()
+    prioridad_calculada = serializers.SerializerMethodField()
+    kwh_perdidos_p90 = serializers.SerializerMethodField()
 
     class Meta:
         model = mo_models.Falla
@@ -143,6 +148,7 @@ class FallaListaSerializer(serializers.ModelSerializer):
             "causa_raiz", "acciones_correctivas", "fecha_programada",
             "dias_abierta", "tiempo_afectacion_horas", "sla_limite_dias",
             "sla_horas_transcurridas", "sla_pct", "sla_contractual",
+            "pct_afectado", "prioridad_calculada", "kwh_perdidos_p90",
             "categoria_codigo", "subtipo_codigo", "subtipo_detalle", "clasificacion",
             "pendiente_reclasificar", "frontera_afecta_medicion",
             "frontera_perdida_comunicacion", "inversores_perdida_comunicacion",
@@ -175,6 +181,16 @@ class FallaListaSerializer(serializers.ModelSerializer):
 
     def get_fotos_lista(self, obj) -> list:
         return dominio.fotos_lista(obj)
+
+    def get_pct_afectado(self, obj) -> float | None:
+        return impacto.pct_afectado(obj)
+
+    def get_prioridad_calculada(self, obj) -> str | None:
+        prioridad = impacto.prioridad_calculada(obj)
+        return prioridad.value if prioridad else None
+
+    def get_kwh_perdidos_p90(self, obj) -> float | None:
+        return impacto.kwh_perdidos_p90(obj)
 
 
 class FallaSerializer(FallaListaSerializer):

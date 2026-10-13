@@ -6,8 +6,10 @@ son sus únicos dueños:
 
 - `fallas/dominio.py` — SLA operativo (horas por prioridad), clasificación
   estructurada y bloqueo de cierre.
-- `fallas/sla_contractual.py` — SLA del Anexo 4 (días por categoría). Es OTRO
+- `fallas/sla_contractual.py` — SLA del Anexo 4 (días por % afectado). Es OTRO
   compromiso, y está aparte para que no se confunda con el operativo.
+- `fallas/impacto.py` — % de la planta afectada, la prioridad que le
+  corresponde y la energía perdida con la simulación P90.
 - `fallas/consultas.py` — el filtrado del listado, la actividad del día y el
   backfill de SLA.
 
@@ -39,7 +41,7 @@ from api.pagination import PaginacionConPaginas
 from api.permissions import RolePermission
 from api.v1.cumplimiento import parametros as par
 from apps.monitoreo import models as mo_models
-from apps.monitoreo.services.fallas import consultas, dominio
+from apps.monitoreo.services.fallas import consultas, dominio, impacto
 from apps.monitoreo.services.fallas.estructura import ESTRUCTURA_FALLAS
 
 from . import serializers as fa_serializers
@@ -285,6 +287,7 @@ class FallaViewSet(viewsets.GenericViewSet):
                 dominio.sincronizar_intervalos(falla, intervalos)
                 if categoria:
                     dominio.aplicar_clasificacion(falla, inversores or [])
+                    impacto.aplicar_prioridad(falla)
                 falla.save()
         except IntegrityError as exc:
             raise dominio.integridad_a_error(exc)
@@ -356,6 +359,7 @@ class FallaViewSet(viewsets.GenericViewSet):
                 if toca_intervalos:
                     dominio.sincronizar_intervalos(falla, intervalos or [])
                 self._reclasificar(falla, datos, inversores, toca_inversores)
+                impacto.aplicar_prioridad(falla)
 
                 # Sella fecha+hora de solución y calcula `sla_cumplido` al cerrar;
                 # al reabrir limpia ambos. Ver `dominio.sincronizar_resolucion`.

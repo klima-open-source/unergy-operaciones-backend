@@ -305,6 +305,26 @@ que desapareció es el cálculo automático que nadie disparaba.
 El otro GET que escribe sigue ahí: `GET /monitoring` auto-asigna
 `project_id_solenium` (`generacion_solar.py:1154`).
 
+### 5.9b Impacto calculado: % afectado, prioridad y energía P90 (2026-10-13)
+
+`fallas/impacto.py` volvió a calcular el impacto, con otra regla y **sin escribir**:
+se calcula al serializar (`pct_afectado`, `prioridad_calculada`, `kwh_perdidos_p90`),
+así que una falla abierta crece hasta que se cierra y nunca queda congelado un número
+provisional (el error de §5.9). `kwh_perdidos_estimado` sigue siendo el valor manual.
+
+- **% afectado**: red = 100; frontera = 0 (la planta genera); "generando sin datos"
+  = 100 solo si se verificó apagada; inversores = kW afectados ÷ `potencia_ac_kw`. La
+  potencia de cada inversor sale de `potencia_kw`, del inversor vinculado, o del nombre
+  ("300KTL-…", "Inversor 3" contra el catálogo del proyecto). Un inversor que solo perdió
+  internet no cuenta. Si algo no se puede resolver: `None`, no un número inventado.
+- **Prioridad**: ≥ 90 % crítica, 66–90 % grave (también frontera que afecta la
+  medición), < 66 % media, 0 % leve. Se asigna al crear/editar; con `None` queda la
+  elegida a mano.
+- **Anexo 4** (`sla_contractual.plazo`) usa la misma escala, más el nivel **Leve (sin
+  pérdida)** a 7 días que pidió Operaciones; la categoría queda de respaldo.
+- **Energía**: por día afectado, P90 del mes ÷ días del mes × fracción de la campana
+  solar (seno 6:00–18:00, hora Colombia) × % afectado.
+
 ### 5.10 El SLA se ancla a medianoche
 
 El vencimiento se construye desde `fecha_identificacion` a las 00:00 sin sumar

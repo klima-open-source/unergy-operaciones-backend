@@ -721,3 +721,144 @@ def test_el_borrado_logico_mueve_updated_at(datos):
     despues = Falla.objects.get(pk=falla.id)
     assert despues.deleted_at is not None
     assert despues.updated_at > viejo, despues.updated_at
+
+
+# ── Impacto · % afectado, prioridad calculada y energía perdida (2026-10-13) ──
+#
+# Un solo dato, el % de la potencia de la planta afectada, decide la prioridad,
+# la gravedad del Anexo 4 y la energía perdida. Ver `fallas/impacto.py`.
+
+def _planta(datos, potencia_ac_kw=1000, p90_kwh_mes=3000):
+    proyecto = datos["proyecto"]
+    proyecto.potencia_ac_kw = potencia_ac_kw
+    proyecto.p90_mensual_kwh = [p90_kwh_mes] * 12
+    proyecto.save()
+    return proyecto
+
+
+def _con_inversores(datos, *inversores, **extra):
+    from apps.monitoreo import models as mo
+
+    falla = _falla(datos, categoria_codigo="inversores", **extra)
+    for nombre, kw, tipos in inversores:
+        mo.FallaInversor.objects.create(
+            falla=falla, nombre=nombre, potencia_kw=kw, tipos=tipos,
+        )
+    return falla
+
+
+def test_el_pct_afectado_suma_la_potencia_de_los_inversores(datos):
+    from apps.monitoreo.services.fallas import impacto, sla_contractual
+
+    _planta(datos)
+    falla = _con_inversores(
+        datos, ("INV-1", 100, ["falla_dispositivo"]), ("INV-2", 100, ["arco_dc"]),
+    )
+    assert impacto.pct_afectado(falla) == 20.0
+    assert impacto.prioridad_calculada(falla) == impacto.Prioridad.MEDIA
+    assert sla_contractual.plazo(falla) == sla_contractual.MEDIO
+
+
+def test_un_inversor_que_solo_perdio_internet_no_pierde_energia(datos):
+    from apps.monitoreo.services.fallas import impacto, sla_contractual
+
+    _planta(datos)
+    falla = _con_inversores(datos, ("INV-1", 100, ["perdida_comunicacion"]))
+    assert impacto.pct_afectado(falla) == 0.0
+    assert impacto.prioridad_calculada(falla) == impacto.Prioridad.LEVE
+    assert impacto.kwh_perdidos_p90(falla) == 0.0
+    assert sla_contractual.plazo(falla) == sla_contractual.LEVE
+
+
+def test_sin_la_potencia_de_un_inversor_no_se_inventa_el_pct(datos):
+    from apps.monitoreo.services.fallas import impacto
+
+    _planta(datos)
+    falla = _con_inversores(datos, ("INV-1", None, ["falla_dispositivo"]))
+    assert impacto.pct_afectado(falla) is None
+    assert impacto.prioridad_calculada(falla) is None
+    assert impacto.kwh_perdidos_p90(falla) is None
+
+
+def test_la_frontera_que_afecta_la_medicion_es_grave_sin_perder_energia(datos):
+    from apps.monitoreo.services.fallas import impacto
+
+    _planta(datos)
+    falla = _falla(datos, categoria_codigo="frontera", frontera_afecta_medicion=True)
+    assert impacto.pct_afectado(falla) == 0.0
+    assert impacto.prioridad_calculada(falla) == impacto.Prioridad.GRAVE
+
+
+def test_la_energia_perdida_sigue_la_campana_solar_del_p90(datos):
+    """P90 de septiembre 3 000 kWh / 30 días = 100 kWh al día. Una falla de red
+    (100 %) de 6 a.m. a 6 p.m. pierde el día entero; de 6 a.m. a mediodía, la
+    mitad, porque la campana es simétrica."""
+    from datetime import datetime as dt
+
+    from apps.monitoreo import models as mo
+    from apps.monitoreo.services.fallas import impacto
+    from apps.plataforma.services.fechas import COL_TZ
+
+    _planta(datos)
+    falla = _falla(datos, categoria_codigo="red", subtipo_codigo="baja_tension")
+    mo.FallaIntervalo.objects.create(
+        falla=falla,
+        inicio=dt(2026, 9, 1, 6, 0, tzinfo=COL_TZ), fin=dt(2026, 9, 1, 18, 0, tzinfo=COL_TZ),
+    )
+    assert impacto.kwh_perdidos_p90(falla) == 100.0
+
+    mo.FallaIntervalo.objects.filter(falla=falla).update(
+        fin=dt(2026, 9, 1, 12, 0, tzinfo=COL_TZ)
+    )
+    assert impacto.kwh_perdidos_p90(falla) == 50.0
+
+
+def test_crear_una_falla_de_red_le_asigna_prioridad_critica(datos):
+    from apps.monitoreo import models as mo
+
+    critica = mo.FallaCatPrioridad.objects.create(codigo="critica", etiqueta="Crítica", nivel=1)
+    _planta(datos)
+    respuesta = _pedir(
+        "post", "/api/v1/fallas",
+        datos,
+        {
+            "proyecto_id": datos["proyecto"].id,
+            "estado_id": datos["abierto"].id,
+            "prioridad_id": datos["alta"].id,
+            "descripcion": "se fue la red",
+            "fecha_identificacion": "2026-09-01",
+            "categoria_codigo": "red",
+            "subtipo_codigo": "baja_tension",
+        },
+        acciones={"post": "create"},
+    )
+    assert respuesta.status_code == 201, respuesta.data
+    assert respuesta.data["prioridad"]["codigo"] == critica.codigo
+    assert respuesta.data["pct_afectado"] == 100.0
+    assert respuesta.data["prioridad_calculada"] == "critica"
+    assert respuesta.data["sla_contractual"]["plazo_dias"] == 2
+
+
+def test_la_potencia_sale_del_nombre_cuando_el_reporte_no_vincula_el_inversor(datos):
+    """Así llegan del monitoreo y del celular: sin `proyecto_inversor_id` ni
+    `potencia_kw`, con la potencia en el nombre o solo con el número."""
+    from apps.monitoreo.services.fallas import impacto
+    from apps.proyectos.models import ProyectoInversor
+
+    proyecto = _planta(datos)
+    ProyectoInversor.objects.create(proyecto=proyecto, nombre="Inversor 4", potencia_nominal_kw=50)
+
+    falla = _con_inversores(
+        datos, ("300KTL-Inversor1|330KTL-Inversor2", None, ["falla_dispositivo"]),
+        ("Inversor 4", None, ["falla_dispositivo"]),
+    )
+    assert impacto.pct_afectado(falla) == 68.0
+    assert impacto.prioridad_calculada(falla) == impacto.Prioridad.GRAVE
+
+
+def test_un_nombre_que_no_se_puede_resolver_no_inventa_el_pct(datos):
+    from apps.monitoreo.services.fallas import impacto
+
+    _planta(datos)
+    falla = _con_inversores(datos, ("Inverter(COM1-12)", None, ["falla_dispositivo"]))
+    assert impacto.pct_afectado(falla) is None

@@ -2,7 +2,7 @@
 
 **No es el SLA operativo.** Ese vive en `dominio.py`, va en HORAS y su umbral
 sale de la PRIORIDAD de la falla (8 / 24 / 72 / 168). Este va en DÍAS y su umbral
-sale de la CATEGORÍA. Son dos compromisos distintos que coexisten a propósito: el
+sale del % de la planta afectada. Son dos compromisos distintos que coexisten a propósito: el
 operativo es la meta interna de atención, este es el plazo de revisión que el
 contrato le promete al cliente, y es el que se imprime en el informe de FMO.
 
@@ -16,12 +16,16 @@ from __future__ import annotations
 
 from apps.monitoreo.models import Falla
 
-from . import dominio
+from . import dominio, impacto
 
 # Plazo de revisión en días, con la etiqueta que imprime el Anexo 4.
 CRITICO = (2, "Crítico (≥90%)")
 GRAVE = (3, "Grave (66-90%)")
 MEDIO = (4, "Medio (<66%)")
+# El Anexo 4 no tiene nivel para una falla que no le quita energía a la planta
+# (comunicación, sensores). Operaciones lo pidió el 2026-10-13 con el mismo
+# plazo del SLA operativo leve (168 h). Si el contrato fija otro, va aquí.
+LEVE = (7, "Leve (sin pérdida)")
 
 # `red` (desconexión de suministro) es el caso crítico y también el default:
 # ante una categoría que no conozcamos, se asume el plazo más corto.
@@ -33,13 +37,31 @@ _POR_CATEGORIA = {
     "eventos_adversos": MEDIO,
 }
 
+# Misma escala que la prioridad operativa: el Anexo 4 y la prioridad salen del
+# mismo % afectado y no pueden contradecirse.
+_POR_PRIORIDAD = {
+    impacto.Prioridad.CRITICA: CRITICO,
+    impacto.Prioridad.GRAVE: GRAVE,
+    impacto.Prioridad.MEDIA: MEDIO,
+    impacto.Prioridad.LEVE: LEVE,
+}
+
 # Fallas legacy sin `clasificacion`: se cae al primer dígito de `tipo.codigo`,
 # que es como se clasificaban antes del reporte estructurado.
 _POR_PREFIJO_TIPO = {"1": GRAVE, "4": MEDIO, "5": MEDIO}
 
 
 def plazo(falla: Falla) -> tuple[int, str]:
-    """`(días de plazo, etiqueta de gravedad)` según la categoría de la falla."""
+    """`(días de plazo, etiqueta de gravedad)` de la falla.
+
+    El contrato define la gravedad por % de la planta afectada, y desde el
+    2026-10-13 se calcula así (`impacto.pct_afectado`). La categoría queda solo
+    de respaldo para las fallas donde el % no se puede calcular.
+    """
+    prioridad = impacto.prioridad_calculada(falla)
+    if prioridad is not None:
+        return _POR_PRIORIDAD[prioridad]
+
     clasificacion = falla.clasificacion if isinstance(falla.clasificacion, dict) else None
     categoria = (clasificacion or {}).get("categoria")
     if categoria:
