@@ -112,3 +112,42 @@ def restablecer(token: str, contrasena_nueva: str) -> None:
     usuario.save(update_fields=[
         "password", "password_reset_token", "password_reset_expires",
     ])
+
+
+# Grupo de Unergy Auth (authentication-system) → rol con el que se da de alta en
+# Operaciones a quien entra por primera vez. Solo estos grupos crean cuenta: el
+# resto de Unergy necesita que un admin la cree a mano.
+ROL_POR_GRUPO_UNERGY = {
+    "operation_staff": pl_models.Rol.OPERACIONES,
+}
+
+
+def alta_desde_unergy(email: str, nombre: str, grupos) -> "pl_models.Usuario | None":
+    """Crea el usuario local de alguien que entró con Unergy Auth y no existía.
+
+    Devuelve None si ninguno de sus grupos da derecho a cuenta. Se crea sin
+    contraseña (inutilizable): entra solo por Unergy Auth, nunca por el login
+    propio. Si ya existe —también inactivo— no se toca: una baja manual manda
+    sobre el grupo, y quien llama ya resolvió ese caso.
+    """
+    rol = next((ROL_POR_GRUPO_UNERGY[g] for g in grupos if g in ROL_POR_GRUPO_UNERGY), None)
+    if rol is None or not email:
+        return None
+
+    # get_or_create y no create: las primeras peticiones de una sesión llegan en
+    # paralelo, y dos altas del mismo email chocarían con el UNIQUE.
+    usuario, creado = pl_models.Usuario.objects.get_or_create(
+        email__iexact=email,
+        defaults={
+            "email": email.strip().lower(),
+            "nombre": nombre or email.split("@")[0],
+            "rol": rol,
+            "activo": True,
+            "password": None,
+        },
+    )
+    if creado:
+        usuario.set_unusable_password()
+        usuario.save(update_fields=["password"])
+        logger.info("Alta automática desde Unergy Auth: %s (rol=%s)", usuario.email, rol)
+    return usuario

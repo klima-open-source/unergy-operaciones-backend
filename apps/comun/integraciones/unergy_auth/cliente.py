@@ -35,6 +35,7 @@ class IdentidadUnergy:
     user_id: int
     email: str
     username: str
+    nombre: str
     grupos: tuple[str, ...]
 
 
@@ -70,5 +71,6 @@ def validar_token(token: str) -> IdentidadUnergy:
         user_id=respuesta.user_id,
         email=respuesta.email,
         username=respuesta.username,
+        nombre=f"{respuesta.first_name} {respuesta.last_name}".strip(),
         grupos=tuple(respuesta.groups),
     )

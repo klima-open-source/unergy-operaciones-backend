@@ -26,7 +26,7 @@ from rest_framework import authentication, exceptions
 
 from apps.comun.integraciones.unergy_auth import cliente as unergy_auth
 from apps.plataforma.models import ApiKey, Usuario
-from apps.plataforma.services import seguridad
+from apps.plataforma.services import cuentas, seguridad
 
 
 class UsuarioAutenticado:
@@ -153,9 +153,11 @@ class UnergyAuthAuthentication(authentication.BaseAuthentication):
     y `api/permissions.py` y cada FK a `usuarios` dejarían de funcionar.
 
     - token rechazado por el servicio → 401 (el frontend manda al login);
-    - token válido pero el email no está en `usuarios` → 403: la persona existe
-      en Unergy pero no tiene acceso a Operaciones, y mandarla al login sería un
-      bucle;
+    - token válido pero el email no está en `usuarios`: si su grupo está en
+      `cuentas.ROL_POR_GRUPO_UNERGY` se le crea la cuenta y entra; si no, 403 —
+      existe en Unergy pero no tiene acceso a Operaciones, y mandarla al login
+      sería un bucle;
+    - existe pero está inactivo → 401, aunque su grupo daría alta: la baja manda;
     - servicio caído → 503, no 401: no es culpa de la sesión.
     """
 
@@ -188,6 +190,12 @@ class UnergyAuthAuthentication(authentication.BaseAuthentication):
             Usuario.objects.filter(email__iexact=identidad.email).first()
             if identidad.email else None
         )
+        if usuario is None:
+            # Primera vez: los grupos de `cuentas.ROL_POR_GRUPO_UNERGY` (hoy
+            # `operation_staff`) se dan de alta solos; el resto sigue en 403.
+            usuario = cuentas.alta_desde_unergy(
+                identidad.email, identidad.nombre, identidad.grupos
+            )
         if usuario is None:
             raise exceptions.PermissionDenied(
                 "Tu cuenta de Unergy no tiene acceso a Operaciones."

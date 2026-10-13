@@ -9,6 +9,9 @@ local. Lo que se vigila:
 - un JWT propio sigue entrando sin pasar por gRPC;
 - token válido de un email que no está en `usuarios` → 403, no 401: mandar al
   login a alguien que ya inició sesión en Unergy sería un bucle;
+- salvo que su grupo dé alta automática (`operation_staff`): se le crea la
+  cuenta con rol `operaciones`, sin contraseña local, y entra;
+- una cuenta inactiva no se reactiva por tener el grupo;
 - servicio caído → 503, no 401: no es culpa de la sesión;
 - el cliente gRPC generado habla de verdad con un servidor (protobuf 7).
 """
@@ -113,10 +116,12 @@ def grpc_falso(monkeypatch):
     return estado
 
 
-def _identidad(email):
+def _identidad(email, grupos=("ops",)):
     from apps.comun.integraciones.unergy_auth.cliente import IdentidadUnergy
 
-    return IdentidadUnergy(user_id=7, email=email, username="ana", grupos=("ops",))
+    return IdentidadUnergy(
+        user_id=7, email=email, username="ana", nombre="Ana Pérez", grupos=grupos,
+    )
 
 
 def test_apagada_token_ajeno_es_401_sin_llamar_a_grpc(cliente, grpc_falso, settings_override):
@@ -150,6 +155,58 @@ def test_email_sin_cuenta_en_operaciones_es_403(cliente, usuario, grpc_falso, co
     grpc_falso["respuesta"] = _identidad("nadie@unergy.io")
     r = cliente.get(ME, HTTP_AUTHORIZATION="Bearer token-de-unergy")
     assert r.status_code == 403
+
+
+def test_operation_staff_nuevo_se_da_de_alta_y_entra(cliente, grpc_falso, con_unergy_auth):
+    from apps.plataforma.models import Usuario
+
+    grpc_falso["respuesta"] = _identidad("Nuevo@Unergy.io", grupos=("otro", "operation_staff"))
+    r = cliente.get(ME, HTTP_AUTHORIZATION="Bearer token-de-unergy")
+
+    assert r.status_code == 200
+    assert r.json()["email"] == "nuevo@unergy.io"
+    assert r.json()["rol"] == "operaciones"
+    nuevo = Usuario.objects.get(email="nuevo@unergy.io")
+    assert nuevo.nombre == "Ana Pérez"
+    assert nuevo.activo
+    # Entra solo por Unergy Auth: el login propio no tiene contraseña que probar.
+    assert not nuevo.has_usable_password()
+
+    # La segunda petición encuentra la cuenta: no duplica ni falla por el UNIQUE.
+    r = cliente.get(ME, HTTP_AUTHORIZATION="Bearer token-de-unergy")
+    assert r.status_code == 200
+    assert Usuario.objects.filter(email__iexact="nuevo@unergy.io").count() == 1
+
+
+def test_grupo_sin_alta_automatica_no_crea_cuenta(cliente, grpc_falso, con_unergy_auth):
+    from apps.plataforma.models import Usuario
+
+    grpc_falso["respuesta"] = _identidad("ajeno@unergy.io", grupos=("finance",))
+    r = cliente.get(ME, HTTP_AUTHORIZATION="Bearer token-de-unergy")
+
+    assert r.status_code == 403
+    assert not Usuario.objects.filter(email__iexact="ajeno@unergy.io").exists()
+
+
+def test_operation_staff_no_pisa_el_rol_de_una_cuenta_existente(
+    cliente, usuario, grpc_falso, con_unergy_auth,
+):
+    grpc_falso["respuesta"] = _identidad("ana@unergy.io", grupos=("operation_staff",))
+    r = cliente.get(ME, HTTP_AUTHORIZATION="Bearer token-de-unergy")
+
+    assert r.status_code == 200
+    assert r.json()["rol"] == "monitoreo"
+
+
+def test_operation_staff_no_reactiva_una_cuenta_dada_de_baja(cliente, grpc_falso, con_unergy_auth):
+    from apps.plataforma.models import Usuario
+
+    Usuario.objects.create(email="retirado@unergy.io", nombre="R", rol="operaciones", activo=False)
+    grpc_falso["respuesta"] = _identidad("retirado@unergy.io", grupos=("operation_staff",))
+    r = cliente.get(ME, HTTP_AUTHORIZATION="Bearer token-de-unergy")
+
+    assert r.status_code == 401
+    assert not Usuario.objects.get(email="retirado@unergy.io").activo
 
 
 def test_usuario_inactivo_es_401(cliente, grpc_falso, con_unergy_auth):
@@ -192,6 +249,7 @@ def servidor_grpc():
                 )
             return auth_pb2.UserResponse(
                 is_valid=True, user_id=7, username="ana", email="ana@unergy.io", groups=["ops"],
+                first_name="Ana", last_name="Pérez",
             )
 
     servidor = grpc.server(futures.ThreadPoolExecutor(max_workers=2))
@@ -210,6 +268,7 @@ def test_cliente_grpc_contra_servidor_real(servidor_grpc, settings_override):
     identidad = unergy_auth.validar_token("bueno")
     assert identidad.email == "ana@unergy.io"
     assert identidad.grupos == ("ops",)
+    assert identidad.nombre == "Ana Pérez"
 
     with pytest.raises(unergy_auth.TokenInvalido, match="vencido"):
         unergy_auth.validar_token("malo")
