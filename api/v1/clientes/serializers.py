@@ -294,3 +294,8 @@ class ClienteDocumentoSerializer(serializers.ModelSerializer):
             "archivo_nombre": {"required": False, "allow_null": True},
             "notas": {"required": False, "allow_null": True},
         }
+
+
+class VincularInversionistaOriginabotSerializer(serializers.Serializer):
+    investment_id = serializers.IntegerField(min_value=1)
+    nombre = serializers.CharField(max_length=255)

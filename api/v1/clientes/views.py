@@ -24,7 +24,7 @@ from api.logging import class_logger_wrapper
 from api.pagination import PaginacionConPaginas
 from api.permissions import RolePermission
 from apps.clientes import models as cl_models
-from apps.clientes.services import gestion, vistas
+from apps.clientes.services import gestion, inversionistas_originabot, vistas
 from apps.clientes.services.panel import proyectos_por_cliente
 from apps.contratos.models import ContratoServicio
 from apps.contratos.services.contrato_partes import ROLES_PPA, ROLES_SERVICIO, contratos_de
@@ -63,6 +63,7 @@ class ClienteViewSet(viewsets.GenericViewSet):
     GET /api/v1/clientes/{id}/proyectos · /fronteras · /contratos-ppa
     GET /api/v1/clientes/{id}/servicios-contratos · /panel
     POST /api/v1/clientes/{ganador_id}/merge/{perdedor_id}
+    POST /api/v1/clientes/originabot[?simular=true]  cliente de un inversionista de TSF
 
     **Un cliente nunca se borra físico**: `deleted_at`. Y no se puede borrar si es
     inversionista de un proyecto o tiene oportunidades comerciales.
@@ -212,6 +213,30 @@ class ClienteViewSet(viewsets.GenericViewSet):
             raise Conflict(f"No se puede eliminar: este cliente {motivo}. Desvincúlalo primero.")
         gestion.borrar(cliente)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    # ── Unión con originabot (TSF) ────────────────────────────────────────
+
+    @action(detail=False, methods=["post"], url_path="originabot")
+    def vincular_originabot(self, request):
+        """El cliente de Operaciones para un inversionista de originabot.
+
+        Cuerpo `{investment_id, nombre}`. Lo vincula por nombre o lo crea; con
+        `?simular=true` solo dice qué haría (`existente`/`vinculado`/`creado`),
+        para que «importar desde TSF» pida confirmación antes de CREAR.
+        """
+        datos = cl_serializers.VincularInversionistaOriginabotSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
+        investment_id = datos.validated_data["investment_id"]
+        nombre = datos.validated_data["nombre"]
+        if request.query_params.get("simular", "").lower() in ("true", "1"):
+            cliente, estado = inversionistas_originabot.que_pasaria(investment_id, nombre)
+        else:
+            cliente, estado = inversionistas_originabot.vincular(investment_id, nombre)
+        return Response({
+            "estado": estado,
+            "id": cliente.id if cliente else None,
+            "razon_social_nombre": cliente.razon_social_nombre if cliente else nombre,
+        })
 
     # ── Vistas agregadas ──────────────────────────────────────────────────
 

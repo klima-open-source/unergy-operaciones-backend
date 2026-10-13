@@ -33,11 +33,23 @@ class Cliente(Timer):
     # crear un PPA; se fija la primera vez y se reutiliza. Ver
     # apps/ppa/services/originabot_sync.py.
     originabot_offtaker_id = models.IntegerField(null=True, blank=True)
+    # El `Investment` (inversionista) de originabot que es este cliente. Lo fija
+    # «importar desde TSF» para que el inversionista de una minigranja se mapee
+    # por llave. Ver apps/clientes/services/inversionistas_originabot.py.
+    originabot_investment_id = models.IntegerField(null=True, blank=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "clientes"
         unique_together = [("nit_cedula",)]
+        constraints = [
+            # Un inversionista de originabot es un solo cliente vivo.
+            models.UniqueConstraint(
+                fields=["originabot_investment_id"],
+                condition=models.Q(originabot_investment_id__isnull=False, deleted_at__isnull=True),
+                name="uq_clientes_originabot_investment_vivo",
+            ),
+        ]
 
 
 class ClienteDocumentoComercial(Timer):
