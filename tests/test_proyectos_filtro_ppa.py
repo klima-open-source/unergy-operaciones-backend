@@ -333,3 +333,31 @@ def test_las_banderas_ya_no_se_escriben(datos):
     ProyectoViewSet.as_view({"patch": "partial_update"})(peticion, pk=planta.id).render()
     planta.refresh_from_db()
     assert planta.srv_operacion is False
+
+
+# ── `GET /proyectos/lista?servicio=` (2026-10-13) ────────────────────────────
+#
+# Los desplegables de Fallas piden solo las plantas que operamos. Con el listado
+# completo eso traía el objeto entero con sus relaciones; `lista` es el liviano.
+
+def test_la_lista_liviana_filtra_por_servicio(datos, monkeypatch):
+    from django.db.models import Q
+    from rest_framework.test import APIRequestFactory, force_authenticate
+
+    from api.authentication import UsuarioAutenticado
+    from api.v1.proyectos import views
+    from api.v1.proyectos.views import ProyectoViewSet
+
+    _proyecto("Operada")
+    _proyecto("Sin operación")
+    monkeypatch.setattr(views.plantas, "filtro_operadas", lambda hoy: Q(nombre_comercial="Operada"))
+
+    def pedir(query):
+        peticion = APIRequestFactory().get(f"/api/v1/proyectos/lista{query}")
+        force_authenticate(peticion, user=UsuarioAutenticado(datos["usuario"]))
+        return ProyectoViewSet.as_view({"get": "lista"})(peticion)
+
+    filtrada = pedir("?servicio=operacion")
+    assert filtrada.status_code == 200, filtrada.data
+    assert [i["nombre_comercial"] for i in filtrada.data["items"]] == ["Operada"]
+    assert pedir("").data["total"] == 2

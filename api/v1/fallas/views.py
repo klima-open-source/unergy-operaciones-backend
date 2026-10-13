@@ -6,8 +6,10 @@ son sus únicos dueños:
 
 - `fallas/dominio.py` — SLA operativo (horas por prioridad), clasificación
   estructurada y bloqueo de cierre.
-- `fallas/sla_contractual.py` — SLA del Anexo 4 (días por categoría). Es OTRO
+- `fallas/sla_contractual.py` — SLA del Anexo 4 (días por % afectado). Es OTRO
   compromiso, y está aparte para que no se confunda con el operativo.
+- `fallas/impacto.py` — % de la planta afectada, la prioridad que le
+  corresponde y la energía perdida con la simulación P90.
 - `fallas/consultas.py` — el filtrado del listado, la actividad del día y el
   backfill de SLA.
 
@@ -39,7 +41,7 @@ from api.pagination import PaginacionConPaginas
 from api.permissions import RolePermission
 from api.v1.cumplimiento import parametros as par
 from apps.monitoreo import models as mo_models
-from apps.monitoreo.services.fallas import consultas, dominio
+from apps.monitoreo.services.fallas import avisos, consultas, dominio, impacto
 from apps.monitoreo.services.fallas.estructura import ESTRUCTURA_FALLAS
 
 from . import serializers as fa_serializers
@@ -285,33 +287,18 @@ class FallaViewSet(viewsets.GenericViewSet):
                 dominio.sincronizar_intervalos(falla, intervalos)
                 if categoria:
                     dominio.aplicar_clasificacion(falla, inversores or [])
+                    impacto.aplicar_prioridad(falla)
                 falla.save()
         except IntegrityError as exc:
             raise dominio.integridad_a_error(exc)
 
-        self._notificar_coordinadores(falla)
+        avisos.falla_registrada(falla)
         self._alarmas_post_guardado(falla.id)
 
         return Response(
             fa_serializers.FallaSerializer(self._falla(falla.id)).data,
             status=status.HTTP_201_CREATED,
         )
-
-    def _notificar_coordinadores(self, falla) -> None:
-        from apps.plataforma.models import Notificacion, Usuario
-
-        coordinadores = Usuario.objects.filter(rol="coordinador", activo=True)
-        nombre = falla.proyecto.nombre_comercial if falla.proyecto_id else f"Proyecto {falla.proyecto_id}"
-        Notificacion.objects.bulk_create([
-            Notificacion(
-                usuario_id=c.id,
-                tipo="accion",
-                titulo="Nueva falla registrada",
-                mensaje=f"{falla.codigo_interno} — {nombre}: {(falla.descripcion or '')[:80]}",
-                leida=False,
-            )
-            for c in coordinadores
-        ])
 
     def _alarmas_post_guardado(self, falla_id: int) -> None:
         """Alarmas de comunicación tras crear o actualizar. Nunca rompe el flujo."""
@@ -408,6 +395,12 @@ class FallaViewSet(viewsets.GenericViewSet):
             dominio.aplicar_clasificacion(
                 falla, inversores if toca_inversores else None
             )
+            # La prioridad sale de la clasificación: se recalcula solo cuando la
+            # clasificación cambia. Un PATCH que solo cierra la falla o que solo
+            # ajusta la prioridad a mano no la toca (cerrar con otro límite
+            # reescribiría `sla_cumplido`).
+            if not (falla.estado_id and falla.estado.es_estado_final):
+                impacto.aplicar_prioridad(falla)
 
     def destroy(self, request, pk=None):
         falla = self._falla_simple(pk)

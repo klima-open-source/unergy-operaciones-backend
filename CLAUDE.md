@@ -92,7 +92,7 @@ están en el comentario del servicio `migrate` en `docker-compose.yml`.
 como bitácora histórica y **no se ejecuta en ningún lado**. `git log` sobre esa
 carpeta sigue siendo la forma de averiguar cuándo apareció una columna vieja.
 
-**Las tareas programadas son Celery, no un scheduler en proceso.** Las 19 franjas
+**Las tareas programadas son Celery, no un scheduler en proceso.** Las 20 franjas
 viven en `config/horarios.py` (fuente de verdad, versionada); `beat` las dispara y
 `worker` las corre. `django_celery_beat` guarda el horario en Postgres, pero el
 `DatabaseScheduler` sincroniza el diccionario al arrancar: editar una franja desde

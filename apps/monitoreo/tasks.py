@@ -29,3 +29,12 @@ def sondeo_mgs() -> dict:
         # reintento inmediato solo repetiría la misma llamada a una API caída.
         logger.exception("el ciclo de monitoreo falló")
         return {"error": "el ciclo falló, ver el log"}
+
+
+@shared_task(name="monitoreo.avisar_fallas_programadas")
+def avisar_fallas_programadas() -> dict:
+    """Avisa en la campana de las fallas programadas para hoy. Una vez al día;
+    reintentarla no duplica avisos (`avisos.programadas_hoy` es idempotente)."""
+    from apps.monitoreo.services.fallas import avisos
+
+    return {"avisos": avisos.programadas_hoy()}

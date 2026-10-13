@@ -2,7 +2,7 @@
 
 **No es el SLA operativo.** Ese vive en `dominio.py`, va en HORAS y su umbral
 sale de la PRIORIDAD de la falla (8 / 24 / 72 / 168). Este va en DÍAS y su umbral
-sale de la CATEGORÍA. Son dos compromisos distintos que coexisten a propósito: el
+sale del % de la planta afectada. Son dos compromisos distintos que coexisten a propósito: el
 operativo es la meta interna de atención, este es el plazo de revisión que el
 contrato le promete al cliente, y es el que se imprime en el informe de FMO.
 
@@ -14,14 +14,20 @@ nadie más lo puede reusar.
 
 from __future__ import annotations
 
+from datetime import date
+
 from apps.monitoreo.models import Falla
 
-from . import dominio
+from . import dominio, impacto
 
 # Plazo de revisión en días, con la etiqueta que imprime el Anexo 4.
 CRITICO = (2, "Crítico (≥90%)")
 GRAVE = (3, "Grave (66-90%)")
 MEDIO = (4, "Medio (<66%)")
+# El Anexo 4 no tiene nivel para una falla que no le quita energía a la planta
+# (comunicación, sensores). Operaciones lo pidió el 2026-10-13 con el mismo
+# plazo del SLA operativo leve (168 h). Si el contrato fija otro, va aquí.
+LEVE = (7, "Leve (sin pérdida)")
 
 # `red` (desconexión de suministro) es el caso crítico y también el default:
 # ante una categoría que no conozcamos, se asume el plazo más corto.
@@ -30,7 +36,22 @@ _POR_CATEGORIA = {
     "frontera": GRAVE,
     "inversores": GRAVE,
     "generando_sin_datos": GRAVE,
+    "equipos": MEDIO,
     "eventos_adversos": MEDIO,
+}
+
+# Desde cuándo rige la gravedad por % afectado. Las fallas identificadas antes
+# conservan la regla por categoría con la que ya se reportaron: regenerar un
+# informe de un mes cerrado no puede cambiar sus cifras.
+REGLA_PCT_DESDE = date(2026, 10, 13)
+
+# Misma escala que la prioridad operativa: el Anexo 4 y la prioridad salen del
+# mismo % afectado y no pueden contradecirse.
+_POR_PRIORIDAD = {
+    impacto.Prioridad.CRITICA: CRITICO,
+    impacto.Prioridad.GRAVE: GRAVE,
+    impacto.Prioridad.MEDIA: MEDIO,
+    impacto.Prioridad.LEVE: LEVE,
 }
 
 # Fallas legacy sin `clasificacion`: se cae al primer dígito de `tipo.codigo`,
@@ -39,7 +60,17 @@ _POR_PREFIJO_TIPO = {"1": GRAVE, "4": MEDIO, "5": MEDIO}
 
 
 def plazo(falla: Falla) -> tuple[int, str]:
-    """`(días de plazo, etiqueta de gravedad)` según la categoría de la falla."""
+    """`(días de plazo, etiqueta de gravedad)` de la falla.
+
+    El contrato define la gravedad por % de la planta afectada, y para las fallas
+    identificadas desde `REGLA_PCT_DESDE` se calcula así (`impacto.pct_afectado`).
+    La categoría queda para las anteriores y para las que no tienen % calculable.
+    """
+    if falla.fecha_identificacion and falla.fecha_identificacion >= REGLA_PCT_DESDE:
+        prioridad = impacto.prioridad_calculada(falla)
+        if prioridad is not None:
+            return _POR_PRIORIDAD[prioridad]
+
     clasificacion = falla.clasificacion if isinstance(falla.clasificacion, dict) else None
     categoria = (clasificacion or {}).get("categoria")
     if categoria:
