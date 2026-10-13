@@ -18,6 +18,7 @@ import re
 
 from rest_framework import serializers
 
+from apps.contratos.models import GrupoContrato
 from apps.proyectos import models as py_models
 
 CAMPOS_CREACION = [
@@ -336,10 +337,14 @@ class ProyectoSerializer(serializers.ModelSerializer):
 
     def get_ppa_contratos(self, obj) -> list:
         """La relación pasa por la tabla puente y no conoce el borrado lógico de
-        `ppa_contratos`: los eliminados se filtran acá para que no reaparezcan."""
+        `ppa_contratos`: los eliminados se filtran acá para que no reaparezcan.
+
+        La tabla puente (`contrato_proyectos`) tiene también los contratos de
+        servicio desde la rama de inversionistas: aquí solo van los PPA."""
         contratos = [
             v.contrato for v in obj.contratos_ppa.all()
             if v.contrato and v.contrato.deleted_at is None
+            and v.contrato.grupo == GrupoContrato.PPA
         ]
         return PpaResumenSerializer(contratos, many=True).data
 
