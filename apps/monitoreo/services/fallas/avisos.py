@@ -52,17 +52,20 @@ def programadas_hoy() -> int:
     )
     coordinadores = _coordinadores_ids()
     inicio_dia = datetime.combine(hoy, time(0, 0), tzinfo=COL_TZ)
-    ya_avisados = set(
-        Notificacion.objects
+    # La clave es el código de la falla y no el mensaje entero: si alguien edita
+    # la descripción entre dos reintentos, no se duplica el aviso.
+    ya_avisados = {
+        (uid, mensaje.split(" — ", 1)[0])
+        for uid, mensaje in Notificacion.objects
         .filter(titulo=TITULO_PROGRAMADA_HOY, created_at__gte=inicio_dia)
         .values_list("usuario_id", "mensaje")
-    )
+    }
 
     nuevos = []
     for falla in fallas:
         mensaje = _resumen(falla)
         for uid in coordinadores | {falla.registrado_por_id}:
-            if (uid, mensaje) not in ya_avisados:
+            if (uid, falla.codigo_interno) not in ya_avisados:
                 nuevos.append(Notificacion(
                     usuario_id=uid, tipo="alerta", titulo=TITULO_PROGRAMADA_HOY,
                     mensaje=mensaje, leida=False,

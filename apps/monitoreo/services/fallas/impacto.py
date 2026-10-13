@@ -20,12 +20,14 @@ respeta lo que haya elegido la persona y no se inventa un número.
 from __future__ import annotations
 
 import calendar
+import json
 import math
 import re
+from collections.abc import Callable
 from datetime import date, datetime, time, timedelta
 from enum import StrEnum
 
-from apps.monitoreo.models import Falla, FallaCatPrioridad
+from apps.monitoreo.models import Falla, FallaCatPrioridad, FallaInversor
 from apps.plataforma.services.fechas import COL_TZ, ahora_col
 
 
@@ -44,8 +46,8 @@ UMBRAL_GRAVE = 66.0
 
 # Categorías donde la planta entera deja de entregar energía.
 _PLANTA_COMPLETA = {"red"}
-# Subtipos de "generando sin datos" en que se verificó que la planta estaba apagada.
-_SIN_DATOS_APAGADA = {"verificado_apagado"}
+# "Generando sin datos": solo se sabe el % cuando alguien fue a verificar.
+_SIN_DATOS_VERIFICADO = {"verificado_apagado": 100.0, "verificado_encendido": 0.0}
 # Equipos de planta cuya falla no le quita energía a la planta. Un tracker o un
 # string sí, pero cuánto depende de cuál: eso se deja a la prioridad manual.
 _EQUIPOS_SIN_PERDIDA = {"smartlogger", "estacion_meteorologica"}
@@ -54,11 +56,12 @@ _TIPOS_INVERSOR_SIN_PERDIDA = {"perdida_comunicacion"}
 
 # Los reportes que llegan del monitoreo y del celular no vinculan el inversor del
 # proyecto: traen solo un nombre, a veces con varios equipos en una misma fila
-# ("300KTL-Inversor1|330KTL-Inversor2"). La potencia sale del nombre o del
-# catálogo del proyecto.
+# ("300KTL-Inversor1|330KTL-Inversor2"). La potencia sale primero del catálogo
+# del proyecto por número de inversor, y solo si no está, del modelo en el
+# nombre ("330KTL" es el modelo, no siempre la potencia nominal).
 _SEPARADORES_NOMBRE = re.compile(r"[|,;]")
 _KW_EN_NOMBRE = re.compile(r"(\d+(?:[.,]\d+)?)\s*k(?:tl|w)\b", re.IGNORECASE)
-_NUMERO_INVERSOR = re.compile(r"inversor\s*-?\s*(\d+)", re.IGNORECASE)
+_NUMERO_INVERSOR = re.compile(r"\b(?:inversor|inv)[\s_\-]*(\d+)", re.IGNORECASE)
 
 # Ventana solar para repartir la energía del día, en hora Colombia. La
 # generación se modela como una campana seno entre estas dos horas: una falla
@@ -75,7 +78,7 @@ def pct_afectado(falla: Falla) -> float | None:
     if categoria in _PLANTA_COMPLETA:
         return 100.0
     if categoria == "generando_sin_datos":
-        return 100.0 if falla.subtipo_codigo in _SIN_DATOS_APAGADA else 0.0
+        return _SIN_DATOS_VERIFICADO.get(falla.subtipo_codigo)
     if categoria == "frontera":
         # La planta sigue generando: lo que falla es la medición o el enlace.
         return 0.0
@@ -88,9 +91,10 @@ def pct_afectado(falla: Falla) -> float | None:
 
 def _pct_inversores(falla: Falla) -> float | None:
     inversores = list(falla.inversores_afectados.all())
+    # Sin tipos no se sabe que solo sea comunicación: cuenta como pérdida.
     con_perdida = [
         inv for inv in inversores
-        if set(inv.tipos or []) - _TIPOS_INVERSOR_SIN_PERDIDA
+        if not inv.tipos or set(inv.tipos) - _TIPOS_INVERSOR_SIN_PERDIDA
     ]
     if inversores and not con_perdida:
         return 0.0
@@ -99,15 +103,28 @@ def _pct_inversores(falla: Falla) -> float | None:
     if not con_perdida or total_kw <= 0:
         return None
 
-    catalogo = _catalogo_inversores(falla)
+    catalogo: dict[int, float] | None = None
     afectado_kw = 0.0
     for inv in con_perdida:
-        kw = _kw_inversor(inv, catalogo)
+        kw = _kw_vinculado(inv)
+        if kw is None:
+            if catalogo is None:
+                catalogo = _catalogo_inversores(falla)
+            kw = _kw_por_nombre(inv.nombre or "", catalogo)
         if kw is None:
             # Sin la potencia de un inversor el % sería inventado.
             return None
         afectado_kw += kw
     return round(min(100.0, afectado_kw / total_kw * 100), 1)
+
+
+def _kw_vinculado(inv: FallaInversor) -> float | None:
+    """La potencia que trae la fila o el inversor del proyecto al que apunta."""
+    if inv.potencia_kw is not None:
+        return float(inv.potencia_kw)
+    if inv.proyecto_inversor_id and inv.proyecto_inversor.potencia_nominal_kw is not None:
+        return float(inv.proyecto_inversor.potencia_nominal_kw)
+    return None
 
 
 def _catalogo_inversores(falla: Falla) -> dict[int, float]:
@@ -120,24 +137,19 @@ def _catalogo_inversores(falla: Falla) -> dict[int, float]:
     return catalogo
 
 
-def _kw_inversor(inv, catalogo: dict[int, float]) -> float | None:
-    """La potencia de una fila de `falla_inversores`, o `None` si no se sabe."""
-    if inv.potencia_kw is not None:
-        return float(inv.potencia_kw)
-    if inv.proyecto_inversor_id and inv.proyecto_inversor.potencia_nominal_kw is not None:
-        return float(inv.proyecto_inversor.potencia_nominal_kw)
-
-    total = 0.0
-    nombres = [n.strip() for n in _SEPARADORES_NOMBRE.split(inv.nombre or "") if n.strip()]
-    if not nombres:
+def _kw_por_nombre(nombre: str, catalogo: dict[int, float]) -> float | None:
+    """kW de uno o varios inversores nombrados en texto; `None` si alguno no se sabe."""
+    partes = [n.strip() for n in _SEPARADORES_NOMBRE.split(nombre) if n.strip()]
+    if not partes:
         return None
-    for nombre in nombres:
-        en_nombre = _KW_EN_NOMBRE.search(nombre)
-        numero = _NUMERO_INVERSOR.search(nombre)
-        if en_nombre:
-            total += float(en_nombre.group(1).replace(",", "."))
-        elif numero and int(numero.group(1)) in catalogo:
+    total = 0.0
+    for parte in partes:
+        numero = _NUMERO_INVERSOR.search(parte)
+        en_nombre = _KW_EN_NOMBRE.search(parte)
+        if numero and int(numero.group(1)) in catalogo:
             total += catalogo[int(numero.group(1))]
+        elif en_nombre:
+            total += float(en_nombre.group(1).replace(",", "."))
         else:
             return None
     return total
@@ -174,6 +186,10 @@ def aplicar_prioridad(falla: Falla) -> None:
 
 # ── Energía perdida ──────────────────────────────────────────────────────────
 
+class _SinSimulacion(Exception):
+    """Falta el P90 de un mes que la falla toca."""
+
+
 def kwh_perdidos_p90(falla: Falla, pct: float | None = None) -> float | None:
     """kWh que la planta dejó de generar según su simulación P90.
 
@@ -187,39 +203,66 @@ def kwh_perdidos_p90(falla: Falla, pct: float | None = None) -> float | None:
     if pct == 0:
         return 0.0
 
-    p90 = falla.proyecto.p90_mensual_kwh if falla.proyecto_id else None
-    if not isinstance(p90, list) or len(p90) != 12:
-        return None
-
+    p90 = _p90_mensual(falla.proyecto.p90_mensual_kwh if falla.proyecto_id else None)
     tramos = _tramos_afectacion(falla)
-    if tramos is None:
+    if p90 is None or tramos is None:
         return None
 
-    total = 0.0
-    for inicio, fin in tramos:
-        for dia, desde_h, hasta_h in _por_dia(inicio, fin):
-            kwh_mes = p90[dia.month - 1]
-            if kwh_mes is None:
-                return None
-            kwh_dia = float(kwh_mes) / calendar.monthrange(dia.year, dia.month)[1]
-            total += kwh_dia * _fraccion_solar(desde_h, hasta_h)
+    def kwh_dia(dia: date) -> float:
+        kwh_mes = p90[dia.month - 1]
+        if kwh_mes is None:
+            raise _SinSimulacion
+        return kwh_mes / calendar.monthrange(dia.year, dia.month)[1]
+
+    try:
+        total = sum(_energia_tramo(inicio, fin, kwh_dia) for inicio, fin in tramos)
+    except _SinSimulacion:
+        return None
     return round(total * pct / 100, 1)
+
+
+def _p90_mensual(valor: object) -> list[float | None] | None:
+    """Los 12 kWh del P90 como números; un mes ilegible queda en `None`.
+
+    Hay P90 guardados como texto JSON (dato histórico) y listas con valores no
+    numéricos: ninguno puede tumbar el listado de fallas.
+    """
+    if isinstance(valor, str):
+        try:
+            valor = json.loads(valor)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(valor, list) or len(valor) != 12:
+        return None
+    meses: list[float | None] = []
+    for kwh in valor:
+        try:
+            meses.append(float(kwh))
+        except (TypeError, ValueError):
+            meses.append(None)
+    return meses
 
 
 def _tramos_afectacion(falla: Falla) -> list[tuple[datetime, datetime]] | None:
     """Los tramos en que la planta estuvo afectada, en hora Colombia.
 
-    Mismo criterio que `dominio.tiempo_afectacion_horas`: mandan los intervalos
-    de disparo si los hay; si no, de la ocurrencia (o identificación) a la
-    resolución, o a ahora si sigue abierta.
+    Mandan los intervalos de disparo si los hay; si no, de la ocurrencia (o
+    identificación) a la resolución. Una falla abierta se cuenta hasta ahora; una
+    cerrada sin fecha de solución (dato legacy) no tiene fin conocido: `None`.
     """
+    cerrada = bool(falla.estado_id and falla.estado.es_estado_final)
     ahora = ahora_col()
+
     intervalos = [iv for iv in falla.intervalos.all() if iv.inicio]
     if intervalos:
+        if cerrada and any(iv.fin is None for iv in intervalos):
+            return None
         return [
             (_col(iv.inicio), _col(iv.fin) if iv.fin else ahora) for iv in intervalos
         ]
 
+    if cerrada and not falla.fecha_resolucion:
+        return None
     inicio = falla.fecha_ocurrencia
     if inicio is None:
         if not falla.fecha_identificacion:
@@ -237,19 +280,31 @@ def _col(dt: datetime) -> datetime:
     return dt.astimezone(COL_TZ)
 
 
-def _por_dia(inicio: datetime, fin: datetime):
-    """Parte `[inicio, fin)` en `(día, hora_desde, hora_hasta)` con horas decimales."""
-    actual = inicio
-    while actual < fin:
-        dia: date = actual.date()
-        siguiente = datetime.combine(dia + timedelta(days=1), time(0, 0), tzinfo=COL_TZ)
-        corte = min(fin, siguiente)
-        desde_h = (actual - actual.replace(hour=0, minute=0, second=0, microsecond=0)).total_seconds() / 3600
-        hasta_h = 24.0 if corte == siguiente else (
-            corte - corte.replace(hour=0, minute=0, second=0, microsecond=0)
-        ).total_seconds() / 3600
-        yield dia, desde_h, hasta_h
-        actual = corte
+def _energia_tramo(inicio: datetime, fin: datetime, kwh_dia: Callable[[date], float]) -> float:
+    """kWh de P90 (al 100 %) entre dos instantes en hora Colombia.
+
+    Los días completos del medio se suman por mes, sin recorrerlos uno a uno: una
+    falla legacy abierta hace años no puede volver lento el listado.
+    """
+    if fin <= inicio:
+        return 0.0
+    if inicio.date() == fin.date():
+        return kwh_dia(inicio.date()) * _fraccion_solar(_hora(inicio), _hora(fin))
+
+    total = kwh_dia(inicio.date()) * _fraccion_solar(_hora(inicio), 24.0)
+    total += kwh_dia(fin.date()) * _fraccion_solar(0.0, _hora(fin))
+
+    dia = inicio.date() + timedelta(days=1)
+    while dia < fin.date():
+        inicio_mes_siguiente = date(dia.year + dia.month // 12, dia.month % 12 + 1, 1)
+        corte = min(fin.date(), inicio_mes_siguiente)
+        total += (corte - dia).days * kwh_dia(dia)
+        dia = corte
+    return total
+
+
+def _hora(dt: datetime) -> float:
+    return dt.hour + dt.minute / 60 + dt.second / 3600 + dt.microsecond / 3_600_000_000
 
 
 def _fraccion_solar(desde_h: float, hasta_h: float) -> float:

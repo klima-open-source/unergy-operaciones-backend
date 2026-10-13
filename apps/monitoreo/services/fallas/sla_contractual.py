@@ -14,6 +14,8 @@ nadie más lo puede reusar.
 
 from __future__ import annotations
 
+from datetime import date
+
 from apps.monitoreo.models import Falla
 
 from . import dominio, impacto
@@ -38,6 +40,11 @@ _POR_CATEGORIA = {
     "eventos_adversos": MEDIO,
 }
 
+# Desde cuándo rige la gravedad por % afectado. Las fallas identificadas antes
+# conservan la regla por categoría con la que ya se reportaron: regenerar un
+# informe de un mes cerrado no puede cambiar sus cifras.
+REGLA_PCT_DESDE = date(2026, 10, 13)
+
 # Misma escala que la prioridad operativa: el Anexo 4 y la prioridad salen del
 # mismo % afectado y no pueden contradecirse.
 _POR_PRIORIDAD = {
@@ -55,13 +62,14 @@ _POR_PREFIJO_TIPO = {"1": GRAVE, "4": MEDIO, "5": MEDIO}
 def plazo(falla: Falla) -> tuple[int, str]:
     """`(días de plazo, etiqueta de gravedad)` de la falla.
 
-    El contrato define la gravedad por % de la planta afectada, y desde el
-    2026-10-13 se calcula así (`impacto.pct_afectado`). La categoría queda solo
-    de respaldo para las fallas donde el % no se puede calcular.
+    El contrato define la gravedad por % de la planta afectada, y para las fallas
+    identificadas desde `REGLA_PCT_DESDE` se calcula así (`impacto.pct_afectado`).
+    La categoría queda para las anteriores y para las que no tienen % calculable.
     """
-    prioridad = impacto.prioridad_calculada(falla)
-    if prioridad is not None:
-        return _POR_PRIORIDAD[prioridad]
+    if falla.fecha_identificacion and falla.fecha_identificacion >= REGLA_PCT_DESDE:
+        prioridad = impacto.prioridad_calculada(falla)
+        if prioridad is not None:
+            return _POR_PRIORIDAD[prioridad]
 
     clasificacion = falla.clasificacion if isinstance(falla.clasificacion, dict) else None
     categoria = (clasificacion or {}).get("categoria")

@@ -343,7 +343,6 @@ class FallaViewSet(viewsets.GenericViewSet):
                 if toca_intervalos:
                     dominio.sincronizar_intervalos(falla, intervalos or [])
                 self._reclasificar(falla, datos, inversores, toca_inversores)
-                impacto.aplicar_prioridad(falla)
 
                 # Sella fecha+hora de solución y calcula `sla_cumplido` al cerrar;
                 # al reabrir limpia ambos. Ver `dominio.sincronizar_resolucion`.
@@ -396,6 +395,12 @@ class FallaViewSet(viewsets.GenericViewSet):
             dominio.aplicar_clasificacion(
                 falla, inversores if toca_inversores else None
             )
+            # La prioridad sale de la clasificación: se recalcula solo cuando la
+            # clasificación cambia. Un PATCH que solo cierra la falla o que solo
+            # ajusta la prioridad a mano no la toca (cerrar con otro límite
+            # reescribiría `sla_cumplido`).
+            if not (falla.estado_id and falla.estado.es_estado_final):
+                impacto.aplicar_prioridad(falla)
 
     def destroy(self, request, pk=None):
         falla = self._falla_simple(pk)

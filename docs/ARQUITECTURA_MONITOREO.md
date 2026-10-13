@@ -321,7 +321,11 @@ provisional (el error de §5.9). `kwh_perdidos_estimado` sigue siendo el valor m
   medición), < 66 % media, 0 % leve. Se asigna al crear/editar; con `None` queda la
   elegida a mano.
 - **Anexo 4** (`sla_contractual.plazo`) usa la misma escala, más el nivel **Leve (sin
-  pérdida)** a 7 días que pidió Operaciones; la categoría queda de respaldo.
+  pérdida)** a 7 días que pidió Operaciones, para fallas identificadas desde
+  `REGLA_PCT_DESDE` (2026-10-13). Las anteriores conservan la regla por categoría: un
+  informe ya enviado no cambia si se regenera.
+- La prioridad calculada se aplica al crear y cuando un PATCH cambia la
+  clasificación; nunca al cerrar ni a un ajuste manual de prioridad.
 - **Energía**: por día afectado, P90 del mes ÷ días del mes × fracción de la campana
   solar (seno 6:00–18:00, hora Colombia) × % afectado.
 
@@ -331,6 +335,9 @@ provisional (el error de §5.9). `kwh_perdidos_estimado` sigue siendo el valor m
   meteorológica). `estructura.equipo_de` deduce el equipo afectado de la
   clasificación (inversores → inversor, frontera medidor_* → medidor).
 - `fallas.en_garantia` / `garantia_detalle` (migración `monitoreo/0009`).
+- **Después de desplegar:** `python manage.py sembrar_tipos_fallas` crea los
+  `fallas_cat_tipos` de la categoría nueva (el sembrado de FastAPI ya no corre).
+  Idempotente.
 - `dominio.en_pendientes`: sin cerrar y en garantía, o de tracker, string, medidor
   o estación meteorológica. Es la pestaña Pendientes del frontend.
 - `monitoreo.avisar_fallas_programadas` (6:00, `config/horarios.py`) deja en la

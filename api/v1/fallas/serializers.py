@@ -188,15 +188,24 @@ class FallaListaSerializer(serializers.ModelSerializer):
     def get_fotos_lista(self, obj) -> list:
         return dominio.fotos_lista(obj)
 
+    def _pct(self, obj) -> float | None:
+        """El % afectado, calculado una vez por falla: lo leen tres campos."""
+        cache = self.__dict__.setdefault("_pct_por_falla", {})
+        if obj.pk not in cache:
+            cache[obj.pk] = impacto.pct_afectado(obj)
+        return cache[obj.pk]
+
     def get_pct_afectado(self, obj) -> float | None:
-        return impacto.pct_afectado(obj)
+        return self._pct(obj)
 
     def get_prioridad_calculada(self, obj) -> str | None:
-        prioridad = impacto.prioridad_calculada(obj)
+        pct = self._pct(obj)
+        prioridad = None if pct is None else impacto.prioridad_calculada(obj, pct)
         return prioridad.value if prioridad else None
 
     def get_kwh_perdidos_p90(self, obj) -> float | None:
-        return impacto.kwh_perdidos_p90(obj)
+        pct = self._pct(obj)
+        return None if pct is None else impacto.kwh_perdidos_p90(obj, pct)
 
     def get_equipo(self, obj) -> str | None:
         equipo = equipo_de(obj.categoria_codigo, obj.subtipo_codigo)
