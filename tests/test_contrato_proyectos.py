@@ -211,3 +211,45 @@ def test_fusionar_proyectos_con_el_mismo_inversionista_conserva_al_representado(
     assert fila.proyecto_id == datos["compartida"].id
     assert fila.proyecto_inversionista_id == datos["bia_en_compartida"].id
     assert ProyectoInversionista.objects.filter(proyecto=datos["compartida"]).count() == 2
+
+
+def test_registrar_el_primer_inversionista_completa_el_contrato_pendiente(datos):
+    """El barrido carga los inversionistas planta por planta: el contrato que
+    esperaba no queda pendiente hasta que alguien lo vuelva a guardar."""
+    from apps.proyectos.models import ProyectoInversionista
+
+    contrato = _contrato("representacion", datos["vacia"])
+    assert _fila(contrato).proyecto_inversionista_id is None
+
+    nueva = ProyectoInversionista.objects.create(proyecto=datos["vacia"], cliente=datos["bia"])
+
+    assert _fila(contrato).proyecto_inversionista_id == nueva.id
+
+
+def test_un_segundo_inversionista_no_decide_por_nadie(datos):
+    from apps.proyectos.models import ProyectoInversionista
+
+    contrato = _contrato("representacion", datos["compartida"])
+    ProyectoInversionista.objects.create(
+        proyecto=datos["compartida"], cliente=_otro_cliente("Tercer fondo"))
+
+    assert _fila(contrato).proyecto_inversionista_id is None
+
+
+def test_el_que_queda_cuando_otro_sale_no_hereda_su_contrato(datos):
+    """Si Suno sale de la planta y solo queda Bia, el contrato de Suno no pasa a Bia."""
+    from apps.proyectos.models import ProyectoInversionista
+
+    contrato = _contrato("representacion", datos["compartida"], datos["suno"])
+    datos["suno_en_compartida"].delete()
+    bia = ProyectoInversionista.objects.get(pk=datos["bia_en_compartida"].pk)
+    bia.porcentaje_participacion = 1
+    bia.save()
+
+    assert _fila(contrato).proyecto_inversionista_id is None
+
+
+def _otro_cliente(nombre):
+    from apps.clientes.models import Cliente
+
+    return Cliente.objects.create(razon_social_nombre=nombre)

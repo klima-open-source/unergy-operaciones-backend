@@ -321,7 +321,12 @@ class ProyectoInversionista(Timer):
                 kwargs["update_fields"] = (
                     set(kwargs["update_fields"]) - {"cliente", "cliente_id"}
                 ) | {"inversionista"}
+        es_nueva = self._state.adding
         super().save(*args, **kwargs)
+        if es_nueva:
+            from apps.contratos.services.contrato_proyectos import completar_pendientes_de_planta
+
+            completar_pendientes_de_planta(self)
 
 
 class ProyectoPendienteIgnorado(models.Model):

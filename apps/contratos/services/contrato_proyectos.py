@@ -68,6 +68,26 @@ def _unica_de(proyecto_id):
     return candidatas[0] if len(candidatas) == 1 else None
 
 
+def completar_pendientes_de_planta(participacion) -> int:
+    """Al REGISTRAR el primer inversionista de una planta, sus contratos de
+    representación que esperaban participación pasan a representarlo.
+
+    Es la misma regla de siempre --una planta con un solo inversionista: ese--,
+    aplicada cuando el barrido carga los inversionistas proyecto por proyecto, para
+    que el contrato no quede pendiente hasta que alguien lo vuelva a guardar.
+
+    Solo al crear, y solo si es el único: cuando una planta se queda con un
+    inversionista porque otro SALIÓ, el contrato del que salió no pasa a ser del
+    que queda. Devuelve cuántos contratos se completaron."""
+    if _unica_de(participacion.proyecto_id) != participacion:
+        return 0
+    return ContratoProyecto.objects.filter(
+        proyecto_id=participacion.proyecto_id,
+        proyecto_inversionista__isnull=True,
+        contrato__grupo=GrupoContrato.REPRESENTACION_CGM,
+    ).update(proyecto_inversionista=participacion)
+
+
 def sincronizar(contrato, *, proyecto_id=_SIN_CAMBIO, inversionista_id=_SIN_CAMBIO) -> None:
     """Deja la fila de `contrato_proyectos` de un contrato de servicio como se pidió.
 
