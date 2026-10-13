@@ -33,9 +33,16 @@ class OperadorRedSerializer(serializers.ModelSerializer):
     class Meta:
         model = fr_models.OperadorRed
         fields = [
-            "id", "nombre_legal", "nombre_comercial", "contactos",
-            "fronteras_vinculadas", "created_at", "updated_at",
+            "id", "nombre_legal", "nombre_comercial", "codigo_originabot",
+            "contactos", "fronteras_vinculadas", "created_at", "updated_at",
         ]
+        # Solo lo escribe `POST /operadores-red/originabot`: es la llave con TSF.
+        read_only_fields = ["codigo_originabot"]
+
+
+class VincularOriginabotSerializer(serializers.Serializer):
+    codigo = serializers.CharField(max_length=50)
+    nombre = serializers.CharField(max_length=100)
 
 
 class OperadorRedEscrituraSerializer(serializers.ModelSerializer):

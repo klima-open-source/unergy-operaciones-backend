@@ -84,6 +84,10 @@ class OperadorRed(Timer):
     id = models.BigAutoField(primary_key=True)
     nombre_legal = models.CharField(max_length=255)
     nombre_comercial = models.CharField(max_length=100, null=True, blank=True)
+    # El `code` del GridOperator de originabot (TSF): `afinia`, `aire`, `essa`…
+    # Es la llave para que importar un proyecto de TSF mapee su operador sin
+    # comparar nombres. Ver apps/fronteras/services/operadores_originabot.py.
+    codigo_originabot = models.CharField(max_length=50, null=True, blank=True, unique=True)
 
     class Meta:
         db_table = "operadores_red"

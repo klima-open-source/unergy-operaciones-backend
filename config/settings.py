@@ -205,6 +205,10 @@ GRPC_TIMEOUT = float(os.getenv("GRPC_TIMEOUT", "5"))
 # gRPC. Existe porque el gRPC de Unergy Auth no se alcanza desde fuera de su red
 # (devauth.uner.gy solo publica HTTP). El lineamiento del equipo es gRPC, así que
 # fuera de development el arranque falla en vez de aceptarlo en silencio.
+# originabot (TSF). Hoy solo lo usa `manage.py vincular_operadores_originabot`.
+# Cambia por entorno: devoriginabot.uner.gy en dev, originabot.uner.gy en prod.
+ORIGINABOT_URL = os.getenv("ORIGINABOT_URL", "https://originabot.uner.gy")
+
 UNERGY_AUTH_HTTP_URL = os.getenv("UNERGY_AUTH_HTTP_URL", "")
 if UNERGY_AUTH_HTTP_URL and ENTORNO != "development":
     raise RuntimeError(

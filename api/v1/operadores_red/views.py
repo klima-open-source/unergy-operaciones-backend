@@ -10,6 +10,7 @@ from api.logging import class_logger_wrapper, log_endpoint
 from api.permissions import RolePermission
 from apps.fronteras import models as fr_models
 from apps.fronteras.services import operadores as operadores_service
+from apps.fronteras.services import operadores_originabot
 
 from . import queryset as operadores_queryset
 from . import serializers as operadores_serializers
@@ -31,6 +32,8 @@ class OperadorRedViewSet(
     POST  /api/v1/operadores-red[?forzar=true]
     PATCH /api/v1/operadores-red/{id}[?forzar=true]
     POST  /api/v1/operadores-red/{id}/contactos     → 201
+    POST  /api/v1/operadores-red/originabot         {codigo, nombre} → el operador
+                                                    vinculado al de TSF
 
     **Dos niveles de duplicado, y solo uno bloquea.** Un `nombre_legal` repetido
     es un 409 definitivo (la columna es única). Un nombre PARECIDO también
@@ -112,6 +115,26 @@ class OperadorRedViewSet(
         return Response(
             operadores_serializers.ContactoSerializer(contacto).data, status=201
         )
+
+    @action(detail=False, methods=["post"], url_path="originabot")
+    @log_endpoint(name="Operaciones | Operadores de red | Vincular originabot")
+    def vincular_originabot(self, request):
+        """El operador de Operaciones para un `code` de originabot (TSF).
+
+        Lo usa «importar desde TSF»: si el operador del proyecto no está aún en
+        nuestro catálogo, lo vincula por nombre o lo crea, para que el mapeo sea
+        siempre por llave y no por nombre. Idempotente. Ver
+        `apps/fronteras/services/operadores_originabot.py`.
+        """
+        datos = operadores_serializers.VincularOriginabotSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
+        try:
+            operador, estado = operadores_originabot.vincular(
+                datos.validated_data["codigo"], datos.validated_data["nombre"],
+            )
+        except operadores_originabot.VinculoImposible as exc:
+            raise Conflict(str(exc))
+        return Response({**self._leer(operador.pk), "estado": estado})
 
     def _leer(self, pk) -> dict:
         """Relee con el conteo anotado, que el serializer de salida expone."""

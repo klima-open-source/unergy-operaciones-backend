@@ -171,7 +171,11 @@ RUTAS_RETIRADAS = {
 #               (SIMEM 709b84) que ya calculaba la indemnizacion, para la vista
 #               SIMEM de Comercializacion. Se expone en vez de recalcularlo
 #               para que los dos numeros no se separen.
+#   2026-10-13  POST /operadores-red/originabot. Vincula (o crea) el operador de
+#               red de un `code` de originabot, para que importar un proyecto de
+#               TSF mapee su operador por llave. No existia en FastAPI.
 RUTAS_NUEVAS = {
+    ("/api/v1/operadores-red/originabot", "POST"),
     ("/api/v1/facturacion/bolsa-simem", "GET"),
     ("/api/v1/generacion-solar/monitoring/{}/irradiancia", "GET"),
     ("/api/v1/reconectadores/interruptor", "GET"),
