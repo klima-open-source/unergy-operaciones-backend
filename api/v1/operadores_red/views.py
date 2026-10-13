@@ -20,6 +20,10 @@ def _forzar(request) -> bool:
     return request.query_params.get("forzar", "").lower() in ("true", "1")
 
 
+def _simular(request) -> bool:
+    return request.query_params.get("simular", "").lower() in ("true", "1")
+
+
 @class_logger_wrapper(name="Operaciones | Fronteras | Operadores de red")
 class OperadorRedViewSet(
     viewsets.GenericViewSet, mixins.ListModelMixin, mixins.RetrieveModelMixin,
@@ -125,9 +129,24 @@ class OperadorRedViewSet(
         nuestro catálogo, lo vincula por nombre o lo crea, para que el mapeo sea
         siempre por llave y no por nombre. Idempotente. Ver
         `apps/fronteras/services/operadores_originabot.py`.
+
+        `?simular=true` dice qué pasaría (`existente`/`vinculado`/`creado`) sin
+        escribir: el import la usa para pedir confirmación antes de CREAR.
         """
         datos = operadores_serializers.VincularOriginabotSerializer(data=request.data)
         datos.is_valid(raise_exception=True)
+        if _simular(request):
+            try:
+                operador, estado = operadores_originabot.que_pasaria(
+                    datos.validated_data["codigo"], datos.validated_data["nombre"],
+                )
+            except operadores_originabot.VinculoImposible as exc:
+                raise Conflict(str(exc))
+            return Response({
+                "estado": estado,
+                "id": operador.id if operador else None,
+                "nombre_comercial": operador.nombre_comercial if operador else datos.validated_data["nombre"],
+            })
         try:
             operador, estado = operadores_originabot.vincular(
                 datos.validated_data["codigo"], datos.validated_data["nombre"],

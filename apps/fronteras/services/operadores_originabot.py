@@ -44,6 +44,26 @@ def _por_nombre_sin_codigo(nombre: str) -> OperadorRed | None:
     return None
 
 
+def que_pasaria(codigo: str, nombre: str) -> tuple[OperadorRed | None, str]:
+    """Lo que haría `vincular()`, sin escribir: para que quien la llama pueda
+    pedir confirmación antes de CREAR un operador."""
+    codigo = (codigo or "").strip().lower()
+    nombre = (nombre or "").strip()
+    if not codigo or not nombre:
+        raise ValueError("Hacen falta el código y el nombre del operador de originabot.")
+    existente = OperadorRed.objects.filter(codigo_originabot=codigo).first()
+    if existente:
+        return existente, EXISTENTE
+    candidato = _por_nombre_sin_codigo(nombre)
+    if candidato:
+        return candidato, VINCULADO
+    if OperadorRed.objects.filter(nombre_legal=nombre).exists():
+        raise VinculoImposible(
+            f"Ya existe un operador con nombre legal «{nombre}» y otro código de originabot."
+        )
+    return None, CREADO
+
+
 def vincular(codigo: str, nombre: str) -> tuple[OperadorRed, str]:
     """El operador de red de Operaciones para el `code` de originabot.
 

@@ -252,8 +252,9 @@ class PpaViewSet(
         """Lleva a originabot lo pendiente del PPA.
 
         Cuerpo opcional: `originabot_ppa_id` lo vincula a uno que ya existe allá
-        (solo le AGREGA las plantas actuales); `off_taker_id` es el comprador con
-        que se crea allá si aún no existe. Vacío = reintentar.
+        (solo le AGREGA las plantas actuales); `crear: true` lo crea allá, con
+        `off_taker_id` o el de su comprador. Vacío = reintentar. Crear y vincular
+        escriben en originabot: la ficha los manda solo después de confirmar.
         """
         contrato = self._contrato(pk)
         entrada = ppa_serializers.SincronizarOriginabotSerializer(data=request.data)
@@ -262,6 +263,7 @@ class PpaViewSet(
             contrato, request.auth,
             vincular_a=entrada.validated_data.get("originabot_ppa_id"),
             off_taker_id=entrada.validated_data.get("off_taker_id"),
+            crear=entrada.validated_data["crear"],
         )
         return Response(ppa_serializers.ContratoSerializer(self._contrato(contrato.pk)).data)
 

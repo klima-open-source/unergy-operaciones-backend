@@ -144,3 +144,28 @@ def test_el_code_no_se_edita_por_patch(admin):
     assert r.status_code in (200, 400)
     operador.refresh_from_db()
     assert operador.codigo_originabot == "epm"
+
+
+def test_simular_dice_que_crearia_sin_escribir(admin):
+    from django.test import Client
+
+    from apps.fronteras.models import OperadorRed
+
+    r = Client().post("/api/v1/operadores-red/originabot?simular=true", {"codigo": "chec", "nombre": "CHEC"},
+                      content_type="application/json", **admin)
+    assert r.status_code == 200
+    assert r.json() == {"estado": "creado", "id": None, "nombre_comercial": "CHEC"}
+    assert not OperadorRed.objects.filter(codigo_originabot="chec").exists()
+
+
+def test_simular_un_vinculo_por_nombre_no_lo_guarda(admin):
+    from django.test import Client
+
+    from apps.fronteras.models import OperadorRed
+
+    local = OperadorRed.objects.create(nombre_legal="EPM S.A. E.S.P.", nombre_comercial="EPM")
+    r = Client().post("/api/v1/operadores-red/originabot?simular=true", {"codigo": "epm", "nombre": "EPM"},
+                      content_type="application/json", **admin)
+    assert (r.json()["estado"], r.json()["id"]) == ("vinculado", local.id)
+    local.refresh_from_db()
+    assert local.codigo_originabot is None

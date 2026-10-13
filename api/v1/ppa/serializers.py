@@ -44,6 +44,8 @@ class CompromisoEntradaSerializer(serializers.Serializer):
 class SincronizarOriginabotSerializer(serializers.Serializer):
     originabot_ppa_id = serializers.IntegerField(required=False, min_value=1)
     off_taker_id = serializers.IntegerField(required=False, min_value=1)
+    # Crear el PPA en originabot: solo lo manda la ficha tras la confirmación.
+    crear = serializers.BooleanField(required=False, default=False)
 
 
 class ContratoSerializer(serializers.ModelSerializer):

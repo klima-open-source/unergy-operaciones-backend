@@ -13,11 +13,13 @@ originabot:
   pudo llevar —la persona entró con el login propio y no hay token de Unergy, u
   originabot falló—, el PPA queda `pendiente`/`error` y el próximo intento lleva
   todo lo acumulado.
-- **Un PPA sin vínculo se crea en originabot** con todas sus plantas, la primera
-  vez que tiene alguna. originabot exige un `off_taker`: es el comprador del PPA,
-  vinculado por `Cliente.originabot_offtaker_id`; si no se puede resolver, el PPA
-  queda pendiente hasta que alguien lo elija. **O se vincula a mano** a uno que ya
-  existe allá: entonces solo se le AGREGAN las plantas actuales.
+- **Crear un PPA en originabot nunca es automático**: solo con `crear=True`, que
+  manda la ficha del PPA después de que la persona confirma («Esta acción creará
+  el PPA en TSF…»). Un PPA sin vínculo al que se le asignan plantas queda
+  `pendiente` hasta que alguien lo cree o lo vincule. Se crea con todas sus
+  plantas y un `off_taker` (obligatorio allá): el elegido, o el del comprador
+  (`Cliente.originabot_offtaker_id`, o por nombre). **O se vincula a mano** a uno
+  que ya existe allá: entonces solo se le AGREGAN las plantas actuales.
 - La minigranja de una planta es `Proyecto.originabot_minifarm_id`; si falta, se
   resuelve una vez y se guarda: la que se llame exactamente como su
   `origina_code` o, si no hay, la ÚNICA que encuentre su código TSF (originabot
@@ -51,6 +53,10 @@ ERROR = "error"
 
 SIN_TOKEN = (
     "El cambio no llegó a originabot: entra con Unergy Auth y pulsa «Sincronizar»."
+)
+SIN_VINCULO = (
+    "Este PPA no existe en originabot: créalo o vincúlalo a uno de allá para que "
+    "sus plantas lleguen."
 )
 SIN_OFFTAKER = (
     "Para crear este PPA en originabot falta su off taker (el comprador): elígelo o "
@@ -150,17 +156,16 @@ def _nombre(contrato) -> str:
 
 
 def sincronizar(
-    contrato, token: str | None, *, vincular_a: int | None = None, off_taker_id: int | None = None,
+    contrato, token: str | None, *, vincular_a: int | None = None,
+    off_taker_id: int | None = None, crear: bool = False,
 ) -> None:
     """Lleva a originabot lo pendiente del PPA y deja el resultado en el contrato
     (`originabot_sync_*`). No lanza: un fallo queda como `error` con su motivo."""
     if not token:
-        hay_algo_que_llevar = (
-            bool(contrato.originabot_pendiente)
-            or bool(vincular_a)
-            or (contrato.originabot_ppa_id is None and bool(plantas_de(contrato)))
-        )
-        if hay_algo_que_llevar:
+        if contrato.originabot_ppa_id is None and not (vincular_a or crear):
+            if plantas_de(contrato):
+                _marcar(contrato, PENDIENTE, SIN_VINCULO)
+        elif contrato.originabot_pendiente or vincular_a or crear:
             _marcar(contrato, PENDIENTE, SIN_TOKEN)
         return
 
@@ -182,8 +187,11 @@ def sincronizar(
             agregar, quitar = plantas_de(contrato), set()
         elif contrato.originabot_ppa_id is None:
             agregar, quitar = plantas_de(contrato), set()
-            if not agregar:
-                return  # sin plantas no hay nada que crear todavía
+            if not crear:
+                # Crear allá exige una confirmación explícita: aquí solo se avisa.
+                if agregar:
+                    _marcar(contrato, PENDIENTE, SIN_VINCULO)
+                return
         else:
             agregar, quitar = set(pendiente.get("agregar", [])), set(pendiente.get("quitar", []))
             if not agregar and not quitar:

@@ -14,6 +14,9 @@ backend no tiene credenciales propias para originabot). Uso:
     uv run python manage.py vincular_operadores_originabot --token "$TOKEN" --dry-run
     uv run python manage.py vincular_operadores_originabot --token "$TOKEN"
 
+Si va a CREAR operadores, los lista y pide confirmación antes de escribir nada
+(`--si` la salta, para correrlo sin terminal interactiva).
+
 El token también se puede pasar en ORIGINABOT_TOKEN, para que no quede en el
 historial de la shell.
 """
@@ -37,6 +40,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--token", help="Bearer de Unergy Auth. Por defecto, ORIGINABOT_TOKEN.")
         parser.add_argument("--dry-run", action="store_true", help="Hace todo y lo deshace al final.")
+        parser.add_argument("--si", action="store_true", help="No pedir confirmación para crear operadores.")
 
     def _catalogo(self, token: str) -> list[dict]:
         base = settings.ORIGINABOT_URL.rstrip("/")
@@ -62,6 +66,26 @@ class Command(BaseCommand):
 
         opciones = self._catalogo(token)
         self.stdout.write(f"originabot ({settings.ORIGINABOT_URL}): {len(opciones)} operadores.")
+
+        a_crear = []
+        for o in opciones:
+            try:
+                _, estado = operadores_originabot.que_pasaria(o.get("code", ""), o.get("name", ""))
+            except (ValueError, operadores_originabot.VinculoImposible):
+                continue
+            if estado == operadores_originabot.CREADO:
+                a_crear.append(f"{o['code']} ({o['name']})")
+        if a_crear and not opts["dry_run"] and not opts["si"]:
+            self.stdout.write(f"Esta acción creará {len(a_crear)} operadores de red en Operaciones:")
+            for linea in a_crear:
+                self.stdout.write(f"  + {linea}")
+            try:
+                respuesta = input("¿Desea continuar? [s/N] ")
+            except EOFError:
+                raise CommandError("Sin terminal para confirmar: vuelve a correrlo con --si.")
+            if respuesta.strip().lower() not in ("s", "si", "sí", "y", "yes"):
+                self.stdout.write(self.style.WARNING("Cancelado: no se escribió nada."))
+                return
 
         conteo = {operadores_originabot.EXISTENTE: 0, operadores_originabot.VINCULADO: 0, operadores_originabot.CREADO: 0}
         problemas = []

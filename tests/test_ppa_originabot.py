@@ -256,7 +256,7 @@ def test_ppa_sin_vinculo_se_crea_con_todas_sus_plantas(ob, plantas):
     from apps.ppa.services import originabot_sync
 
     contrato = _ppa([plantas["UNO"], plantas["TRES"]])
-    originabot_sync.sincronizar(contrato, "tok", off_taker_id=1)
+    originabot_sync.sincronizar(contrato, "tok", off_taker_id=1, crear=True)
 
     contrato.refresh_from_db()
     assert ob.creados == [{"id": 50, "name": "Terpel 1", "off_taker": 1, "minifarms": [1, 3]}]
@@ -268,13 +268,29 @@ def test_sin_off_taker_queda_pendiente_y_no_crea_nada(ob, plantas):
     from apps.ppa.services import originabot_sync
 
     contrato = _ppa([plantas["UNO"]])
-    originabot_sync.sincronizar(contrato, "tok")
+    originabot_sync.sincronizar(contrato, "tok", crear=True)
 
     contrato.refresh_from_db()
     assert ob.creados == []
     assert contrato.originabot_ppa_id is None
     assert contrato.originabot_sync_estado == "pendiente"
     assert contrato.originabot_sync_detalle == originabot_sync.SIN_OFFTAKER
+
+
+def test_nunca_crea_en_originabot_sin_confirmacion_explicita(ob, plantas):
+    """Asignar plantas a un PPA sin vínculo NO lo crea allá, aunque el off taker
+    se pudiera resolver: crear exige `crear=True`, que la ficha manda solo tras
+    el modal de confirmación."""
+    from apps.ppa.services import originabot_sync
+
+    contrato = _ppa([plantas["UNO"]])
+    originabot_sync.sincronizar(contrato, "tok", off_taker_id=1)
+
+    contrato.refresh_from_db()
+    assert ob.creados == []
+    assert contrato.originabot_ppa_id is None
+    assert contrato.originabot_sync_estado == "pendiente"
+    assert contrato.originabot_sync_detalle == originabot_sync.SIN_VINCULO
 
 
 def test_el_off_taker_sale_del_comprador_por_nombre_y_se_recuerda(ob, plantas):
@@ -285,7 +301,7 @@ def test_el_off_taker_sale_del_comprador_por_nombre_y_se_recuerda(ob, plantas):
     contrato = _ppa([plantas["UNO"]])
     contrato.comprador_id = terpel.id
     contrato.save()
-    originabot_sync.sincronizar(contrato, "tok")
+    originabot_sync.sincronizar(contrato, "tok", crear=True)
 
     assert ob.creados[0]["off_taker"] == 1
     terpel.refresh_from_db()
