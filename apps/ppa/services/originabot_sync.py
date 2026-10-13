@@ -4,28 +4,27 @@ Operaciones crea y configura el PPA; originabot tiene que saber qué minigranjas
 cubre. Cada vez que cambian las plantas de un PPA, el cambio se lleva a
 originabot:
 
-- **Solo el cambio, nunca la lista entera.** Se agregan las minigranjas de las
-  plantas que entraron y se quitan las de las que salieron; lo que originabot
-  tenga y Operaciones no conozca (una minigranja sin planta aquí) no se toca.
-  originabot solo acepta la lista completa (PATCH de `minifarms`), así que se lee
-  la actual, se le aplica el cambio y se escribe.
-- **El cambio se acumula en `originabot_pendiente` hasta que llegue.** Si no se
-  pudo llevar —la persona entró con el login propio y no hay token de Unergy, u
-  originabot falló—, el PPA queda `pendiente`/`error` y el próximo intento lleva
-  todo lo acumulado.
+- **Operaciones manda: la lista se REEMPLAZA.** Tras sincronizar, el PPA de
+  originabot tiene exactamente las minigranjas de las plantas del contrato; lo que
+  hubiera allá y aquí no esté, se quita. (PATCH de `minifarms`, que ya es la lista
+  entera.)
+- **Si no llega, queda pendiente.** Sin token de Unergy (login propio) u originabot
+  caído, el PPA queda `pendiente`/`error` (`originabot_pendiente` lo marca) y el
+  próximo intento vuelve a calcular la lista desde las plantas de ese momento.
 - **Crear un PPA en originabot nunca es automático**: solo con `crear=True`, que
   manda la ficha del PPA después de que la persona confirma («Esta acción creará
   el PPA en TSF…»). Un PPA sin vínculo al que se le asignan plantas queda
   `pendiente` hasta que alguien lo cree o lo vincule. Se crea con todas sus
   plantas y un `off_taker` (obligatorio allá): el elegido, o el del comprador
   (`Cliente.originabot_offtaker_id`, o por nombre). **O se vincula a mano** a uno
-  que ya existe allá: entonces solo se le AGREGAN las plantas actuales.
+  que ya existe allá: también se le REEMPLAZAN las minigranjas por las de aquí.
 - La minigranja de una planta es `Proyecto.originabot_minifarm_id`; si falta, se
   resuelve una vez y se guarda: la que se llame exactamente como su
   `origina_code` o, si no hay, la ÚNICA que encuentre su código TSF (originabot
   renombró las antiguas: `COLCORT7P1` es «Minigranja 0030 - Chimá Oriente», pero
   su búsqueda sigue indexando el código). Con más de una candidata no se adivina.
-  Una planta sin minigranja en originabot no se lleva y se avisa en el detalle.
+  Una planta sin minigranja en originabot no se lleva y se avisa en el detalle:
+  como la lista se reemplaza, esa planta no queda en el PPA de allá.
 
 Las llamadas van con el token de Unergy Auth de quien hizo el cambio
 (`apps/comun/integraciones/originabot.py`). Que falle NO deshace el cambio en
@@ -70,23 +69,11 @@ def plantas_de(contrato) -> set[int]:
 
 
 def registrar_cambio(contrato, antes: set[int], despues: set[int]) -> None:
-    """Acumula en `originabot_pendiente` lo que cambió. Una planta que entra y
-    sale antes de sincronizar se cancela: originabot nunca la vio."""
+    """Marca que las plantas cambiaron y originabot aún no se enteró. No hace
+    falta saber qué cambió: la sincronización reemplaza la lista entera."""
     if antes == despues:
         return
-    pendiente = contrato.originabot_pendiente or {}
-    por_agregar = set(pendiente.get("agregar", []))
-    por_quitar = set(pendiente.get("quitar", []))
-    entran, salen = despues - antes, antes - despues
-    # Lo que se iba a agregar y sale, o se iba a quitar y vuelve, se cancela: el
-    # estado de originabot para esa planta no cambió. Sin esto, una planta que
-    # entra y sale antes de sincronizar terminaría QUITANDO allá una minigranja
-    # que alguien sí tenía puesta.
-    agregar = (por_agregar - salen) | (entran - por_quitar)
-    quitar = (por_quitar - entran) | (salen - por_agregar)
-    contrato.originabot_pendiente = (
-        {"agregar": sorted(agregar), "quitar": sorted(quitar)} if agregar or quitar else None
-    )
+    contrato.originabot_pendiente = {"reemplazar": True}
     Contrato.objects.filter(pk=contrato.pk).update(originabot_pendiente=contrato.originabot_pendiente)
 
 
@@ -144,7 +131,6 @@ def sincronizar(
         return
 
     ob = ClienteOriginabot(token)
-    pendiente = contrato.originabot_pendiente or {}
     try:
         if vincular_a:
             ob.ppa(vincular_a)  # que exista; 404 → error legible
@@ -157,46 +143,34 @@ def sincronizar(
                 return
             Contrato.objects.filter(pk=contrato.pk).update(originabot_ppa_id=vincular_a)
             contrato.originabot_ppa_id = vincular_a
-            # Vincular a uno existente solo AGREGA: lo que ya tenga allá se respeta.
-            agregar, quitar = plantas_de(contrato), set()
-        elif contrato.originabot_ppa_id is None:
-            agregar, quitar = plantas_de(contrato), set()
-            if not crear:
-                # Crear allá exige una confirmación explícita: aquí solo se avisa.
-                if agregar:
-                    _marcar(contrato, PENDIENTE, SIN_VINCULO)
-                return
-        else:
-            agregar, quitar = set(pendiente.get("agregar", [])), set(pendiente.get("quitar", []))
-            if not agregar and not quitar:
-                _marcar(contrato, SINCRONIZADO, contrato.originabot_sync_detalle)
-                return
+        elif contrato.originabot_ppa_id is None and not crear:
+            # Crear allá exige una confirmación explícita: aquí solo se avisa.
+            if plantas_de(contrato):
+                _marcar(contrato, PENDIENTE, SIN_VINCULO)
+            return
 
-        proyectos = Proyecto.objects.in_bulk(agregar | quitar)
-        mf_agregar, mf_quitar, sin_minigranja = set(), set(), []
-        for pid in sorted(agregar | quitar):
-            proyecto = proyectos.get(pid)
-            minifarm = minigranjas.minigranja_de(proyecto, ob) if proyecto else None
+        # La lista que debe quedar allá: la minigranja de cada planta del contrato.
+        proyectos = Proyecto.objects.in_bulk(plantas_de(contrato))
+        objetivo, sin_minigranja = set(), []
+        for pid in sorted(proyectos):
+            minifarm = minigranjas.minigranja_de(proyectos[pid], ob)
             if minifarm is None:
-                sin_minigranja.append(proyecto.nombre_comercial if proyecto else f"#{pid}")
-            elif pid in agregar:
-                mf_agregar.add(minifarm)
+                sin_minigranja.append(proyectos[pid].nombre_comercial)
             else:
-                mf_quitar.add(minifarm)
+                objetivo.add(minifarm)
 
         if contrato.originabot_ppa_id is None:
             off_taker = _offtaker(contrato, ob, off_taker_id)
             if off_taker is None:
                 _marcar(contrato, PENDIENTE, SIN_OFFTAKER)
                 return
-            creado = ob.crear_ppa(_nombre(contrato), off_taker, sorted(mf_agregar))
+            creado = ob.crear_ppa(_nombre(contrato), off_taker, sorted(objetivo))
             Contrato.objects.filter(pk=contrato.pk).update(originabot_ppa_id=creado["id"])
             contrato.originabot_ppa_id = creado["id"]
         else:
             actual = set(ob.ppa(contrato.originabot_ppa_id).get("minifarms") or [])
-            nuevo = (actual - mf_quitar) | mf_agregar
-            if nuevo != actual:
-                ob.fijar_minifarms(contrato.originabot_ppa_id, sorted(nuevo))
+            if actual != objetivo:
+                ob.fijar_minifarms(contrato.originabot_ppa_id, sorted(objetivo))
     except OriginabotError as exc:
         _marcar(contrato, ERROR, str(exc))
         return

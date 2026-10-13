@@ -2,10 +2,10 @@
 
 Contra un originabot falso en memoria: lo que se prueba es la regla, no la red.
 
-- solo se lleva el CAMBIO: lo que originabot tenga y Operaciones no conozca no se toca;
-- sin token de Unergy el cambio se acumula y llega entero en el próximo intento;
+- Operaciones manda: la lista de minigranjas de allá se REEMPLAZA por la de aquí;
+- sin token de Unergy queda pendiente y el próximo intento reemplaza con lo de ese momento;
 - un PPA sin vínculo se crea allá con todas sus plantas, si hay off taker;
-- vincular a mano a uno existente solo AGREGA;
+- vincular a mano a uno existente también reemplaza;
 - una planta sin minigranja no se lleva y se avisa.
 """
 import pytest
@@ -153,15 +153,16 @@ def _cambiar(contrato, nuevas):
     originabot_sync.registrar_cambio(contrato, antes, originabot_sync.plantas_de(contrato))
 
 
-def test_lleva_solo_el_cambio_y_respeta_lo_que_solo_esta_alla(ob, plantas):
+def test_reemplaza_la_lista_entera_de_originabot(ob, plantas):
+    """Operaciones manda: lo que hubiera allá y aquí no esté (99, o la planta que
+    salió) se quita."""
     from apps.ppa.services import originabot_sync
 
     contrato = _ppa([plantas["UNO"]], originabot_ppa_id=10)
-    _cambiar(contrato, [plantas["DOS"]])  # sale UNO (1), entra DOS (2)
+    _cambiar(contrato, [plantas["DOS"]])
     originabot_sync.sincronizar(contrato, "tok")
 
-    # 99 es una minigranja que Operaciones no conoce: sigue allá.
-    assert ob.ppas[10]["minifarms"] == [2, 99]
+    assert ob.ppas[10]["minifarms"] == [2]
     contrato.refresh_from_db()
     assert contrato.originabot_sync_estado == "sincronizado"
     assert contrato.originabot_pendiente is None
@@ -170,7 +171,7 @@ def test_lleva_solo_el_cambio_y_respeta_lo_que_solo_esta_alla(ob, plantas):
     assert plantas["DOS"].originabot_minifarm_id == 2
 
 
-def test_sin_token_se_acumula_y_llega_entero_despues(ob, plantas):
+def test_sin_token_queda_pendiente_y_despues_reemplaza_con_lo_de_ese_momento(ob, plantas):
     from apps.ppa.services import originabot_sync
 
     contrato = _ppa([plantas["UNO"]], originabot_ppa_id=10)
@@ -181,75 +182,46 @@ def test_sin_token_se_acumula_y_llega_entero_despues(ob, plantas):
 
     contrato.refresh_from_db()
     assert contrato.originabot_sync_estado == "pendiente"
-    assert contrato.originabot_pendiente == {
-        "agregar": sorted([plantas["DOS"].id, plantas["TRES"].id]),
-        "quitar": [plantas["UNO"].id],
-    }
+    assert contrato.originabot_pendiente == {"reemplazar": True}
     assert ob.parches == []
 
     originabot_sync.sincronizar(contrato, "tok")
-    assert ob.ppas[10]["minifarms"] == [2, 3, 99]
+    assert ob.ppas[10]["minifarms"] == [2, 3]
 
 
-def test_una_planta_que_entra_y_sale_antes_de_sincronizar_no_viaja(ob, plantas):
+def test_si_ya_coincide_no_escribe_en_originabot(ob, plantas):
     from apps.ppa.services import originabot_sync
 
-    contrato = _ppa([], originabot_ppa_id=10)
-    _cambiar(contrato, [plantas["DOS"]])
-    _cambiar(contrato, [])
-    contrato.refresh_from_db()
-    assert contrato.originabot_pendiente is None
-    originabot_sync.sincronizar(contrato, "tok")
-    assert ob.parches == []
-
-
-def test_una_planta_que_sale_y_vuelve_antes_de_sincronizar_no_viaja(ob, plantas):
-    from apps.ppa.services import originabot_sync
-
+    ob.ppas[10]["minifarms"] = [1]
     contrato = _ppa([plantas["UNO"]], originabot_ppa_id=10)
-    _cambiar(contrato, [])
-    _cambiar(contrato, [plantas["UNO"]])
-    contrato.refresh_from_db()
-    assert contrato.originabot_pendiente is None
     originabot_sync.sincronizar(contrato, "tok")
-    assert ob.ppas[10]["minifarms"] == [1, 99]
+    assert ob.parches == []
 
 
 def test_minigranja_renombrada_se_encuentra_por_su_codigo_unico(ob, plantas):
     from apps.ppa.services import originabot_sync
 
-    contrato = _ppa([], originabot_ppa_id=10)
-    _cambiar(contrato, [plantas["TRES"]])
+    contrato = _ppa([plantas["TRES"]], originabot_ppa_id=10)
     originabot_sync.sincronizar(contrato, "tok")
 
     plantas["TRES"].refresh_from_db()
     assert plantas["TRES"].originabot_minifarm_id == 3
-    assert ob.ppas[10]["minifarms"] == [1, 3, 99]
+    assert ob.ppas[10]["minifarms"] == [3]
 
 
-def test_codigo_con_varias_minigranjas_no_se_adivina(ob, plantas):
+def test_planta_sin_minigranja_no_queda_alla_y_se_avisa(ob, plantas):
+    """Con reemplazo, una planta sin minigranja única en originabot (código
+    ambiguo, o sin código) no queda en el PPA de allá: el detalle lo dice."""
     from apps.ppa.services import originabot_sync
 
-    contrato = _ppa([], originabot_ppa_id=10)
-    _cambiar(contrato, [plantas["CINCO"]])  # COLX5P1 → dos candidatas
+    contrato = _ppa([plantas["TRES"], plantas["SINTSF"], plantas["CINCO"]], originabot_ppa_id=10)
     originabot_sync.sincronizar(contrato, "tok")
 
     contrato.refresh_from_db()
-    assert ob.parches == []
-    assert "Cinco" in contrato.originabot_sync_detalle
-
-
-def test_planta_sin_minigranja_no_se_lleva_y_se_avisa(ob, plantas):
-    from apps.ppa.services import originabot_sync
-
-    contrato = _ppa([], originabot_ppa_id=10)
-    _cambiar(contrato, [plantas["TRES"], plantas["SINTSF"]])
-    originabot_sync.sincronizar(contrato, "tok")
-
-    contrato.refresh_from_db()
-    assert ob.ppas[10]["minifarms"] == [1, 3, 99]
+    assert ob.ppas[10]["minifarms"] == [3]
     assert contrato.originabot_sync_estado == "sincronizado"
     assert "Planta propia" in contrato.originabot_sync_detalle
+    assert "Cinco" in contrato.originabot_sync_detalle
 
 
 def test_ppa_sin_vinculo_se_crea_con_todas_sus_plantas(ob, plantas):
@@ -308,7 +280,7 @@ def test_el_off_taker_sale_del_comprador_por_nombre_y_se_recuerda(ob, plantas):
     assert terpel.originabot_offtaker_id == 1
 
 
-def test_vincular_a_uno_existente_solo_agrega(ob, plantas):
+def test_vincular_a_uno_existente_reemplaza_sus_minigranjas(ob, plantas):
     from apps.ppa.services import originabot_sync
 
     contrato = _ppa([plantas["TRES"]])
@@ -316,7 +288,7 @@ def test_vincular_a_uno_existente_solo_agrega(ob, plantas):
 
     contrato.refresh_from_db()
     assert contrato.originabot_ppa_id == 10
-    assert ob.ppas[10]["minifarms"] == [1, 3, 99]
+    assert ob.ppas[10]["minifarms"] == [3]
 
 
 def test_no_se_vinculan_dos_contratos_al_mismo_ppa(ob, plantas):
@@ -343,7 +315,7 @@ def test_si_originabot_falla_queda_error_y_el_cambio_espera(ob, plantas):
     contrato.refresh_from_db()
     assert contrato.originabot_sync_estado == "error"
     assert contrato.originabot_sync_detalle == "originabot no respondió."
-    assert contrato.originabot_pendiente == {"agregar": [plantas["DOS"].id], "quitar": []}
+    assert contrato.originabot_pendiente == {"reemplazar": True}
 
 
 # ── API ───────────────────────────────────────────────────────────────────────

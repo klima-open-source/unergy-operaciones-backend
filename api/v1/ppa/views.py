@@ -252,7 +252,7 @@ class PpaViewSet(
         """Lleva a originabot lo pendiente del PPA.
 
         Cuerpo opcional: `originabot_ppa_id` lo vincula a uno que ya existe allá
-        (solo le AGREGA las plantas actuales); `crear: true` lo crea allá, con
+        (y le REEMPLAZA las minigranjas por las de aquí); `crear: true` lo crea allá, con
         `off_taker_id` o el de su comprador. Vacío = reintentar. Crear y vincular
         escriben en originabot: la ficha los manda solo después de confirmar.
         """
