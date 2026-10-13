@@ -178,10 +178,48 @@ class ProyectoInversor(Timer):
         unique_together = [("nombre", "proyecto")]
 
 
+class Inversionista(Timer):
+    """Un cliente en su papel de inversionista: una fila por cliente.
+
+    `clientes` es la ficha de cualquier tercero (comprador, arrendador, operador
+    de red…); no todo cliente es inversionista. Esta tabla dice cuáles sí, y es a
+    la que apunta su participación en cada planta (`proyecto_inversionistas`).
+    El nombre y el NIT se leen de la ficha del cliente: aquí no se copian.
+
+    `nombre_corto` es como aparece en los nombres de archivo de los mandatos
+    ("Suno", "Jemma"): con él la carga del ZIP reconoce al inversionista. Reemplaza
+    a la lista suelta `mandato_inversionistas`, que se borra en el paso siguiente.
+
+    Diagrama de Sara (2026-10-13). Hoy la escribe solo `ProyectoInversionista.save()`
+    al registrar una participación; `poblar_inversionistas` crea las de las
+    participaciones que ya existían."""
+
+    id = models.BigAutoField(primary_key=True)
+    cliente = models.OneToOneField(
+        "clientes.Cliente", on_delete=models.PROTECT, db_column="cliente_id",
+        related_name="inversionista",
+    )
+    nombre_corto = models.CharField(max_length=120, null=True, blank=True, unique=True)
+
+    class Meta:
+        db_table = "inversionistas"
+
+
 class ProyectoInversionista(Timer):
+    """La participación de un inversionista en una planta, con su porcentaje.
+
+    `inversionista` es el vínculo del diagrama. `cliente` es el de siempre y sigue
+    siendo el que leen los ~15 sitios que preguntan "de quién es esta planta";
+    mientras convivan, `save()` deriva el inversionista del cliente para que no
+    puedan discrepar. Quitar `cliente_id` es un paso posterior."""
+
     id = models.BigAutoField(primary_key=True)
     proyecto = models.ForeignKey("Proyecto", on_delete=models.DO_NOTHING, db_column="proyecto_id", related_name="inversionistas")
     cliente = models.ForeignKey("clientes.Cliente", on_delete=models.DO_NOTHING, db_column="cliente_id", related_name="proyecto_inversionistas_por_cliente_id")
+    inversionista = models.ForeignKey(
+        "Inversionista", on_delete=models.PROTECT, db_column="inversionista_id",
+        null=True, blank=True, related_name="participaciones",
+    )
     porcentaje_participacion = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     es_patrimonio_autonomo = models.BooleanField(default=False)
     fecha_inicio = models.DateField(null=True, blank=True)
@@ -189,6 +227,15 @@ class ProyectoInversionista(Timer):
 
     class Meta:
         db_table = "proyecto_inversionistas"
+
+    def save(self, *args, **kwargs):
+        if self.cliente_id and (
+            self.inversionista_id is None or self.inversionista.cliente_id != self.cliente_id
+        ):
+            self.inversionista, _ = Inversionista.objects.get_or_create(cliente_id=self.cliente_id)
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = {*kwargs["update_fields"], "inversionista"}
+        super().save(*args, **kwargs)
 
 
 class ProyectoPendienteIgnorado(models.Model):

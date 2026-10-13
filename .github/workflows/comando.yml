@@ -37,6 +37,8 @@ on:
           - "revisar_decimales_redondeados (solo lee)"
           - "revisar_coordenadas (solo lee)"
           - "exportar_partes_sin_cliente (solo lee)"
+          - "poblar_inversionistas (solo lee)"
+          - "poblar_inversionistas --aplicar"
           - "DESHACER paso 2 (corte de contratos)"
           - "DESHACER paso 0 (diagnostico)"
       confirmar:
@@ -92,6 +94,8 @@ jobs:
             "revisar_decimales_redondeados (solo lee)")  manage revisar_decimales_redondeados ;;
             "revisar_coordenadas (solo lee)")            manage revisar_coordenadas ;;
             "exportar_partes_sin_cliente (solo lee)")    manage exportar_partes_sin_cliente ;;
+            "poblar_inversionistas (solo lee)")          manage poblar_inversionistas ;;
+            "poblar_inversionistas --aplicar")           manage poblar_inversionistas --aplicar ;;
             "DESHACER paso 2 (corte de contratos)")
               confirmado
               manage migrate contratos 0008

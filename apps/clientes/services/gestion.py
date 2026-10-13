@@ -59,6 +59,11 @@ MERGE_COMPUESTO = [
     # nulo): si las dos fichas tienen tasa para lo mismo, gana la del ganador.
     ("cliente_tasa_servicio", ["proyecto_id", "servicio"]),
 ]
+# `inversionistas` tiene UNA fila por cliente y las participaciones apuntan a ella,
+# así que no cabe en `MERGE_COMPUESTO`: si las dos fichas son inversionistas, las
+# participaciones del perdedor pasan a la fila del ganador y la del perdedor se
+# borra; si solo lo es el perdedor, su fila pasa al ganador. Ver `_fusionar_inversionista`.
+MERGE_ROL_UNICO = [("inversionistas", "cliente_id")]
 # `nit_cedula` es UNIQUE en la base: hay que liberarlo en el perdedor antes de
 # copiarlo al ganador (mismo tratamiento que `sunfactory_project_id` en proyectos).
 MERGE_ESCALAR_UNICO = ["nit_cedula"]
@@ -135,6 +140,29 @@ def _escalar(cur, sql: str, params: dict) -> int:
     return fila[0] if fila else 0
 
 
+def _fusionar_inversionista(cur, p: dict) -> None:
+    cur.execute("SELECT id, nombre_corto FROM inversionistas WHERE cliente_id = %(loser)s", p)
+    del_perdedor = cur.fetchone()
+    if not del_perdedor:
+        return
+    cur.execute("SELECT id FROM inversionistas WHERE cliente_id = %(keeper)s", p)
+    del_ganador = cur.fetchone()
+    if not del_ganador:
+        cur.execute("UPDATE inversionistas SET cliente_id = %(keeper)s WHERE cliente_id = %(loser)s", p)
+        return
+    q = {"perdedor": del_perdedor[0], "ganador": del_ganador[0], "nombre_corto": del_perdedor[1]}
+    cur.execute(
+        "UPDATE proyecto_inversionistas SET inversionista_id = %(ganador)s "
+        "WHERE inversionista_id = %(perdedor)s", q,
+    )
+    # Se borra antes de pasar su nombre corto al ganador: el nombre es único.
+    cur.execute("DELETE FROM inversionistas WHERE id = %(perdedor)s", q)
+    cur.execute(
+        "UPDATE inversionistas SET nombre_corto = %(nombre_corto)s "
+        "WHERE id = %(ganador)s AND nombre_corto IS NULL", q,
+    )
+
+
 def reporte_merge(ganador: Cliente, perdedor: Cliente) -> tuple[list[dict], list[dict]]:
     """Qué filas se moverían y qué campos escalares se copiarían. No modifica nada."""
     p = {"keeper": ganador.id, "loser": perdedor.id}
@@ -160,6 +188,10 @@ def reporte_merge(ganador: Cliente, perdedor: Cliente) -> tuple[list[dict], list
             movimientos.append({
                 "tabla": t, "a_mover": n - coli, "descartadas_por_colision": coli,
             })
+
+        n = _escalar(cur, "SELECT count(*) FROM inversionistas WHERE cliente_id = %(loser)s", p)
+        if n:
+            movimientos.append({"tabla": "inversionistas", "a_mover": n, "descartadas_por_colision": 0})
 
         # contratos: las partes de PPA (comprador/vendedor) y de servicio
         # (contratante/prestador/inversionista), todas en la tabla única desde el
@@ -207,6 +239,10 @@ def ejecutar_merge(ganador: Cliente, perdedor: Cliente, movimientos: list[dict],
                 cur.execute(
                     f"UPDATE contratos SET {campo} = %(keeper)s WHERE {campo} = %(loser)s", p
                 )
+
+            # 1 bis) El inversionista, antes que sus participaciones (paso 2): las
+            #        del perdedor se repuntan al del ganador si ya lo era.
+            _fusionar_inversionista(cur, p)
 
             # 2) Colisión por clave compuesta: se descarta la del perdedor.
             for t, claves in MERGE_COMPUESTO:
