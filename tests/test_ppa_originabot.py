@@ -379,3 +379,23 @@ def test_opciones_sin_unergy_auth_es_403(admin_local):
 
     r = Client().get("/api/v1/ppa/originabot/opciones", **admin_local)
     assert r.status_code == 403
+
+
+def test_comando_vincular_minigranjas_dry_run_no_escribe(monkeypatch, plantas):
+    """`vincular_minigranjas_originabot` llena la llave de las plantas con código;
+    `--dry-run` solo informa."""
+    from django.core.management import call_command
+
+    from apps.proyectos.management.commands import vincular_minigranjas_originabot as cmd
+
+    falso = OriginabotFalso()
+    monkeypatch.setattr(cmd, "ClienteOriginabot", lambda token: falso)
+
+    call_command("vincular_minigranjas_originabot", "--token", "tok", "--dry-run")
+    plantas["UNO"].refresh_from_db()
+    assert plantas["UNO"].originabot_minifarm_id is None
+
+    call_command("vincular_minigranjas_originabot", "--token", "tok")
+    for clave, esperado in (("UNO", 1), ("DOS", 2), ("TRES", 3), ("CINCO", None), ("SINTSF", None)):
+        plantas[clave].refresh_from_db()
+        assert plantas[clave].originabot_minifarm_id == esperado, clave

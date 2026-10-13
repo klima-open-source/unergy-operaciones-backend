@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import logging
 
-from django.db import IntegrityError
 from django.utils import timezone
 
 from apps.clientes.models import Cliente
@@ -43,7 +42,7 @@ from apps.comun.integraciones.originabot import ClienteOriginabot, OriginabotErr
 from apps.comun.nombre_matching import normalizar
 from apps.contratos.models import Contrato, ContratoProyecto
 from apps.proyectos.models import Proyecto
-from apps.proyectos.services.tsf_sync import _tsf_code_from_base_name
+from apps.proyectos.services import originabot_minigranjas as minigranjas
 
 logger = logging.getLogger(__name__)
 
@@ -101,31 +100,6 @@ def _marcar(contrato, estado: str, detalle: str | None, **extra) -> None:
     for campo, valor in valores.items():
         setattr(contrato, campo, valor)
     Contrato.objects.filter(pk=contrato.pk).update(**valores)
-
-
-def _minifarm_de(proyecto: Proyecto, ob: ClienteOriginabot) -> int | None:
-    if proyecto.originabot_minifarm_id:
-        return proyecto.originabot_minifarm_id
-    minifarm = None
-    if proyecto.origina_code:
-        exactas = [m for m in ob.buscar_minifarms(proyecto.origina_code) if m.get("name") == proyecto.origina_code]
-        if len(exactas) == 1:
-            minifarm = exactas[0]["id"]
-    if minifarm is None:
-        codigo = proyecto.codigo_tsf or _tsf_code_from_base_name(proyecto.origina_code)
-        candidatas = ob.buscar_minifarms(codigo) if codigo else []
-        if len(candidatas) == 1:
-            minifarm = candidatas[0]["id"]
-    if minifarm is None:
-        return None
-    try:
-        Proyecto.objects.filter(pk=proyecto.pk).update(originabot_minifarm_id=minifarm)
-    except IntegrityError:
-        # Otra planta viva ya tiene esa minigranja: es un duplicado que una persona
-        # tiene que resolver; aquí no se adivina cuál es la buena.
-        logger.warning("Minigranja %s ya asignada a otra planta (proyecto %s)", minifarm, proyecto.pk)
-        return None
-    return minifarm
 
 
 def _offtaker(contrato, ob: ClienteOriginabot, elegido: int | None) -> int | None:
@@ -202,7 +176,7 @@ def sincronizar(
         mf_agregar, mf_quitar, sin_minigranja = set(), set(), []
         for pid in sorted(agregar | quitar):
             proyecto = proyectos.get(pid)
-            minifarm = _minifarm_de(proyecto, ob) if proyecto else None
+            minifarm = minigranjas.minigranja_de(proyecto, ob) if proyecto else None
             if minifarm is None:
                 sin_minigranja.append(proyecto.nombre_comercial if proyecto else f"#{pid}")
             elif pid in agregar:
