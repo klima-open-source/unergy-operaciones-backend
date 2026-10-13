@@ -186,10 +186,6 @@ class Inversionista(Timer):
     la que apunta su participación en cada planta (`proyecto_inversionistas`).
     El nombre y el NIT se leen de la ficha del cliente: aquí no se copian.
 
-    `nombre_corto` es como aparece en los nombres de archivo de los mandatos
-    ("Suno", "Jemma"): con él la carga del ZIP reconoce al inversionista. Reemplaza
-    a la lista suelta `mandato_inversionistas`, que se borra en el paso siguiente.
-
     Diagrama de Sara (2026-10-13). Hoy la escribe solo `ProyectoInversionista.save()`
     al registrar una participación; `poblar_inversionistas` crea las de las
     participaciones que ya existían."""
@@ -199,7 +195,6 @@ class Inversionista(Timer):
         "clientes.Cliente", on_delete=models.PROTECT, db_column="cliente_id",
         related_name="inversionista",
     )
-    nombre_corto = models.CharField(max_length=120, null=True, blank=True, unique=True)
 
     class Meta:
         db_table = "inversionistas"

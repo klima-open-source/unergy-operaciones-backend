@@ -141,7 +141,7 @@ def _escalar(cur, sql: str, params: dict) -> int:
 
 
 def _fusionar_inversionista(cur, p: dict) -> None:
-    cur.execute("SELECT id, nombre_corto FROM inversionistas WHERE cliente_id = %(loser)s", p)
+    cur.execute("SELECT id FROM inversionistas WHERE cliente_id = %(loser)s", p)
     del_perdedor = cur.fetchone()
     if not del_perdedor:
         return
@@ -150,17 +150,12 @@ def _fusionar_inversionista(cur, p: dict) -> None:
     if not del_ganador:
         cur.execute("UPDATE inversionistas SET cliente_id = %(keeper)s WHERE cliente_id = %(loser)s", p)
         return
-    q = {"perdedor": del_perdedor[0], "ganador": del_ganador[0], "nombre_corto": del_perdedor[1]}
+    q = {"perdedor": del_perdedor[0], "ganador": del_ganador[0]}
     cur.execute(
         "UPDATE proyecto_inversionistas SET inversionista_id = %(ganador)s "
         "WHERE inversionista_id = %(perdedor)s", q,
     )
-    # Se borra antes de pasar su nombre corto al ganador: el nombre es único.
     cur.execute("DELETE FROM inversionistas WHERE id = %(perdedor)s", q)
-    cur.execute(
-        "UPDATE inversionistas SET nombre_corto = %(nombre_corto)s "
-        "WHERE id = %(ganador)s AND nombre_corto IS NULL", q,
-    )
 
 
 def reporte_merge(ganador: Cliente, perdedor: Cliente) -> tuple[list[dict], list[dict]]:

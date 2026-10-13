@@ -182,11 +182,9 @@ def test_si_los_dos_son_inversionistas_queda_el_del_ganador(datos):
 
     del_ganador = _participacion(datos["ganador"], "Planta A")
     del_perdedor = _participacion(datos["perdedor"], "Planta B")
-    Inversionista.objects.filter(cliente=datos["perdedor"]).update(nombre_corto="Bia")
     _fusionar(datos["ganador"], datos["perdedor"])
 
     del_perdedor.refresh_from_db()
     assert del_perdedor.cliente_id == datos["ganador"].id
     assert del_perdedor.inversionista_id == del_ganador.inversionista_id
     assert not Inversionista.objects.filter(cliente=datos["perdedor"]).exists()
-    assert Inversionista.objects.get(cliente=datos["ganador"]).nombre_corto == "Bia"
