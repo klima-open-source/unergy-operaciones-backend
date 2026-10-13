@@ -80,7 +80,7 @@ def cliente():
 
 @pytest.fixture
 def con_unergy_auth(settings_override):
-    return settings_override(GRPC_HOST="auth.test", GRPC_PORT="50051")
+    return settings_override(GRPC_HOST="auth.test", GRPC_PORT="50051", UNERGY_AUTH_HTTP_URL="")
 
 
 @pytest.fixture
@@ -125,7 +125,7 @@ def _identidad(email, grupos=("ops",)):
 
 
 def test_apagada_token_ajeno_es_401_sin_llamar_a_grpc(cliente, grpc_falso, settings_override):
-    settings_override(GRPC_HOST="")
+    settings_override(GRPC_HOST="", UNERGY_AUTH_HTTP_URL="")
     r = cliente.get(ME, HTTP_AUTHORIZATION="Bearer token-de-unergy")
     assert r.status_code == 401
     assert grpc_falso["llamadas"] == []
@@ -281,3 +281,87 @@ def test_cliente_grpc_sin_servidor_es_no_disponible(settings_override):
     settings_override(GRPC_HOST="127.0.0.1", GRPC_PORT="9", GRPC_TIMEOUT=0.5)
     with pytest.raises(unergy_auth.ServicioNoDisponible):
         unergy_auth.validar_token("cualquiera")
+
+
+# ── Validación por HTTP (solo desarrollo, sin acceso a la red del gRPC) ──────
+
+class _RespuestaHttp:
+    def __init__(self, status_code, datos=None):
+        self.status_code = status_code
+        self._datos = datos or {}
+
+    def json(self):
+        return self._datos
+
+
+@pytest.fixture
+def http_falso(monkeypatch, settings_override):
+    from apps.comun.integraciones.unergy_auth import cliente as unergy_auth
+
+    settings_override(GRPC_HOST="", UNERGY_AUTH_HTTP_URL="https://devauth.test/", GRPC_TIMEOUT=5)
+    estado = {"respuesta": None, "llamadas": []}
+
+    def get(url, headers, timeout):
+        estado["llamadas"].append((url, headers["Authorization"]))
+        if isinstance(estado["respuesta"], Exception):
+            raise estado["respuesta"]
+        return estado["respuesta"]
+
+    monkeypatch.setattr(unergy_auth.httpx, "get", get)
+    return estado
+
+
+def test_http_lee_usuario_de_dj_rest_auth(http_falso):
+    from apps.comun.integraciones.unergy_auth import cliente as unergy_auth
+
+    http_falso["respuesta"] = _RespuestaHttp(200, {
+        "pk": 9, "username": "ana", "email": "ana@unergy.io",
+        "first_name": "Ana", "last_name": "Pérez",
+        "groups": [{"id": 1, "name": "operation_staff"}, "otro"],
+    })
+    identidad = unergy_auth.validar_token("tok")
+
+    assert http_falso["llamadas"] == [("https://devauth.test/auth/user/", "Bearer tok")]
+    assert identidad.email == "ana@unergy.io"
+    assert identidad.nombre == "Ana Pérez"
+    assert identidad.grupos == ("operation_staff", "otro")
+
+
+def test_http_token_rechazado(http_falso):
+    from apps.comun.integraciones.unergy_auth import cliente as unergy_auth
+
+    http_falso["respuesta"] = _RespuestaHttp(401)
+    with pytest.raises(unergy_auth.TokenInvalido):
+        unergy_auth.validar_token("tok")
+
+
+def test_http_caido_es_no_disponible(http_falso):
+    import httpx
+
+    from apps.comun.integraciones.unergy_auth import cliente as unergy_auth
+
+    http_falso["respuesta"] = httpx.ConnectError("sin red")
+    with pytest.raises(unergy_auth.ServicioNoDisponible):
+        unergy_auth.validar_token("tok")
+    http_falso["respuesta"] = _RespuestaHttp(502)
+    with pytest.raises(unergy_auth.ServicioNoDisponible):
+        unergy_auth.validar_token("tok")
+
+
+def test_http_no_se_acepta_fuera_de_development():
+    """Validar por HTTP se aparta del lineamiento (gRPC): fuera de development
+    el arranque tiene que fallar, no aceptarlo en silencio."""
+    import os
+    import subprocess
+    import sys
+
+    entorno = {
+        **os.environ, "ENVIRONMENT": "production", "SECRET_KEY": "x" * 40,
+        "UNERGY_AUTH_HTTP_URL": "https://devauth.test", "DJANGO_SETTINGS_MODULE": "config.settings",
+    }
+    r = subprocess.run(
+        [sys.executable, "-c", "import django; django.setup()"],
+        env=entorno, capture_output=True, text=True,
+    )
+    assert r.returncode != 0
+    assert "UNERGY_AUTH_HTTP_URL es solo para desarrollo" in r.stderr

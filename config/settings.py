@@ -201,6 +201,17 @@ GRPC_HOST = os.getenv("GRPC_HOST", "")
 GRPC_PORT = os.getenv("GRPC_PORT", "50051")
 GRPC_TIMEOUT = float(os.getenv("GRPC_TIMEOUT", "5"))
 
+# SOLO DESARROLLO: validar el token por HTTP (`GET <url>/auth/user/`) en vez de
+# gRPC. Existe porque el gRPC de Unergy Auth no se alcanza desde fuera de su red
+# (devauth.uner.gy solo publica HTTP). El lineamiento del equipo es gRPC, así que
+# fuera de development el arranque falla en vez de aceptarlo en silencio.
+UNERGY_AUTH_HTTP_URL = os.getenv("UNERGY_AUTH_HTTP_URL", "")
+if UNERGY_AUTH_HTTP_URL and ENTORNO != "development":
+    raise RuntimeError(
+        "UNERGY_AUTH_HTTP_URL es solo para desarrollo local. En "
+        f"ENVIRONMENT={ENTORNO} Unergy Auth se valida por gRPC (GRPC_HOST)."
+    )
+
 REST_FRAMEWORK = {
     # El ORDEN importa: la API key se mira antes que el Bearer, igual que en
     # FastAPI, y el JWT propio antes que el de Unergy Auth para no pagar una
