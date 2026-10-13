@@ -45,6 +45,11 @@ class ArrArrendador(Timer):
     anticipo_pagado_desde = models.DateField(null=True, blank=True)
     anticipo_pagado_hasta = models.DateField(null=True, blank=True)
     observaciones = models.CharField(max_length=1000, null=True, blank=True)
+    # Unión con TSF (originabot): el `LandLord` de allá y su % del pago del
+    # arriendo (`LandLordTerrain.payment_percentage`). Lo escribe «Sincronizar
+    # con TSF»; 0 % = propietario que firma pero no recibe pago.
+    originabot_landlord_id = models.IntegerField(null=True, blank=True)
+    porcentaje_pago = models.DecimalField(max_digits=7, decimal_places=4, null=True, blank=True)
 
     class Meta:
         db_table = "arr_arrendador"

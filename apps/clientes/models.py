@@ -37,6 +37,9 @@ class Cliente(Timer):
     # «importar desde TSF» para que el inversionista de una minigranja se mapee
     # por llave. Ver apps/clientes/services/inversionistas_originabot.py.
     originabot_investment_id = models.IntegerField(null=True, blank=True)
+    # El `LandLord` (propietario/arrendador) de TSF que es este cliente. Ver
+    # apps/clientes/services/arrendadores_originabot.py.
+    originabot_landlord_id = models.IntegerField(null=True, blank=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
@@ -48,6 +51,11 @@ class Cliente(Timer):
                 fields=["originabot_investment_id"],
                 condition=models.Q(originabot_investment_id__isnull=False, deleted_at__isnull=True),
                 name="uq_clientes_originabot_investment_vivo",
+            ),
+            models.UniqueConstraint(
+                fields=["originabot_landlord_id"],
+                condition=models.Q(originabot_landlord_id__isnull=False, deleted_at__isnull=True),
+                name="uq_clientes_originabot_landlord_vivo",
             ),
         ]
 

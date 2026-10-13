@@ -24,7 +24,7 @@ from api.logging import class_logger_wrapper
 from api.pagination import PaginacionConPaginas
 from api.permissions import RolePermission
 from apps.clientes import models as cl_models
-from apps.clientes.services import gestion, inversionistas_originabot, vistas
+from apps.clientes.services import arrendadores_originabot, gestion, inversionistas_originabot, vistas
 from apps.clientes.services.panel import proyectos_por_cliente
 from apps.contratos.models import ContratoServicio
 from apps.contratos.services.contrato_partes import ROLES_PPA, ROLES_SERVICIO, contratos_de
@@ -64,6 +64,7 @@ class ClienteViewSet(viewsets.GenericViewSet):
     GET /api/v1/clientes/{id}/servicios-contratos · /panel
     POST /api/v1/clientes/{ganador_id}/merge/{perdedor_id}
     POST /api/v1/clientes/originabot[?simular=true]  cliente de un inversionista de TSF
+    POST /api/v1/clientes/originabot-arrendador[?simular=true]  cliente de un propietario de TSF
 
     **Un cliente nunca se borra físico**: `deleted_at`. Y no se puede borrar si es
     inversionista de un proyecto o tiene oportunidades comerciales.
@@ -236,6 +237,29 @@ class ClienteViewSet(viewsets.GenericViewSet):
             "estado": estado,
             "id": cliente.id if cliente else None,
             "razon_social_nombre": cliente.razon_social_nombre if cliente else nombre,
+        })
+
+    @action(detail=False, methods=["post"], url_path="originabot-arrendador")
+    def vincular_arrendador_originabot(self, request):
+        """El cliente de Operaciones para un propietario (`LandLord`) de originabot.
+
+        Cuerpo `{landlord_id, nombre, documento?, tipo_persona?}`. Lo vincula por
+        documento o nombre, o lo crea; con `?simular=true` solo dice qué haría,
+        para que «Sincronizar con TSF» pida confirmación antes de CREAR.
+        """
+        datos = cl_serializers.VincularArrendadorOriginabotSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
+        d = datos.validated_data
+        if request.query_params.get("simular", "").lower() in ("true", "1"):
+            cliente, estado = arrendadores_originabot.que_pasaria(d["landlord_id"], d["nombre"], d.get("documento"))
+        else:
+            cliente, estado = arrendadores_originabot.vincular(
+                d["landlord_id"], d["nombre"], d.get("documento"), d.get("tipo_persona"),
+            )
+        return Response({
+            "estado": estado,
+            "id": cliente.id if cliente else None,
+            "razon_social_nombre": cliente.razon_social_nombre if cliente else d["nombre"],
         })
 
     # ── Vistas agregadas ──────────────────────────────────────────────────

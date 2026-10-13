@@ -299,3 +299,10 @@ class ClienteDocumentoSerializer(serializers.ModelSerializer):
 class VincularInversionistaOriginabotSerializer(serializers.Serializer):
     investment_id = serializers.IntegerField(min_value=1)
     nombre = serializers.CharField(max_length=255)
+
+
+class VincularArrendadorOriginabotSerializer(serializers.Serializer):
+    landlord_id = serializers.IntegerField(min_value=1)
+    nombre = serializers.CharField(max_length=255)
+    documento = serializers.CharField(max_length=40, required=False, allow_blank=True, allow_null=True)
+    tipo_persona = serializers.ChoiceField(choices=["natural", "juridica"], required=False, allow_null=True)

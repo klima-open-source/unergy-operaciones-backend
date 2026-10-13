@@ -31,6 +31,7 @@ class ArrendadorSerializer(serializers.ModelSerializer):
             "id", "contrato_id", "cliente_id", "nombre", "valor_base",
             "responsable_iva", "activo", "anticipo_pagado_desde",
             "anticipo_pagado_hasta", "observaciones",
+            "originabot_landlord_id", "porcentaje_pago",
         ]
 
 
@@ -50,6 +51,7 @@ class ArrendadorEscrituraSerializer(serializers.ModelSerializer):
         fields = [
             "nombre", "cliente_id", "valor_base", "responsable_iva", "activo",
             "anticipo_pagado_desde", "anticipo_pagado_hasta", "observaciones",
+            "originabot_landlord_id", "porcentaje_pago",
         ]
 
 

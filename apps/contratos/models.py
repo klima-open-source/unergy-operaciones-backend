@@ -292,6 +292,9 @@ class Contrato(Timer):
     # Lo que falta llevar a originabot si la última sincronización no pudo:
     # {"agregar": [proyecto_id, …], "quitar": [proyecto_id, …]}.
     originabot_pendiente = models.JSONField(null=True, blank=True)
+    # Arriendo: el contrato de arrendamiento (`LeasingContract`) de TSF del que
+    # sale este. Lo escribe «Sincronizar con TSF»; es la llave para no duplicarlo.
+    originabot_arriendo_id = models.IntegerField(null=True, blank=True)
 
     deleted_at = models.DateTimeField(null=True, blank=True)
 
@@ -350,6 +353,11 @@ class Contrato(Timer):
         constraints = [
             # Un PPA de originabot corresponde a un solo contrato vivo: dos que
             # apuntaran al mismo se pisarían las minigranjas.
+            models.UniqueConstraint(
+                fields=["originabot_arriendo_id"],
+                condition=Q(originabot_arriendo_id__isnull=False),
+                name="uq_contratos_originabot_arriendo",
+            ),
             models.UniqueConstraint(
                 fields=["originabot_ppa_id"],
                 condition=Q(originabot_ppa_id__isnull=False, deleted_at__isnull=True),
