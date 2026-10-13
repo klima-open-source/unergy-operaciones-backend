@@ -229,6 +229,12 @@ class ProyectoInversionista(Timer):
             models.UniqueConstraint(
                 fields=["proyecto", "inversionista"], name="uq_proyecto_inversionistas",
             ),
+            # Redundante con la PK, a propósito: es el destino de la llave compuesta
+            # de `contrato_proyectos`, que exige que la participación sea de la
+            # misma planta que el contrato (`contratos/0017`).
+            models.UniqueConstraint(
+                fields=["id", "proyecto"], name="uq_proyecto_inversionistas_id_proyecto",
+            ),
         ]
 
     @property

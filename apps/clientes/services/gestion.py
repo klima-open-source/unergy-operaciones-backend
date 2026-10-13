@@ -168,6 +168,18 @@ def _fusionar_inversionista(cur, p: dict) -> None:
                     {**p, "perdedor": perdedor})
         return
     q = {"perdedor": perdedor, "ganador": ganador}
+    # Antes de descartar las que chocan: el contrato de representación que apuntaba a
+    # la del perdedor pasa a la del ganador en la misma planta.
+    cur.execute(
+        "UPDATE contrato_proyectos SET proyecto_inversionista_id = ("
+        "  SELECT g.id FROM proyecto_inversionistas l JOIN proyecto_inversionistas g"
+        "    ON g.proyecto_id = l.proyecto_id AND g.inversionista_id = %(ganador)s"
+        "  WHERE l.id = contrato_proyectos.proyecto_inversionista_id) "
+        "WHERE proyecto_inversionista_id IN ("
+        "  SELECT l.id FROM proyecto_inversionistas l JOIN proyecto_inversionistas g"
+        "    ON g.proyecto_id = l.proyecto_id AND g.inversionista_id = %(ganador)s"
+        "  WHERE l.inversionista_id = %(perdedor)s)", q,
+    )
     cur.execute(_PARTICIPACIONES_QUE_CHOCAN.replace("SELECT count(*)", "DELETE"), q)
     cur.execute(
         "UPDATE proyecto_inversionistas SET inversionista_id = %(ganador)s "

@@ -325,9 +325,10 @@ class Contrato(Timer):
         # Qué servicios cubre, desde el ÚNICO lugar que los escribe: así ningún
         # camino de escritura (API, CRM, admin) puede dejarlos desalineados con
         # `tipo_contrato` o `servicio_aplica`.
-        from apps.contratos.services import contrato_partes, servicios
+        from apps.contratos.services import contrato_partes, contrato_proyectos, servicios
 
         servicios.registrar(self)
+        contrato_proyectos.sincronizar(self)
         pendientes = self.__dict__.pop("_partes_pendientes", None)
         if pendientes:
             contrato_partes.asignar(self, pendientes)
@@ -462,10 +463,24 @@ class ContratoParte(Timer):
 
 
 class ContratoProyecto(models.Model):
-    """Qué plantas cubre un PPA (N:M). Reemplaza a `ppa_contrato_proyectos` con el
-    mismo significado. El proyecto de un contrato de servicio sigue en su FK directa;
-    unificarlo acá va con la rama de inversionistas (plan 08, §2)."""
+    """Qué planta cubre un contrato, y en representación, qué participación.
 
+    Una fila por contrato y planta, para TODOS los contratos: los PPA (que pueden
+    cubrir varias) y los de servicio (una). En un contrato de representación,
+    `proyecto_inversionista` dice a qué inversionista de esa planta representamos;
+    en los demás va vacío: quién está en el contrato son sus partes
+    (`contrato_partes`), no los inversionistas (Sara, 2026-10-13).
+
+    La base exige que la participación sea de la misma planta: llave compuesta
+    `(proyecto_inversionista_id, proyecto_id)` → `proyecto_inversionistas (id,
+    proyecto_id)`, diferida al COMMIT para que la fusión de proyectos pueda mover
+    las dos tablas en la misma transacción (`contratos/0017`).
+
+    Mientras convivan con `contratos.proyecto_id` e `inversionista_id`, las filas
+    de los contratos de servicio las deriva `Contrato.save()`
+    (`services/contrato_proyectos.py`)."""
+
+    id = models.BigAutoField(primary_key=True)
     contrato = models.ForeignKey(
         "contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_id",
         related_name="proyectos_vinculados",
@@ -474,10 +489,18 @@ class ContratoProyecto(models.Model):
         "proyectos.Proyecto", on_delete=models.CASCADE, db_column="proyecto_id",
         related_name="contratos_ppa",
     )
-    pk = models.CompositePrimaryKey("contrato_id", "proyecto_id")
+    proyecto_inversionista = models.ForeignKey(
+        # Borrar la participación deja el contrato pendiente de asignar, no lo bloquea.
+        "proyectos.ProyectoInversionista", on_delete=models.SET_NULL,
+        db_column="proyecto_inversionista_id", null=True, blank=True,
+        related_name="contratos_vinculados",
+    )
 
     class Meta:
         db_table = "contrato_proyectos"
+        constraints = [
+            models.UniqueConstraint(fields=["contrato", "proyecto"], name="uq_contrato_proyectos"),
+        ]
 
 
 #: Columnas de `contratos` que solo tienen sentido en un PPA (venían de

@@ -37,6 +37,8 @@ on:
           - "revisar_decimales_redondeados (solo lee)"
           - "revisar_coordenadas (solo lee)"
           - "exportar_partes_sin_cliente (solo lee)"
+          - "registrar_proyectos_contratos (solo lee)"
+          - "registrar_proyectos_contratos --aplicar"
           - "DESHACER paso 2 (corte de contratos)"
           - "DESHACER paso 0 (diagnostico)"
       confirmar:
@@ -92,6 +94,8 @@ jobs:
             "revisar_decimales_redondeados (solo lee)")  manage revisar_decimales_redondeados ;;
             "revisar_coordenadas (solo lee)")            manage revisar_coordenadas ;;
             "exportar_partes_sin_cliente (solo lee)")    manage exportar_partes_sin_cliente ;;
+            "registrar_proyectos_contratos (solo lee)")  manage registrar_proyectos_contratos ;;
+            "registrar_proyectos_contratos --aplicar")   manage registrar_proyectos_contratos --aplicar ;;
             "DESHACER paso 2 (corte de contratos)")
               confirmado
               manage migrate contratos 0008
