@@ -34,6 +34,9 @@ CAMPOS_CREACION = [
     "fecha_estimada_energizacion", "avance_obra_pct", "origen",
     # La minigranja de originabot: la manda «importar desde TSF».
     "originabot_minifarm_id",
+    # El ECS de TSF: lo manda «Sincronizar con TSF».
+    "ecs_estado", "ecs_codigo_insumo", "ecs_vencimiento", "ecs_archivo_url",
+    "ecs_conformidad_url",
 ]
 
 

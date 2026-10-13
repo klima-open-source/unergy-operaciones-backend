@@ -68,6 +68,15 @@ class Proyecto(Timer):
     # desde TSF»; para los demás se resuelve por `origina_code` la primera vez que
     # hace falta (sincronizar las plantas de un PPA).
     originabot_minifarm_id = models.IntegerField(null=True, blank=True)
+    # ECS (Estudio de Conexión Simplificado): el insumo principal del punto de
+    # conexión en TSF (servicio `requests`, expuesto por originabot en
+    # /api/connection/supplies-info/). Lo escribe «Sincronizar con TSF» desde la
+    # ficha del proyecto. Los enlaces son los que da TSF: si son firmados, caducan.
+    ecs_estado = models.CharField(max_length=100, null=True, blank=True)
+    ecs_codigo_insumo = models.CharField(max_length=50, null=True, blank=True)
+    ecs_vencimiento = models.DateField(null=True, blank=True)
+    ecs_archivo_url = models.TextField(null=True, blank=True)
+    ecs_conformidad_url = models.TextField(null=True, blank=True)
     fase_construccion = models.CharField(max_length=40, null=True, blank=True)
     fecha_estimada_energizacion = models.DateField(null=True, blank=True)
     avance_obra_pct = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)

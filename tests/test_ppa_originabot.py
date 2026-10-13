@@ -399,3 +399,38 @@ def test_comando_vincular_minigranjas_dry_run_no_escribe(monkeypatch, plantas):
     for clave, esperado in (("UNO", 1), ("DOS", 2), ("TRES", 3), ("CINCO", None), ("SINTSF", None)):
         plantas[clave].refresh_from_db()
         assert plantas[clave].originabot_minifarm_id == esperado, clave
+
+
+def test_endpoint_minigranja_de_la_planta(monkeypatch, plantas, admin_local):
+    """«Sincronizar con TSF» necesita la minigranja: la resuelve y la guarda, con
+    el token de Unergy de quien sincroniza; con el login propio es 403."""
+    from django.test import Client
+
+    from api.v1.proyectos import views as py_views
+    from apps.comun.integraciones.unergy_auth import cliente as unergy_auth
+    from apps.comun.integraciones.unergy_auth.cliente import IdentidadUnergy
+
+    falso = OriginabotFalso()
+    monkeypatch.setattr(py_views, "ClienteOriginabot", lambda token: falso)
+    c = Client()
+
+    # Login propio: no hay token que mandar a originabot.
+    r = c.post(f"/api/v1/proyectos/{plantas['TRES'].id}/originabot/minigranja", **admin_local)
+    assert r.status_code == 403
+
+    # Con un token de Unergy Auth.
+    from apps.plataforma.models import Usuario
+
+    Usuario.objects.get_or_create(
+        email="admin-ppa@unergy.io", defaults={"nombre": "A", "rol": "admin", "activo": True},
+    )
+    monkeypatch.setattr(unergy_auth, "habilitado", lambda: True)
+    monkeypatch.setattr(unergy_auth, "validar_token", lambda t: IdentidadUnergy(1, "admin-ppa@unergy.io", "a", "A", ()))
+    r = c.post(f"/api/v1/proyectos/{plantas['TRES'].id}/originabot/minigranja",
+               HTTP_AUTHORIZATION="Bearer token-unergy")
+    assert r.status_code == 200
+    assert r.json() == {"originabot_minifarm_id": 3}
+
+    r = c.post(f"/api/v1/proyectos/{plantas['SINTSF'].id}/originabot/minigranja",
+               HTTP_AUTHORIZATION="Bearer token-unergy")
+    assert r.status_code == 404

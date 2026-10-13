@@ -18,10 +18,10 @@ from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef, Q
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.response import Response
 
-from api.exceptions import Conflict, ServicioNoDisponible
+from api.exceptions import Conflict, NoProcesable, ServicioNoDisponible
 from api.logging import class_logger_wrapper
 from api.pagination import PaginacionConPaginas
 from api.permissions import RolePermission
@@ -32,7 +32,9 @@ from apps.fronteras.models import Frontera
 from apps.plataforma.services.fechas import hoy_col
 from apps.ppa.models import PpaContratoProyecto
 from apps.proyectos import models as py_models
+from apps.comun.integraciones.originabot import ClienteOriginabot, OriginabotError
 from apps.proyectos.services import gen_promedio, gestion, pendientes as pendientes_svc
+from apps.proyectos.services import originabot_minigranjas as minigranjas_svc
 from apps.proyectos.services.operador_red import sincronizar_operador_red
 from apps.proyectos.services.resolucion import id_por_nombre
 from apps.proyectos.services.unicidad import (
@@ -593,6 +595,28 @@ class ProyectoViewSet(viewsets.GenericViewSet):
                 for f in fronteras
             ],
         })
+
+    @action(detail=True, methods=["post"], url_path="originabot/minigranja")
+    def originabot_minigranja(self, request, pk=None):
+        """La minigranja de originabot (TSF) de la planta, para «Sincronizar con TSF».
+
+        Si la planta no la tiene guardada, la resuelve una vez (nombre exacto o
+        código TSF único, ver `apps/proyectos/services/originabot_minigranjas.py`)
+        y la guarda. Con el token de Unergy Auth de quien sincroniza: sin él, 403.
+        """
+        proyecto = self._simple(pk)
+        if not request.auth:
+            raise PermissionDenied("Para sincronizar con TSF entra con Unergy Auth.")
+        try:
+            minifarm = minigranjas_svc.minigranja_de(proyecto, ClienteOriginabot(request.auth))
+        except OriginabotError as exc:
+            raise NoProcesable(str(exc))
+        if minifarm is None:
+            raise NotFound(
+                "No se encontró la minigranja de esta planta en TSF: guarda su Código TSF "
+                "o importa el proyecto desde TSF."
+            )
+        return Response({"originabot_minifarm_id": minifarm})
 
     @action(
         detail=True, methods=["post"],
