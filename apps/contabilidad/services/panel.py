@@ -23,7 +23,6 @@ import os
 import tempfile
 
 from django.db import transaction
-from django.db.models import Exists, OuterRef, Q
 
 from rest_framework.exceptions import NotFound
 
@@ -219,31 +218,18 @@ def minigranjas_operativas():
 
 
 def representamos():
-    """`Q` de "representamos el proyecto".
+    """`Q` de "representamos el proyecto": contrato de representación vigente.
 
-    Criterio SEGURO, el mismo que liquidaciones: flag `srv_representacion` activo
-    O contrato de representación vigente. El flag y el contrato a veces se
-    contradicen; se conserva si CUALQUIERA indica representación, para no dejar
-    de liquidar algo que sí representamos.
+    Es `plantas.filtro_proyectos_con("representacion")`, la misma regla de
+    liquidaciones, cumplimiento y registros CND. Solo representación: un contrato
+    que cubre únicamente CGM no cuenta (decisión del 2026-10-06), y una planta en
+    comunidad energética tampoco. Antes sumaba la bandera `srv_*` del proyecto
+    "por seguridad"; la bandera se retira con el barrido de servicios.
     """
-    from apps.contratos.models import ContratoServicio
-
-    from apps.contratos.services import grupos as grupos_service
-    from apps.contratos.services import vigencia as vigencia_service
+    from apps.contratos.services import plantas
     from apps.plataforma.services.fechas import hoy_col
 
-    # "Vigente" es `vigencia.filtro_vivos`, la misma definicion que usan el
-    # informe FMO y la alerta de aniversario: estado no cerrado Y fecha que
-    # todavia rige. Comparar solo el estado dejaba pasar los vencidos.
-    # `filtro_subservicio` y no `servicio_aplica="representacion"`: esa etiqueta
-    # la comparten representacion y CGM --el campo admite un solo valor-- asi que
-    # un contrato que solo cubre CGM entraba aca como si representara la planta.
-    con_contrato = ContratoServicio.objects.filter(
-        vigencia_service.filtro_vivos(hoy_col()),
-        grupos_service.filtro_subservicio(grupos_service.REPRESENTACION),
-        proyecto_id=OuterRef("pk"),
-    )
-    return Q(srv_representacion=True) | Q(Exists(con_contrato))
+    return plantas.filtro_proyectos_con("representacion", hoy_col())
 
 
 def cargar_er(archivos: list, periodo: str, tipo: str, tipo_carga: str,

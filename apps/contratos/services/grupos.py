@@ -52,7 +52,7 @@ INTERNET = "internet"
 #:
 #: Los tres de `operacion` cuentan por igual (confirmado por Sara el 2026-09-17):
 #: una planta "tiene operación" si tiene contrato de mantenimiento, de arriendo
-#: O de internet. Importa porque de ahí sale `srv_operacion`, que es el
+#: O de internet. Importa porque de ahí sale "tiene operación" (`plantas.py`), el
 #: interruptor del monitoreo: si el arriendo no contara, tres plantas que hoy
 #: solo tienen ese contrato quedarían sin respaldo.
 SUBSERVICIOS: dict[str, tuple[str, ...]] = {

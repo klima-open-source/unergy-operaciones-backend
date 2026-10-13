@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from apps.clientes import models as cl_models
 from apps.ppa import models as ppa_models
+from apps.contratos.services.vigencia import validar_fechas_del_contrato
 
 
 class ProyectoRefSerializer(serializers.Serializer):
@@ -71,7 +72,9 @@ class ContratoSerializer(serializers.ModelSerializer):
             "gescon_codigo", "gescon_fecha_inicio", "gescon_fecha_fin",
             "gescon_precio", "gescon_cantidades_kwh", "codigo_sic",
             "tipo_contrato", "renovacion_automatica", "es_comunidad_energetica",
-            "fecha_entrada_comunidad",
+            # `nombre_comunidad` faltaba aquí y en la escritura: el asistente lo
+            # mandaba y DRF lo descartaba sin avisar, así que nunca se guardó.
+            "fecha_entrada_comunidad", "nombre_comunidad",
             "proyectos", "tarifas", "compromisos_energia", "carpeta_link",
             "estado_cumplimiento", "dias_restantes", "cobertura_actual_pct",
             "created_at", "updated_at",
@@ -137,9 +140,9 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
     class Meta:
         model = ppa_models.PpaContrato
         fields = [
+            # Las partes, solo por su cliente: nombre y NIT son los de la ficha.
             "numero_codigo_contrato", "nombre_interno", "responsable_id",
-            "comprador_id", "vendedor_id", "comprador_nombre", "comprador_nit",
-            "vendedor_nombre", "vendedor_nit", "fecha_inicio", "fecha_fin",
+            "comprador_id", "vendedor_id", "fecha_inicio", "fecha_fin",
             "tarifa_base", "indice_indexacion", "periodicidad_indexacion",
             "periodo_indexacion_base", "valor_indexacion_base",
             "cantidad_minima_kwh_mes", "cantidad_maxima_kwh_mes",
@@ -147,10 +150,14 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
             "gescon_codigo", "gescon_fecha_inicio", "gescon_fecha_fin",
             "gescon_precio", "gescon_cantidades_kwh", "codigo_sic",
             "tipo_contrato", "renovacion_automatica", "es_comunidad_energetica",
-            "fecha_entrada_comunidad",
+            "fecha_entrada_comunidad", "nombre_comunidad",
             "proyecto_ids", "carpeta_link",
         ]
         extra_kwargs = {c: {"required": False} for c in fields}
+
+    def validate(self, datos):
+        validar_fechas_del_contrato(datos, self.instance)
+        return datos
 
 
 class ContratoCreacionSerializer(ContratoEscrituraSerializer):

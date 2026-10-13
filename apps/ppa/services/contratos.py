@@ -9,7 +9,6 @@ from datetime import date
 
 from django.db.models import Q
 
-from apps.clientes import models as cl_models
 from apps.mercado_xm import models as mx_models
 from apps.ppa import models as ppa_models
 
@@ -20,27 +19,6 @@ class ReglaPpa(ValueError):
 
 class Bloqueado(RuntimeError):
     """409 — hay datos que dependen de este contrato."""
-
-
-def sincronizar_partes(contrato) -> None:
-    """Copia nombre y NIT desde el cliente cuando hay comprador o vendedor.
-
-    Se DUPLICAN a propósito en el contrato: un PPA firmado con una razón social
-    tiene que seguir mostrando esa, aunque el cliente se renombre después.
-    """
-    campos = []
-    for rol in ("comprador", "vendedor"):
-        cliente_id = getattr(contrato, f"{rol}_id")
-        if not cliente_id:
-            continue
-        cliente = cl_models.Cliente.objects.filter(pk=cliente_id).first()
-        if cliente is None:
-            continue
-        setattr(contrato, f"{rol}_nombre", cliente.razon_social_nombre)
-        setattr(contrato, f"{rol}_nit", cliente.nit_cedula)
-        campos += [f"{rol}_nombre", f"{rol}_nit"]
-    if campos:
-        contrato.save(update_fields=campos)
 
 
 def validar_fecha_fin_vs_asic(contrato) -> None:

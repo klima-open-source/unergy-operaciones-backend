@@ -1,9 +1,9 @@
 """Filtro por contrato PPA en GET /proyectos (ver docs/API_PROYECTOS.md).
 
 "PPA" se puede filtrar de dos formas distintas y no hay que confundirlas:
-`servicio=ppa` es la bandera de servicio contratado (columna booleana
-`srv_ppa`), mientras que `ppa_id` (repetible) y `sin_ppa` miran el vínculo a un
-contrato PPA real (tabla `ppa_contratos`, via `ppa_contrato_proyectos`).
+`servicio=ppa` es "tiene un PPA vigente hoy" (`apps/contratos/services/plantas.py`;
+antes, una bandera puesta a mano), mientras que `ppa_id` (repetible) y `sin_ppa`
+miran el vínculo a un contrato PPA concreto, vigente o no.
 
 **El port a Django perdió los dos.** `api/v1/proyectos/views.py::list` solo
 implementaba `q`, `estado`, `tipo_proyecto`, `portafolio_id` y `servicio`, así
@@ -260,3 +260,76 @@ def test_ppa_id_vacio_no_filtra(datos):
 
     assert respuesta.status_code == 200, respuesta.data
     assert respuesta.data["total"] == 2
+
+
+# ── Servicios de la planta: de los contratos, no de una bandera ──────────────
+
+
+def _con_servicio(proyecto, servicio_aplica, servicios=None):
+    from apps.contratos.models import ContratoServicio
+    from apps.contratos.services import servicios as servicios_service
+
+    contrato = ContratoServicio.objects.create(proyecto=proyecto, servicio_aplica=servicio_aplica)
+    if servicios is not None:
+        servicios_service.registrar(contrato, servicios)
+    return contrato
+
+
+def test_el_listado_trae_los_servicios_calculados_y_ninguna_bandera(datos):
+    planta = _proyecto("Completa", estado="en_operacion")
+    _con_servicio(planta, "mantenimiento")
+    _con_servicio(planta, "representacion", ["cgm"])
+    _vincular(planta, _contrato(nombre_interno="PPA", tipo_contrato="venta"))
+    _proyecto("Solo banderas", estado="en_operacion", srv_operacion=True, srv_ppa=True)
+
+    filas = {p["nombre_comercial"]: p for p in _listar(datos).data["items"]}
+
+    assert filas["Completa"]["servicios"] == {
+        "operacion": True, "representacion": False, "cgm": True, "ppa": True}
+    assert filas["Solo banderas"]["servicios"] == {
+        "operacion": False, "representacion": False, "cgm": False, "ppa": False}
+    assert not [k for k in filas["Completa"] if k.startswith("srv_")]
+
+
+def test_operacion_es_genera_y_la_operamos(datos):
+    """Un arriendo firmado en desarrollo no la vuelve "operada": lo mismo que el
+    sondeo, para que el catálogo de Fallas y el monitoreo no discrepen."""
+    _con_servicio(_proyecto("Opera", estado="en_operacion"), "mantenimiento")
+    desarrollo = _proyecto("Desarrollo", estado="en_desarrollo")
+    _con_servicio(desarrollo, "arriendo")
+
+    respuesta = _listar(datos, "?servicio=operacion")
+
+    assert {p["nombre_comercial"] for p in respuesta.data["items"]} == {"Opera"}
+    detalle = {p["nombre_comercial"]: p for p in _listar(datos).data["items"]}
+    assert detalle["Desarrollo"]["servicios"]["operacion"] is False
+
+
+def test_filtro_por_servicio_usa_los_contratos(datos):
+    _con_servicio(_proyecto("Con CGM"), "representacion", ["representacion", "cgm"])
+    _con_servicio(_proyecto("Sin CGM"), "representacion")
+    _proyecto("Bandera CGM", srv_cgm=True)
+
+    respuesta = _listar(datos, "?servicio=cgm")
+
+    assert {p["nombre_comercial"] for p in respuesta.data["items"]} == {"Con CGM"}
+
+
+def test_las_banderas_ya_no_se_escriben(datos):
+    """Ni el PATCH del proyecto las acepta ni existe el endpoint que las editaba."""
+    from rest_framework.test import APIRequestFactory, force_authenticate
+
+    from api.authentication import UsuarioAutenticado
+    from api.v1.proyectos.serializers import ProyectoActualizarSerializer
+    from api.v1.proyectos.views import ProyectoViewSet
+
+    assert not [c for c in ProyectoActualizarSerializer.Meta.fields if c.startswith("srv_")]
+    assert not hasattr(ProyectoViewSet, "servicios")
+
+    planta = _proyecto("Planta")
+    peticion = APIRequestFactory().patch(
+        f"/api/v1/proyectos/{planta.id}", {"srv_operacion": True}, format="json")
+    force_authenticate(peticion, user=UsuarioAutenticado(datos["usuario"]))
+    ProyectoViewSet.as_view({"patch": "partial_update"})(peticion, pk=planta.id).render()
+    planta.refresh_from_db()
+    assert planta.srv_operacion is False

@@ -31,6 +31,7 @@ from django.db import close_old_connections
 from rest_framework.exceptions import NotFound
 
 from api.exceptions import NoProcesable, ServicioNoDisponible
+from apps.contratos.services import plantas
 from apps.fronteras.models import Frontera
 from apps.plataforma.services.fechas import hoy_col
 from apps.proyectos.models import Proyecto
@@ -406,8 +407,8 @@ def monitoreo_flota() -> dict:
     from apps.monitoreo.services import comunicacion
 
     proyectos = list(Proyecto.objects.filter(
-        estado="en_operacion", tipo_proyecto="minigranja", srv_operacion=True,
-        deleted_at__isnull=True,
+        plantas.filtro_operadas(hoy_col()),
+        tipo_proyecto="minigranja", deleted_at__isnull=True,
     ))
 
     if not proyectos:

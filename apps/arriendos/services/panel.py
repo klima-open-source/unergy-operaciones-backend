@@ -18,6 +18,8 @@ from apps.arriendos.services.calculadora import (
     calcular_arriendo, calcular_iva, serie_indexacion,
 )
 from apps.contratos import models as ct_models
+from apps.contratos.services import plantas
+from apps.plataforma.services.fechas import hoy_col
 from apps.proyectos import models as py_models
 
 SERVICIO = "arriendo"
@@ -76,8 +78,9 @@ def calculo(periodo: str) -> dict:
         for s in ar_models.ArrSeleccionMensual.objects.filter(periodo=periodo)
     }
     contratos = _contrato_por_proyecto()
+    # En operación (genera) y con contrato de operación vigente (la operamos).
     proyectos = py_models.Proyecto.objects.filter(
-        deleted_at__isnull=True, estado="en_operacion", srv_operacion=True
+        plantas.filtro_operadas(hoy_col()), deleted_at__isnull=True,
     ).order_by("nombre_comercial")
 
     filas, total = [], 0

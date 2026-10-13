@@ -92,11 +92,11 @@ class AlertaAniversario(Timer):
 # (`contrato_proyectos`) y qué servicios cubre cada uno (`servicios`).
 #
 # Fuera de este alcance, a propósito (decisión de Sara, 2026-10-06): las tarifas
-# siguen en las columnas del contrato y en `ppa_tarifas`; las partes, en
-# comprador/vendedor/contratante/prestador; el proyecto de un contrato de servicio,
-# en su FK directa. `contrato_partes` y `contrato_tarifas` entran en sus propias
-# ramas, ya con quién las escribe y quién las lee: una tabla llenada una sola vez
-# por el backfill se desactualiza con la primera edición.
+# siguen en las columnas del contrato y en `ppa_tarifas`; el proyecto de un contrato
+# de servicio, en su FK directa. `contrato_tarifas` entra en su propia rama, ya con
+# quién la escribe y quién la lee: una tabla llenada una sola vez por el backfill se
+# desactualiza con la primera edición. Las partes llegaron así (`ContratoParte`,
+# rama `contratos-partes`, 2026-10-07).
 # =====================================================================================
 
 
@@ -120,6 +120,19 @@ class ServicioContrato(models.TextChoices):
     MANTENIMIENTO = grupos.MANTENIMIENTO, "Mantenimiento"
     ARRIENDO = grupos.ARRIENDO, "Arriendo"
     INTERNET = grupos.INTERNET, "Internet"
+
+
+class RolParte(models.TextChoices):
+    """El papel de un cliente en un contrato. Los mismos cuatro para todos los
+    contratos (decisión de Sara, 2026-10-07); la pantalla los nombra según el tipo
+    (en un arriendo, el prestador es el arrendador y el contratante el arrendatario).
+    El inversionista NO es una parte: es de quién es la planta, y va a
+    `contrato_proyectos` en la rama de inversionistas."""
+
+    COMPRADOR = "comprador", "Comprador"
+    VENDEDOR = "vendedor", "Vendedor"
+    CONTRATANTE = "contratante", "Contratante"
+    PRESTADOR = "prestador", "Prestador"
 
 
 class EstadoContrato(models.TextChoices):
@@ -184,15 +197,10 @@ class Contrato(Timer):
     indice_indexacion = models.CharField(max_length=60, null=True, blank=True)
     renovacion_automatica = models.BooleanField(default=False)
 
-    # --- Partes por nombre/NIT, copiadas del cliente vinculado (`clientes.partes`) ---
-    comprador_nombre = models.CharField(max_length=255, null=True, blank=True)
-    comprador_nit = models.CharField(max_length=20, null=True, blank=True)
-    vendedor_nombre = models.CharField(max_length=255, null=True, blank=True)
-    vendedor_nit = models.CharField(max_length=20, null=True, blank=True)
-    contratante_nombre = models.CharField(max_length=255, null=True, blank=True)
-    contratante_nit = models.CharField(max_length=20, null=True, blank=True)
-    prestador_nombre = models.CharField(max_length=255, null=True, blank=True)
-    prestador_nit = models.CharField(max_length=20, null=True, blank=True)
+    # Las partes (comprador, vendedor, contratante, prestador) viven en
+    # `contrato_partes`; su nombre y NIT, en la ficha del cliente. Los atajos de
+    # lectura con los nombres de siempre están al final de la clase.
+    # El inversionista sigue aquí hasta la rama de inversionistas.
     inversionista_nombre = models.CharField(max_length=255, null=True, blank=True)
 
     # --- Específicas de compraventa de energía (PPA), antes en ppa_contratos ---
@@ -203,14 +211,6 @@ class Contrato(Timer):
     # venta | compra (antes ppa_contratos.tipo_contrato).
     tipo_contrato = models.CharField(
         max_length=20, choices=Compraventa.choices, null=True, blank=True,
-    )
-    comprador = models.ForeignKey(
-        "clientes.Cliente", on_delete=models.SET_NULL, db_column="comprador_id",
-        null=True, blank=True, related_name="ppa_contratos_por_comprador_id",
-    )
-    vendedor = models.ForeignKey(
-        "clientes.Cliente", on_delete=models.SET_NULL, db_column="vendedor_id",
-        null=True, blank=True, related_name="ppa_contratos_por_vendedor_id",
     )
     periodicidad_indexacion = models.CharField(max_length=50, null=True, blank=True)
     periodo_indexacion_base = models.CharField(max_length=7, null=True, blank=True)
@@ -241,14 +241,6 @@ class Contrato(Timer):
                  ("mantenimiento", "mantenimiento"), ("arriendo", "arriendo"),
                  ("internet", "internet")],
         null=True, blank=True,
-    )
-    contratante = models.ForeignKey(
-        "clientes.Cliente", on_delete=models.SET_NULL, db_column="contratante_id",
-        null=True, blank=True, related_name="contratos_servicio_por_contratante_id",
-    )
-    prestador = models.ForeignKey(
-        "clientes.Cliente", on_delete=models.SET_NULL, db_column="prestador_id",
-        null=True, blank=True, related_name="contratos_servicio_por_prestador_id",
     )
     inversionista = models.ForeignKey(
         "clientes.Cliente", on_delete=models.SET_NULL, db_column="inversionista_id",
@@ -290,14 +282,55 @@ class Contrato(Timer):
 
     deleted_at = models.DateTimeField(null=True, blank=True)
 
+    # --- Las partes: atajos con los nombres de siempre --------------------------
+    #
+    # `contrato.comprador_nombre`, `contrato.contratante_id`… se siguen leyendo igual,
+    # pero salen de `contrato_partes` y de la ficha del cliente. Para no hacer una
+    # consulta por contrato en un listado: `.prefetch_related(contrato_partes.CON_PARTES)`.
+    #
+    # Escribir `contrato.comprador_id = 5` (o `comprador = cliente`) deja la parte
+    # pendiente y `save()` la guarda en `contrato_partes`. El nombre y el NIT NO se
+    # escriben: son los de la ficha. Asignarlos da error a propósito.
+
+    def _partes_por_rol(self) -> dict:
+        cache = self.__dict__.get("_partes_cache")
+        if cache is None:
+            filas = getattr(self, "_prefetched_objects_cache", {}).get("partes")
+            if filas is None:
+                filas = (self.partes.select_related("cliente").order_by("id")
+                         if self.pk else [])
+            cache = {}
+            for fila in filas:
+                cache.setdefault(fila.rol, fila.cliente)
+            self.__dict__["_partes_cache"] = cache
+        return cache
+
+    def _parte(self, rol):
+        pendientes = self.__dict__.get("_partes_pendientes", {})
+        if rol in pendientes:
+            return pendientes[rol]
+        return self._partes_por_rol().get(rol)
+
+    def _poner_parte(self, rol, cliente) -> None:
+        self.__dict__.setdefault("_partes_pendientes", {})[rol] = cliente
+
     def save(self, *args, **kwargs):
+        # Los atajos de las partes no son columnas: fuera de `update_fields`.
+        # Si solo se tocaron partes, la lista queda vacía y Django no escribe la fila.
+        if kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = [
+                f for f in kwargs["update_fields"] if f not in _ATAJOS_DE_PARTES
+            ]
         super().save(*args, **kwargs)
         # Qué servicios cubre, desde el ÚNICO lugar que los escribe: así ningún
         # camino de escritura (API, CRM, admin) puede dejarlos desalineados con
         # `tipo_contrato` o `servicio_aplica`.
-        from apps.contratos.services import servicios
+        from apps.contratos.services import contrato_partes, servicios
 
         servicios.registrar(self)
+        pendientes = self.__dict__.pop("_partes_pendientes", None)
+        if pendientes:
+            contrato_partes.asignar(self, pendientes)
 
     class Meta:
         db_table = "contratos"
@@ -332,6 +365,38 @@ class Contrato(Timer):
         ]
 
 
+def _atajo_de_parte(rol: str, campo: str | None):
+    """`comprador` / `comprador_id` / `comprador_nombre` / `comprador_nit`, de una parte."""
+
+    def leer(self):
+        cliente = self._parte(rol)
+        if campo is None or cliente is None:
+            return cliente
+        return getattr(cliente, campo)
+
+    if campo == "razon_social_nombre" or campo == "nit_cedula":
+        return property(leer)  # de la ficha: no se escribe aquí
+
+    def escribir(self, valor):
+        if campo is None or valor is None:
+            self._poner_parte(rol, valor)
+        else:
+            from apps.clientes.models import Cliente
+
+            self._poner_parte(rol, Cliente.objects.get(pk=valor))
+
+    return property(leer, escribir)
+
+
+#: Los nombres de siempre de las partes, ahora atajos sobre `contrato_partes`.
+_ATAJOS_DE_PARTES = set()
+for _rol in RolParte.values:
+    for _sufijo, _campo in (("", None), ("_id", "id"),
+                            ("_nombre", "razon_social_nombre"), ("_nit", "nit_cedula")):
+        setattr(Contrato, f"{_rol}{_sufijo}", _atajo_de_parte(_rol, _campo))
+        _ATAJOS_DE_PARTES.add(f"{_rol}{_sufijo}")
+
+
 class Servicio(Timer):
     """Un servicio que cubre un contrato: una fila por contrato y por servicio.
 
@@ -360,6 +425,42 @@ class Servicio(Timer):
         ]
 
 
+class ContratoParte(Timer):
+    """Un cliente y el papel que juega en un contrato: una fila por parte.
+
+    La misma tabla para todos los contratos — PPA, representación/CGM, operación,
+    arriendo—; lo que cambia por tipo es qué papeles lleva. Un contrato puede tener
+    dos filas del mismo papel (un terreno con varios dueños), así que la unicidad es
+    por contrato, papel y cliente.
+
+    El nombre y el NIT se leen siempre de la ficha del cliente: aquí no se copian.
+
+    Hoy la escribe solo `Contrato.save()`, derivándola de las columnas
+    comprador/vendedor/contratante/prestador (`services/contrato_partes.py`); la leen
+    las consultas de «en qué contratos participa este cliente». Que las pantallas
+    escriban aquí directamente, y quitar esas columnas, es el paso siguiente."""
+
+    id = models.BigAutoField(primary_key=True)
+    contrato = models.ForeignKey(
+        "contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_id",
+        related_name="partes",
+    )
+    cliente = models.ForeignKey(
+        "clientes.Cliente", on_delete=models.CASCADE, db_column="cliente_id",
+        related_name="partes_de_contratos",
+    )
+    rol = models.CharField(max_length=20, choices=RolParte.choices)
+
+    class Meta:
+        db_table = "contrato_partes"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["contrato", "rol", "cliente"], name="uq_contrato_partes",
+            ),
+        ]
+        indexes = [models.Index(fields=["cliente", "rol"], name="ix_contrato_partes_cliente")]
+
+
 class ContratoProyecto(models.Model):
     """Qué plantas cubre un PPA (N:M). Reemplaza a `ppa_contrato_proyectos` con el
     mismo significado. El proyecto de un contrato de servicio sigue en su FK directa;
@@ -384,9 +485,8 @@ class ContratoProyecto(models.Model):
 #: API siga teniendo exactamente los campos de antes de la tabla única: con
 #: `exclude` y la tabla ancha se colaban en la lectura y, peor, en la escritura.
 COLUMNAS_SOLO_PPA = (
-    "numero_codigo_contrato", "nombre_interno", "comprador_nombre", "comprador_nit",
-    "vendedor_nombre", "vendedor_nit", "responsable", "tipo_contrato", "comprador",
-    "vendedor", "periodicidad_indexacion", "periodo_indexacion_base",
+    "numero_codigo_contrato", "nombre_interno", "responsable", "tipo_contrato",
+    "periodicidad_indexacion", "periodo_indexacion_base",
     "valor_indexacion_base", "cantidad_minima_kwh_mes", "cantidad_maxima_kwh_mes",
     "periodicidad_facturacion", "tiempo_pago", "condiciones_pago", "gescon_codigo",
     "gescon_fecha_inicio", "gescon_fecha_fin", "gescon_precio",

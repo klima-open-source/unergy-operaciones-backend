@@ -12,6 +12,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.contratos import models as ct_models
+from apps.contratos.services import contrato_partes
 from apps.om import models as om_models
 from apps.om.services.calculadora import calcular_proyecto  # noqa: F401
 from apps.om.services.pdf_splitter import (
@@ -62,7 +63,8 @@ def contratos_para_split() -> list[dict]:
         {"contrato_id": c.id, "nombre_proyecto": nombre_proyecto_de(c)}
         for c in ct_models.ContratoServicio.objects
         .filter(servicio_aplica=SERVICIO_OM)
-        .select_related("proyecto").order_by("id")
+        .select_related("proyecto").prefetch_related(contrato_partes.CON_PARTES)
+        .order_by("id")
     ]
 
 

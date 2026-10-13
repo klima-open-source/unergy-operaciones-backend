@@ -339,8 +339,13 @@ def proyectos_sin_fecha_comercializacion() -> list[dict]:
     por no tener fecha, con el motivo probable — sin identificador de monitoreo o
     sin generación registrada.
     """
+    from apps.contratos.services import plantas
     from apps.proyectos.models import Proyecto
 
+    representados = set(
+        Proyecto.objects.filter(plantas.filtro_proyectos_con("representacion", hoy_col()))
+        .values_list("id", flat=True)
+    )
     proyectos = (
         Proyecto.objects
         .filter(deleted_at__isnull=True, fecha_inicio_comercializacion__isnull=True)
@@ -358,7 +363,9 @@ def proyectos_sin_fecha_comercializacion() -> list[dict]:
             "id": p.id,
             "nombre": p.nombre_comercial,
             "estado": p.estado,
-            "srv_representacion": bool(p.srv_representacion),
+            # Del contrato de representación vigente; antes, la bandera del
+            # proyecto. Ningún front lee esta clave.
+            "representacion": p.id in representados,
             "identificador_monitoreo": ident,
             "motivo": "sin_identificador_monitoreo" if not ident else "sin_generacion_registrada",
         })

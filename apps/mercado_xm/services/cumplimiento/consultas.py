@@ -29,6 +29,7 @@ from apps.mercado_xm.models import AsicSolicitud
 from apps.mercado_xm.services.gescon_vigencia import resolver_vigencias
 from apps.plataforma.services.fechas import hoy_col
 from apps.ppa.models import PpaContrato, PpaResponsable
+from apps.contratos.services import contrato_partes
 
 from .periodos import UNGC_COMERCIALIZADOR, _recortar, _restar_intervalos
 
@@ -126,6 +127,8 @@ def _contratos_vigentes(year: int, month: int | None = None,
         PpaContrato.objects
         # el responsable se lee en las filas de la matriz: precargarlo evita N+1
         .select_related("responsable")
+        # y las partes: el comprador se muestra en cada fila
+        .prefetch_related(contrato_partes.CON_PARTES)
         .filter(deleted_at__isnull=True)
         .filter(Q(fecha_inicio__isnull=True) | Q(fecha_inicio__lte=last_day))
         .filter(Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=first_day))

@@ -27,7 +27,9 @@ from api.pagination import PaginacionConPaginas
 from api.permissions import RolePermission
 from api.v1.cumplimiento import parametros as par
 from apps.clientes.models import Cliente, ProyectoAreaContacto
+from apps.contratos.services import plantas
 from apps.fronteras.models import Frontera
+from apps.plataforma.services.fechas import hoy_col
 from apps.ppa.models import PpaContratoProyecto
 from apps.proyectos import models as py_models
 from apps.proyectos.services import gen_promedio, gestion, pendientes as pendientes_svc
@@ -39,11 +41,9 @@ from apps.proyectos.services.unicidad import (
 
 from . import serializers as py_serializers
 
-# Los flags de servicio, por si el listado quiere filtrar por uno. Los mismos
-# que acepta el PATCH de /proyectos/{id}/servicios.
-SERVICIOS = (
-    "operacion", "representacion", "cgm", "ppa",
-)
+# Los servicios por los que el listado puede filtrar (`?servicio=`). Salen de los
+# contratos vigentes, no de una bandera (`apps/contratos/services/plantas.py`).
+SERVICIOS = plantas.SERVICIOS_DE_PLANTA
 
 
 def _con_relaciones():
@@ -184,14 +184,19 @@ class ProyectoViewSet(viewsets.GenericViewSet):
             qs = qs.filter(portafolio_id=par.entero(request, "portafolio_id"))
         servicio = request.query_params.get("servicio")
         if servicio in SERVICIOS:
-            qs = qs.filter(**{f"srv_{servicio}": True})
+            # `operacion` es "genera y la operamos", lo mismo que el sondeo.
+            qs = qs.filter(
+                plantas.filtro_operadas(hoy_col()) if servicio == "operacion"
+                else plantas.filtro_proyectos_con(servicio, hoy_col())
+            )
         filtro_ppa = _filtro_ppa(request)
         if filtro_ppa is not None:
             qs = qs.filter(filtro_ppa)
 
         pagina = self.paginate_queryset(qs.order_by("nombre_comercial"))
+        contexto = {"servicios_por_proyecto": plantas.servicios_por_proyecto(hoy_col())}
         return self.get_paginated_response(
-            py_serializers.ProyectoSerializer(pagina, many=True).data
+            py_serializers.ProyectoSerializer(pagina, many=True, context=contexto).data
         )
 
     def create(self, request, *args, **kwargs):
@@ -649,17 +654,6 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         )
         reporte["ejecutado"] = True
         return Response(reporte)
-
-    @action(detail=True, methods=["patch"], url_path="servicios")
-    def servicios(self, request, pk=None):
-        proyecto = self._simple(pk)
-        campos = [f"srv_{s}" for s in SERVICIOS]
-        tocados = [c for c in campos if c in request.data]
-        for campo in tocados:
-            setattr(proyecto, campo, request.data[campo])
-        if tocados:
-            proyecto.save(update_fields=tocados)
-        return self._salida(pk)
 
     # ── Info técnica ──────────────────────────────────────────────────────
 

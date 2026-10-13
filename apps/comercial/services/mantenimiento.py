@@ -21,8 +21,7 @@ from apps.comercial.models import (
 )
 from apps.comercial.services.pipeline import col_now, estado_a_resultado
 from apps.comun.nombre_matching import mejor_candidato
-from apps.contratos.models import ContratoServicio
-from apps.ppa.models import PpaContrato
+from apps.contratos.models import ContratoParte
 from apps.proyectos.models import Proyecto, ProyectoInversionista
 
 
@@ -60,12 +59,7 @@ def ejecutar_backfill(usuario_id: int, dry_run: bool = True,
         # crearle una oportunidad "operando" sería un registro sin sustento y
         # ensuciaría los KPIs del CRM. El job diario solo migra a quien de
         # verdad tiene relación comercial.
-        con_contrato = (
-            _ids(ContratoServicio.objects.all(), "contratante_id")
-            | _ids(ContratoServicio.objects.all(), "prestador_id")
-            | _ids(PpaContrato.objects.all(), "comprador_id")
-            | _ids(PpaContrato.objects.all(), "vendedor_id")
-        )
+        con_contrato = _ids(ContratoParte.objects.all(), "cliente_id")
         a_migrar = [c for c in a_migrar if c.id in con_contrato]
 
     resumen = {"clientes_a_migrar": len(a_migrar), "proyectos_a_vincular": 0, "detalle": []}

@@ -59,13 +59,14 @@ class PortafolioViewSet(
             py_models.Proyecto.objects.filter(deleted_at__isnull=True)
             .order_by("nombre_comercial")
         )
+        operativos = portafolios_service.ids_operativos()
         por_capa: dict[int, list] = {}
         sin_capa: list = []
         for proyecto in proyectos:
             item = portafolios_serializers.ProyectoEnPortafolioSerializer(proyecto).data
             if proyecto.portafolio_id:
                 por_capa.setdefault(proyecto.portafolio_id, []).append(item)
-            elif portafolios_service.es_operativo(proyecto):
+            elif proyecto.id in operativos:
                 # Al pool solo van los OPERATIVOS sin capa: son los que importan
                 # para los informes.
                 sin_capa.append(item)

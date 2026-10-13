@@ -13,7 +13,6 @@ from collections import defaultdict
 from pathlib import Path
 
 from django.db import IntegrityError, transaction
-from django.db.models import Q
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, ValidationError
@@ -28,6 +27,7 @@ from apps.clientes import models as cl_models
 from apps.clientes.services import gestion, vistas
 from apps.clientes.services.panel import proyectos_por_cliente
 from apps.contratos.models import ContratoServicio
+from apps.contratos.services.contrato_partes import ROLES_PPA, ROLES_SERVICIO, contratos_de
 from apps.fronteras.models import Frontera
 from apps.ppa.models import PpaContrato, PpaContratoProyecto
 from apps.proyectos.models import Proyecto, ProyectoInversionista
@@ -410,19 +410,17 @@ class ClienteViewSet(viewsets.GenericViewSet):
             .values_list("proyecto_id", flat=True),
             "inversionista",
         )
-        for campo, etiqueta in (("contratante_id", "contratante"),
-                                ("prestador_id", "prestador")):
+        for rol in ROLES_SERVICIO:
             anotar(
                 ContratoServicio.objects
-                .filter(proyecto_id__in=ids, **{campo: cliente_id})
+                .filter(proyecto_id__in=ids, pk__in=contratos_de({cliente_id}, [rol]))
                 .values_list("proyecto_id", flat=True),
-                etiqueta,
+                str(rol),
             )
         anotar(
             PpaContratoProyecto.objects
-            .filter(proyecto_id__in=ids, contrato__deleted_at__isnull=True)
-            .filter(Q(contrato__comprador_id=cliente_id)
-                    | Q(contrato__vendedor_id=cliente_id))
+            .filter(proyecto_id__in=ids, contrato__deleted_at__isnull=True,
+                    contrato_id__in=contratos_de({cliente_id}, ROLES_PPA))
             .values_list("proyecto_id", flat=True),
             "ppa",
         )
@@ -512,8 +510,7 @@ class ClienteViewSet(viewsets.GenericViewSet):
         self._cliente(pk)
         contratos = (
             PpaContrato.objects
-            .filter(deleted_at__isnull=True)
-            .filter(Q(comprador_id=pk) | Q(vendedor_id=pk))
+            .filter(deleted_at__isnull=True, pk__in=contratos_de({int(pk)}, ROLES_PPA))
             .order_by(F("fecha_inicio").desc(nulls_last=True))
         )
         return Response([

@@ -4,6 +4,8 @@ from datetime import date
 
 from django.db.models import Q
 
+from apps.contratos.models import ContratoParte, RolParte
+from apps.contratos.services import contrato_partes
 from apps.ppa import models as ppa_models
 from apps.ppa.services import contratos as contratos_service
 
@@ -22,8 +24,9 @@ def con_relaciones():
     return (
         ppa_models.PpaContrato.objects
         .filter(deleted_at__isnull=True)
-        .select_related("responsable", "comprador", "vendedor")
+        .select_related("responsable")
         .prefetch_related(
+            contrato_partes.CON_PARTES,
             "proyectos_vinculados__proyecto",
             "tarifas",
             "compromisos",
@@ -47,7 +50,9 @@ def listar(proyecto_id=None, q=None, tipo_contrato=None, limite=LIMITE_MAXIMO):
             Q(proyectos_vinculados__proyecto__nombre_comercial__icontains=q)
             | Q(nombre_interno__icontains=q)
             | Q(numero_codigo_contrato__icontains=q)
-            | Q(comprador_nombre__icontains=q)
+            | Q(pk__in=ContratoParte.objects.filter(
+                rol=RolParte.COMPRADOR, cliente__razon_social_nombre__icontains=q,
+            ).values("contrato_id"))
         ).distinct()
 
     return consulta.order_by("-fecha_inicio", "-id")[:limite]
@@ -56,20 +61,20 @@ def listar(proyecto_id=None, q=None, tipo_contrato=None, limite=LIMITE_MAXIMO):
 def partes() -> dict:
     """Compradores y vendedores distintos que aparecen en los contratos.
 
-    Sale de los contratos y no de `clientes` porque hay partes que nunca se
-    dieron de alta como cliente: el nombre y el NIT están escritos en el PPA.
+    Los clientes que son comprador o vendedor de algún PPA, con el nombre y el
+    NIT de su ficha.
     """
-    def unicos(campo_nombre: str, campo_nit: str) -> list[dict]:
+    def unicos(rol: str) -> list[dict]:
         filas = (
-            ppa_models.PpaContrato.objects
-            .filter(**{f"{campo_nombre}__isnull": False})
-            .values_list(campo_nombre, campo_nit).distinct()
+            ContratoParte.objects
+            .filter(rol=rol, contrato__grupo="ppa")
+            .values_list("cliente__razon_social_nombre", "cliente__nit_cedula").distinct()
         )
         return [{"nombre": nombre, "nit": nit} for nombre, nit in filas]
 
     return {
-        "compradores": unicos("comprador_nombre", "comprador_nit"),
-        "vendedores": unicos("vendedor_nombre", "vendedor_nit"),
+        "compradores": unicos(RolParte.COMPRADOR),
+        "vendedores": unicos(RolParte.VENDEDOR),
     }
 
 

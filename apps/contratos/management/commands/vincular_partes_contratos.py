@@ -47,16 +47,14 @@ from apps.clientes.models import Cliente
 from apps.contratos.models import ContratoServicio
 from apps.contratos.services import partes as partes_service
 from apps.facturacion.models import ContratoFactura
-from apps.ppa.models import PpaContrato
 
 #: Modelo → los roles cuyo `*_id` hay que poblar, y si el rol tiene columna NIT.
 #: `ContratoServicio` no tiene `deleted_at` --se borra de verdad--, así que el
 #: filtro de vivos solo aplica al PPA.
+#: Comprador, vendedor, contratante y prestador ya no están: viven en
+#: `contrato_partes` y siempre son un cliente (rama `contratos-partes`, 2026-10-07).
 OBJETIVOS = (
-    (ContratoServicio, "contratos_servicio",
-     (("contratante", True), ("prestador", True), ("inversionista", False))),
-    (PpaContrato, "ppa_contratos",
-     (("comprador", True), ("vendedor", True))),
+    (ContratoServicio, "contratos_servicio", (("inversionista", False),)),
     # El arrendador es la sexta parte, y su vinculo (`cliente_id`) nacio el
     # 2026-09-18: TODAS sus filas estan sin vincular. Su campo de texto se llama
     # `nombre` a secas, no `<rol>_nombre`, y no tiene NIT.

@@ -10,8 +10,10 @@ Tenerlos separados costaba caro. La API tenía **15 meses que nosotros no**:
 salen los `ipp_base` de los PPA. Sin esos meses, esas líneas de facturación caen
 en `sin_ipp_base` y no se pueden calcular.
 
-Se dispara **a mano** desde Liquidaciones, no por horario: el IPP se publica una
-vez al mes y quien liquida prefiere decidir cuándo traerlo.
+La sincronización completa (`sincronizar`, que también corrige valores) se
+dispara **a mano** desde Liquidaciones, no por horario. Desde el 2026-10-08,
+además, Facturación trae SOLA el mes que le falte (`asegurar_mes`), sin pisar
+ningún valor existente.
 """
 from __future__ import annotations
 
@@ -89,6 +91,60 @@ def clasificar(
 
     return {"crear": crear, "actualizar": actualizar,
             "cambios": cambios, "sin_cambio": sin_cambio}
+
+
+def asegurar_mes(anio: int, mes: int) -> bool:
+    """Si falta el IPP del mes, lo trae solo de la API. `True` si quedó guardado.
+
+    Lo pidió Jessica el 2026-10-08: el botón de `sincronizar` funcionaba, pero
+    había que acordarse de pulsarlo antes de facturar. Ahora Facturación lo busca
+    sola cuando abre un mes sin IPP.
+
+    **Solo crea meses que faltan, nunca pisa uno existente**: un valor que cambia
+    solo movería un mes que quizá ya se facturó. Corregir valores sigue siendo
+    cosa del botón (`sincronizar`, donde manda la API) o del campo manual.
+
+    Si la API aún no publica el mes, o se cae, no se reintenta en cada carga de
+    la vista: se recuerda el intento un rato. Nunca levanta: sin IPP la vista
+    sigue mostrando su aviso, como antes.
+    """
+    if IppMensual.objects.filter(año=anio, mes=mes).exists():
+        return True
+
+    clave = f"ipp:intento:{anio}-{mes:02d}"
+    try:
+        from django.core.cache import cache
+
+        if cache.get(clave):
+            return False
+    except Exception:  # sin Redis no hay memoria del intento; se intenta igual
+        cache = None
+
+    try:
+        de_la_api = elegir_por_mes(_traer_de_la_api())
+        nuestros = {(i.año, i.mes) for i in IppMensual.objects.all()}
+        faltan = {k: v for k, v in de_la_api.items() if k not in nuestros}
+        if faltan:
+            IppMensual.objects.bulk_create(
+                [IppMensual(año=a, mes=m, valor=Decimal(str(v)))
+                 for (a, m), v in sorted(faltan.items())],
+                ignore_conflicts=True,
+            )
+            logger.info("IPP traído solo de la API: %s",
+                        sorted(f"{a}-{m:02d}" for a, m in faltan))
+        espera = 3600  # la API aún no tiene el mes: volver a mirar en una hora
+    except Exception:
+        logger.exception("No se pudo traer el IPP %s-%02d de la API", anio, mes)
+        espera = 600
+
+    if IppMensual.objects.filter(año=anio, mes=mes).exists():
+        return True
+    if cache is not None:
+        try:
+            cache.set(clave, True, espera)
+        except Exception:
+            pass
+    return False
 
 
 def sincronizar() -> dict[str, Any]:

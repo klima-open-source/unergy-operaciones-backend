@@ -90,7 +90,7 @@ def _completar_lado_unergy(tipo_contrato: str, datos: dict) -> str | None:
     por un ajuste que falta sería peor que el hueco que viene a tapar.
     """
     lado = LADO_UNERGY.get(tipo_contrato)
-    if lado is None or datos.get(f"{lado}_id"):
+    if lado is None or datos.get(f"{lado}_id") or datos.get(lado):
         return None
 
     unergy = unergy_service.cliente_unergy()
@@ -201,7 +201,6 @@ def crear_ppa(
             tipo_contrato=tipo_contrato, **datos
         )
         contratos_service.fijar_proyectos(contrato, proyecto_ids)
-        contratos_service.sincronizar_partes(contrato)
 
         if tarifas:
             ppa_models.PpaTarifa.objects.bulk_create([

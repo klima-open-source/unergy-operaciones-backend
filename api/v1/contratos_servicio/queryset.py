@@ -5,6 +5,7 @@ import re
 from django.db.models import Q
 
 from apps.contratos import models as ct_models
+from apps.contratos.services import contrato_partes
 from apps.proyectos import models as py_models
 
 LIMITE_MAXIMO = 500
@@ -24,7 +25,8 @@ def con_relaciones():
     """
     return (
         ct_models.ContratoServicio.objects
-        .select_related("proyecto", "contratante", "prestador", "inversionista")
+        .select_related("proyecto", "inversionista")
+        .prefetch_related(contrato_partes.CON_PARTES)
         .prefetch_related(
             "contrato_frontera_por_contrato_servicio_id__frontera",
             "cliente_documentos_comerciales_por_contrato_servicio_id",

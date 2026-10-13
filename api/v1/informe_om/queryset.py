@@ -1,20 +1,21 @@
 """Consultas del Informe de Puesta en Marcha."""
 
+from apps.contratos.services import plantas
 from apps.om import models as om_models
 from apps.om.services import checklist, evidencia, forma_ficha, vivo
+from apps.plataforma.services.fechas import hoy_col
 from apps.proyectos import models as py_models
 
 
 def proyectos_con_informe():
-    """Minigranjas en operación con servicio de operación.
+    """Minigranjas en operación con contrato de operación vigente.
 
     Mismo filtro que la pantalla de Inicio de Operación: el informe de puesta en
     marcha solo aplica a las plantas que operamos nosotros.
     """
     return py_models.Proyecto.objects.filter(
-        srv_operacion=True,
+        plantas.filtro_operadas(hoy_col()),
         tipo_proyecto="minigranja",
-        estado="en_operacion",
         deleted_at__isnull=True,
     ).order_by("nombre_comercial")
 

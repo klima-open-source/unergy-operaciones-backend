@@ -428,7 +428,6 @@ def firmar(oferta: OportunidadOferta, datos: dict, usuario):
         )
 
     op = get_oportunidad(oferta.oportunidad_id)
-    cliente = Cliente.objects.filter(pk=op.cliente_id).first()
     plantas = plantas_de_la_oferta(oferta)
 
     with transaction.atomic():
@@ -441,10 +440,8 @@ def firmar(oferta: OportunidadOferta, datos: dict, usuario):
                 ),
                 "nombre_interno": datos.get("nombre_interno") or oferta.planta_nombre,
                 # Unergy COMPRA la energía al generador: el cliente de la oferta
-                # vende. `crear_ppa` sincroniza nombre y NIT desde esa FK.
+                # vende. Su nombre y NIT son los de la ficha.
                 "vendedor_id": op.cliente_id,
-                "vendedor_nombre": cliente.razon_social_nombre if cliente else None,
-                "vendedor_nit": cliente.nit_cedula if cliente else None,
                 "fecha_inicio": datos.get("fecha_inicio"),
                 "fecha_fin": datos.get("fecha_fin"),
                 "tarifa_base": datos.get("tarifa_base") or tarifa_del_primer_anio(datos),

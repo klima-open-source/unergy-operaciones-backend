@@ -19,6 +19,7 @@ from apps.mercado_xm.models import AsicSolicitud
 from apps.plataforma.services.fechas import hoy_col
 from apps.ppa.models import PpaContrato
 from apps.proyectos.models import Proyecto
+from apps.contratos.services import contrato_partes
 
 from .consultas import _asc_nulls_first, _asc_nulls_last, _resolve_gescon
 
@@ -38,6 +39,7 @@ def diagnostico_enlaces() -> dict:
     contratos = (
         PpaContrato.objects
         .filter(deleted_at__isnull=True)
+        .prefetch_related(contrato_partes.CON_PARTES)
         .order_by(_asc_nulls_last("nombre_interno"), "id")
     )
 
