@@ -110,6 +110,10 @@ class Falla(Timer):
     frontera_afecta_medicion = models.BooleanField(null=True, blank=True)
     frontera_perdida_comunicacion = models.BooleanField(null=True, blank=True)
     inversores_perdida_comunicacion = models.BooleanField(null=True, blank=True)
+    # El equipo afectado está en garantía con su proveedor: la falla queda en
+    # la pestaña Pendientes hasta que se cierre.
+    en_garantia = models.BooleanField(default=False)
+    garantia_detalle = models.TextField(null=True, blank=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:

@@ -41,7 +41,7 @@ from api.pagination import PaginacionConPaginas
 from api.permissions import RolePermission
 from api.v1.cumplimiento import parametros as par
 from apps.monitoreo import models as mo_models
-from apps.monitoreo.services.fallas import consultas, dominio, impacto
+from apps.monitoreo.services.fallas import avisos, consultas, dominio, impacto
 from apps.monitoreo.services.fallas.estructura import ESTRUCTURA_FALLAS
 
 from . import serializers as fa_serializers
@@ -292,29 +292,13 @@ class FallaViewSet(viewsets.GenericViewSet):
         except IntegrityError as exc:
             raise dominio.integridad_a_error(exc)
 
-        self._notificar_coordinadores(falla)
+        avisos.falla_registrada(falla)
         self._alarmas_post_guardado(falla.id)
 
         return Response(
             fa_serializers.FallaSerializer(self._falla(falla.id)).data,
             status=status.HTTP_201_CREATED,
         )
-
-    def _notificar_coordinadores(self, falla) -> None:
-        from apps.plataforma.models import Notificacion, Usuario
-
-        coordinadores = Usuario.objects.filter(rol="coordinador", activo=True)
-        nombre = falla.proyecto.nombre_comercial if falla.proyecto_id else f"Proyecto {falla.proyecto_id}"
-        Notificacion.objects.bulk_create([
-            Notificacion(
-                usuario_id=c.id,
-                tipo="accion",
-                titulo="Nueva falla registrada",
-                mensaje=f"{falla.codigo_interno} — {nombre}: {(falla.descripcion or '')[:80]}",
-                leida=False,
-            )
-            for c in coordinadores
-        ])
 
     def _alarmas_post_guardado(self, falla_id: int) -> None:
         """Alarmas de comunicación tras crear o actualizar. Nunca rompe el flujo."""

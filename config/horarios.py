@@ -94,6 +94,12 @@ HORARIOS = {
         "task": "monitoreo.sondeo_mgs",
         "schedule": crontab(minute="*/15"),
     },
+    # A primera hora, para que el equipo vea en la campana lo que tiene
+    # programado antes de salir a campo.
+    "fallas-programadas-hoy": {
+        "task": "monitoreo.avisar_fallas_programadas",
+        "schedule": crontab(hour=6, minute=0),
+    },
 
     # ── Alertas de vencimiento ───────────────────────────────────────────────
     # Las dos salen por el mismo SMTP; 15 min de separacion para no competir por

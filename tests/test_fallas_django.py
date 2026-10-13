@@ -862,3 +862,95 @@ def test_un_nombre_que_no_se_puede_resolver_no_inventa_el_pct(datos):
     _planta(datos)
     falla = _con_inversores(datos, ("Inverter(COM1-12)", None, ["falla_dispositivo"]))
     assert impacto.pct_afectado(falla) is None
+
+
+# ── Equipos, garantía, Pendientes y aviso de programadas (2026-10-13) ────────
+
+def test_el_equipo_se_deduce_de_la_clasificacion():
+    from apps.monitoreo.services.fallas.estructura import EquipoFalla, equipo_de
+
+    assert equipo_de("inversores", None) == EquipoFalla.INVERSOR
+    assert equipo_de("frontera", "medidor_principal") == EquipoFalla.MEDIDOR
+    assert equipo_de("frontera", "ct") is None
+    assert equipo_de("equipos", "tracker") == EquipoFalla.TRACKER
+    assert equipo_de("red", "baja_tension") is None
+
+
+def test_pendientes_son_las_abiertas_en_garantia_o_de_equipos_que_esperan(datos):
+    from apps.monitoreo.services.fallas import dominio
+
+    assert dominio.en_pendientes(_falla(datos, en_garantia=True))
+    assert dominio.en_pendientes(_falla(
+        datos, codigo_interno="FAL-2026-00002",
+        categoria_codigo="equipos", subtipo_codigo="tracker",
+    ))
+    assert not dominio.en_pendientes(_falla(
+        datos, codigo_interno="FAL-2026-00003",
+        categoria_codigo="equipos", subtipo_codigo="smartlogger",
+    ))
+    assert not dominio.en_pendientes(_falla(
+        datos, codigo_interno="FAL-2026-00004", en_garantia=True,
+        estado_id=datos["cerrado"].id,
+    ))
+
+
+def test_un_smartlogger_no_pierde_energia_y_un_tracker_no_se_adivina(datos):
+    from apps.monitoreo.services.fallas import impacto
+
+    _planta(datos)
+    smartlogger = _falla(datos, categoria_codigo="equipos", subtipo_codigo="smartlogger")
+    tracker = _falla(
+        datos, codigo_interno="FAL-2026-00002",
+        categoria_codigo="equipos", subtipo_codigo="tracker",
+    )
+    assert impacto.prioridad_calculada(smartlogger) == impacto.Prioridad.LEVE
+    assert impacto.pct_afectado(tracker) is None
+
+
+def test_crear_una_falla_en_garantia_la_manda_a_pendientes(datos):
+    respuesta = _pedir(
+        "post", "/api/v1/fallas",
+        datos,
+        {
+            "proyecto_id": datos["proyecto"].id,
+            "estado_id": datos["abierto"].id,
+            "prioridad_id": datos["alta"].id,
+            "descripcion": "tracker trabado",
+            "fecha_identificacion": "2026-09-01",
+            "categoria_codigo": "equipos",
+            "subtipo_codigo": "tracker",
+            "subtipo_detalle": "fila 12",
+            "en_garantia": True,
+            "garantia_detalle": "RMA 4471 con el proveedor",
+        },
+        acciones={"post": "create"},
+    )
+    assert respuesta.status_code == 201, respuesta.data
+    assert respuesta.data["equipo"] == "tracker"
+    assert respuesta.data["en_garantia"] is True
+    assert respuesta.data["garantia_detalle"] == "RMA 4471 con el proveedor"
+    assert respuesta.data["en_pendientes"] is True
+
+
+def test_el_aviso_de_programadas_sale_una_vez_por_dia(datos):
+    from apps.monitoreo import models as mo
+    from apps.monitoreo.services.fallas import avisos
+    from apps.plataforma.models import Notificacion, Usuario
+    from apps.plataforma.services.fechas import hoy_col
+
+    programado = mo.FallaCatEstado.objects.create(
+        codigo="programado", etiqueta="Programado", orden=0, es_estado_final=False,
+    )
+    coordinador = Usuario.objects.create(
+        nombre="Coord", email="coord@unergy.io", rol="coordinador", activo=True,
+    )
+    _falla(datos, estado_id=programado.id, fecha_programada=hoy_col())
+    _falla(datos, codigo_interno="FAL-2026-00002", estado_id=programado.id,
+           fecha_programada=date(2020, 1, 1))
+
+    # Uno al coordinador y otro a quien la registró; la de 2020 no avisa.
+    assert avisos.programadas_hoy() == 2
+    assert avisos.programadas_hoy() == 0
+    assert Notificacion.objects.filter(
+        usuario=coordinador, titulo=avisos.TITULO_PROGRAMADA_HOY,
+    ).count() == 1

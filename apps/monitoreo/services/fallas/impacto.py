@@ -46,6 +46,9 @@ UMBRAL_GRAVE = 66.0
 _PLANTA_COMPLETA = {"red"}
 # Subtipos de "generando sin datos" en que se verificó que la planta estaba apagada.
 _SIN_DATOS_APAGADA = {"verificado_apagado"}
+# Equipos de planta cuya falla no le quita energía a la planta. Un tracker o un
+# string sí, pero cuánto depende de cuál: eso se deja a la prioridad manual.
+_EQUIPOS_SIN_PERDIDA = {"smartlogger", "estacion_meteorologica"}
 # Un inversor que solo perdió internet sigue generando.
 _TIPOS_INVERSOR_SIN_PERDIDA = {"perdida_comunicacion"}
 
@@ -78,6 +81,8 @@ def pct_afectado(falla: Falla) -> float | None:
         return 0.0
     if categoria == "inversores":
         return _pct_inversores(falla)
+    if categoria == "equipos" and falla.subtipo_codigo in _EQUIPOS_SIN_PERDIDA:
+        return 0.0
     return None
 
 

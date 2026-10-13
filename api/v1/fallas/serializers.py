@@ -14,6 +14,7 @@ from rest_framework import serializers
 
 from apps.monitoreo import models as mo_models
 from apps.monitoreo.services.fallas import dominio, impacto, sla_contractual
+from apps.monitoreo.services.fallas.estructura import equipo_de
 
 
 class FallaCatEstadoSerializer(serializers.ModelSerializer):
@@ -135,6 +136,10 @@ class FallaListaSerializer(serializers.ModelSerializer):
     pct_afectado = serializers.SerializerMethodField()
     prioridad_calculada = serializers.SerializerMethodField()
     kwh_perdidos_p90 = serializers.SerializerMethodField()
+    # El equipo afectado (deducido de la clasificación) y si la falla va a la
+    # pestaña Pendientes. Ver `estructura.equipo_de` y `dominio.en_pendientes`.
+    equipo = serializers.SerializerMethodField()
+    en_pendientes = serializers.SerializerMethodField()
 
     class Meta:
         model = mo_models.Falla
@@ -149,6 +154,7 @@ class FallaListaSerializer(serializers.ModelSerializer):
             "dias_abierta", "tiempo_afectacion_horas", "sla_limite_dias",
             "sla_horas_transcurridas", "sla_pct", "sla_contractual",
             "pct_afectado", "prioridad_calculada", "kwh_perdidos_p90",
+            "equipo", "en_garantia", "garantia_detalle", "en_pendientes",
             "categoria_codigo", "subtipo_codigo", "subtipo_detalle", "clasificacion",
             "pendiente_reclasificar", "frontera_afecta_medicion",
             "frontera_perdida_comunicacion", "inversores_perdida_comunicacion",
@@ -191,6 +197,13 @@ class FallaListaSerializer(serializers.ModelSerializer):
 
     def get_kwh_perdidos_p90(self, obj) -> float | None:
         return impacto.kwh_perdidos_p90(obj)
+
+    def get_equipo(self, obj) -> str | None:
+        equipo = equipo_de(obj.categoria_codigo, obj.subtipo_codigo)
+        return equipo.value if equipo else None
+
+    def get_en_pendientes(self, obj) -> bool:
+        return dominio.en_pendientes(obj)
 
 
 class FallaSerializer(FallaListaSerializer):
@@ -235,6 +248,7 @@ _COLUMNAS_ENTRADA = [
     "causa_raiz", "acciones_correctivas", "fecha_programada",
     "categoria_codigo", "subtipo_codigo", "subtipo_detalle",
     "frontera_afecta_medicion", "frontera_perdida_comunicacion",
+    "en_garantia", "garantia_detalle",
 ]
 
 

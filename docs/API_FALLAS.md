@@ -243,6 +243,10 @@ Solo con `categoria_codigo: "inversores"`. Una entrada por inversor afectado.
 | `pct_afectado` | `float` | solo lectura | % de la potencia AC de la planta afectada; `null` si no se puede calcular |
 | `prioridad_calculada` | `string` | solo lectura | `critica`/`grave`/`media`/`leve` según `pct_afectado`; al crear o editar reemplaza `prioridad_id` |
 | `kwh_perdidos_p90` | `float` | solo lectura | Energía perdida estimada con la simulación P90; crece mientras la falla siga abierta |
+| `equipo` | `string` | solo lectura | `inversor`/`smartlogger`/`tracker`/`string`/`medidor`/`estacion_meteorologica`, deducido de la clasificación |
+| `en_garantia` | `bool` | — | El equipo afectado está en garantía con su proveedor |
+| `garantia_detalle` | `string` | — | Proveedor, RMA, serial… |
+| `en_pendientes` | `bool` | solo lectura | Sin cerrar y en garantía, o de tracker/string/medidor/estación meteorológica |
 | `impacto_economico_cop` | `float` | — | Impacto en pesos. Numérico con 2 decimales |
 | `causa_raiz` | `string` | — | Texto libre |
 | `acciones_correctivas` | `string` | — | Texto libre |

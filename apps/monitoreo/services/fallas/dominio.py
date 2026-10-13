@@ -31,8 +31,8 @@ from api.exceptions import Conflict, NoProcesable
 from apps.monitoreo.models import Falla, FallaCatTipo, FallaIntervalo, FallaInversor
 from apps.plataforma.services.fechas import hoy_col
 from apps.monitoreo.services.fallas.estructura import (
-    es_subtipo_pendiente, etiqueta_subtipo, get_categoria, tipo_codigo,
-    validar_clasificacion,
+    EquipoFalla, equipo_de, es_subtipo_pendiente, etiqueta_subtipo, get_categoria,
+    tipo_codigo, validar_clasificacion,
 )
 
 _COL_TZ = timezone(timedelta(hours=-5))
@@ -169,6 +169,24 @@ def dias_abierta(falla: Falla) -> int | None:
         return None
     fin = falla.fecha_resolucion.date() if falla.fecha_resolucion else hoy_col()
     return max(0, (fin - falla.fecha_identificacion).days)
+
+
+# Equipos cuya falla suele quedar esperando repuesto o visita: van a Pendientes
+# aunque no estén en garantía.
+EQUIPOS_PENDIENTES = {
+    EquipoFalla.TRACKER, EquipoFalla.STRING, EquipoFalla.MEDIDOR,
+    EquipoFalla.ESTACION_METEOROLOGICA,
+}
+
+
+def en_pendientes(falla: Falla) -> bool:
+    """Si la falla va a la pestaña Pendientes: sin cerrar, y en garantía o de un
+    equipo de `EQUIPOS_PENDIENTES`."""
+    if falla.estado_id and falla.estado.es_estado_final:
+        return False
+    return falla.en_garantia or (
+        equipo_de(falla.categoria_codigo, falla.subtipo_codigo) in EQUIPOS_PENDIENTES
+    )
 
 
 def sla_limite_dias(falla: Falla) -> int:

@@ -34,6 +34,7 @@ _POR_CATEGORIA = {
     "frontera": GRAVE,
     "inversores": GRAVE,
     "generando_sin_datos": GRAVE,
+    "equipos": MEDIO,
     "eventos_adversos": MEDIO,
 }
 

@@ -325,6 +325,18 @@ provisional (el error de §5.9). `kwh_perdidos_estimado` sigue siendo el valor m
 - **Energía**: por día afectado, P90 del mes ÷ días del mes × fracción de la campana
   solar (seno 6:00–18:00, hora Colombia) × % afectado.
 
+### 5.9c Equipos, garantía, Pendientes y aviso de programadas (2026-10-13)
+
+- Categoría nueva **`equipos`** (smartlogger, tracker, string, estación
+  meteorológica). `estructura.equipo_de` deduce el equipo afectado de la
+  clasificación (inversores → inversor, frontera medidor_* → medidor).
+- `fallas.en_garantia` / `garantia_detalle` (migración `monitoreo/0009`).
+- `dominio.en_pendientes`: sin cerrar y en garantía, o de tracker, string, medidor
+  o estación meteorológica. Es la pestaña Pendientes del frontend.
+- `monitoreo.avisar_fallas_programadas` (6:00, `config/horarios.py`) deja en la
+  campana un aviso por cada falla `programado` con `fecha_programada` = hoy, a los
+  coordinadores y a quien la registró. Idempotente por día.
+
 ### 5.10 El SLA se ancla a medianoche
 
 El vencimiento se construye desde `fecha_identificacion` a las 00:00 sin sumar
