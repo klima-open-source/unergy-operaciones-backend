@@ -194,12 +194,21 @@ if os.getenv("DATABASE_URL"):
 REQUESTSDB_DATABASE_URL = os.getenv("REQUESTSDB_DATABASE_URL", "")
 ORIGINA_DATABASE_URL = os.getenv("ORIGINA_DATABASE_URL", "")
 
+# Unergy Auth (authentication-system) por gRPC. `GRPC_HOST` vacío la apaga: es el
+# default a propósito, para que un `.env` sin estas variables siga aceptando solo
+# los JWT y API keys propios, como antes. Ver apps/comun/integraciones/unergy_auth.
+GRPC_HOST = os.getenv("GRPC_HOST", "")
+GRPC_PORT = os.getenv("GRPC_PORT", "50051")
+GRPC_TIMEOUT = float(os.getenv("GRPC_TIMEOUT", "5"))
+
 REST_FRAMEWORK = {
     # El ORDEN importa: la API key se mira antes que el Bearer, igual que en
-    # FastAPI. Ver el docstring de api/authentication.py.
+    # FastAPI, y el JWT propio antes que el de Unergy Auth para no pagar una
+    # llamada gRPC por cada token local. Ver el docstring de api/authentication.py.
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "api.authentication.ApiKeyAuthentication",
         "api.authentication.JWTAuthentication",
+        "api.authentication.UnergyAuthAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_PAGINATION_CLASS": "api.pagination.BasePagination",

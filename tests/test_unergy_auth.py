@@ -1,0 +1,224 @@
+"""Tokens de Unergy Auth (authentication-system) conviviendo con los propios.
+
+`api.authentication.UnergyAuthAuthentication` valida por gRPC los `Bearer` que
+no son nuestros y resuelve el usuario **por email contra `usuarios`**, con su rol
+local. Lo que se vigila:
+
+- con `GRPC_HOST` vacío (el default) nada cambia: un token ajeno es 401 y no se
+  llama a nadie;
+- un JWT propio sigue entrando sin pasar por gRPC;
+- token válido de un email que no está en `usuarios` → 403, no 401: mandar al
+  login a alguien que ya inició sesión en Unergy sería un bucle;
+- servicio caído → 503, no 401: no es culpa de la sesión;
+- el cliente gRPC generado habla de verdad con un servidor (protobuf 7).
+"""
+from concurrent import futures
+
+import pytest
+
+django = pytest.importorskip("django", reason="requiere el entorno de Django (uv sync)")
+
+ME = "/api/v1/auth/me"
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _base():
+    import os
+
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    os.environ.setdefault("SECRET_KEY", "x" * 40)
+
+    from django.conf import settings
+
+    originales = settings.DATABASES
+    settings.DATABASES = {
+        "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}
+    }
+    django.setup()
+
+    from django.apps import apps as django_apps
+    from django.db import connections
+    from django.test.utils import setup_test_environment
+
+    connections.close_all()
+    connections.__dict__.pop("settings", None)
+    connections.__init__()
+
+    settings.MIGRATION_MODULES = {a.label: None for a in django_apps.get_app_configs()}
+    setup_test_environment()
+    connections["default"].creation.create_test_db(verbosity=0)
+    assert connections["default"].vendor == "sqlite", "no se aisló de la base real"
+    yield
+
+    from django.test.utils import teardown_test_environment
+
+    connections.close_all()
+    teardown_test_environment()
+    settings.DATABASES = originales
+    connections.__dict__.pop("settings", None)
+    connections.__init__()
+
+
+@pytest.fixture(scope="module")
+def usuario():
+    from apps.plataforma.models import Usuario
+
+    return Usuario.objects.create(
+        email="ana@unergy.io", nombre="Ana", rol="monitoreo", activo=True,
+    )
+
+
+@pytest.fixture
+def cliente():
+    from django.test import Client
+
+    return Client()
+
+
+@pytest.fixture
+def con_unergy_auth(settings_override):
+    return settings_override(GRPC_HOST="auth.test", GRPC_PORT="50051")
+
+
+@pytest.fixture
+def settings_override():
+    from django.test import override_settings
+
+    activos = []
+
+    def aplicar(**valores):
+        o = override_settings(**valores)
+        o.enable()
+        activos.append(o)
+
+    yield aplicar
+    for o in reversed(activos):
+        o.disable()
+
+
+@pytest.fixture
+def grpc_falso(monkeypatch):
+    """Reemplaza la llamada de red; `respuesta` es una IdentidadUnergy o una excepción."""
+    from apps.comun.integraciones.unergy_auth import cliente as unergy_auth
+
+    estado = {"respuesta": None, "llamadas": []}
+
+    def validar(token):
+        estado["llamadas"].append(token)
+        if isinstance(estado["respuesta"], Exception):
+            raise estado["respuesta"]
+        return estado["respuesta"]
+
+    monkeypatch.setattr(unergy_auth, "validar_token", validar)
+    return estado
+
+
+def _identidad(email):
+    from apps.comun.integraciones.unergy_auth.cliente import IdentidadUnergy
+
+    return IdentidadUnergy(user_id=7, email=email, username="ana", grupos=("ops",))
+
+
+def test_apagada_token_ajeno_es_401_sin_llamar_a_grpc(cliente, grpc_falso, settings_override):
+    settings_override(GRPC_HOST="")
+    r = cliente.get(ME, HTTP_AUTHORIZATION="Bearer token-de-unergy")
+    assert r.status_code == 401
+    assert grpc_falso["llamadas"] == []
+
+
+def test_jwt_propio_sigue_entrando_sin_grpc(cliente, usuario, grpc_falso, con_unergy_auth):
+    from apps.plataforma.services import cuentas
+
+    r = cliente.get(ME, HTTP_AUTHORIZATION=f"Bearer {cuentas.token_de(usuario, movil=False)}")
+    assert r.status_code == 200
+    assert r.json()["email"] == "ana@unergy.io"
+    assert grpc_falso["llamadas"] == []
+
+
+def test_token_unergy_resuelve_usuario_local_por_email(cliente, usuario, grpc_falso, con_unergy_auth):
+    # Mayúsculas a propósito: el email de authentication-system no tiene por qué
+    # venir con la misma capitalización que en `usuarios`.
+    grpc_falso["respuesta"] = _identidad("Ana@Unergy.io")
+    r = cliente.get(ME, HTTP_AUTHORIZATION="Bearer token-de-unergy")
+    assert r.status_code == 200
+    assert r.json()["id"] == usuario.id
+    assert r.json()["rol"] == "monitoreo"
+    assert grpc_falso["llamadas"] == ["token-de-unergy"]
+
+
+def test_email_sin_cuenta_en_operaciones_es_403(cliente, usuario, grpc_falso, con_unergy_auth):
+    grpc_falso["respuesta"] = _identidad("nadie@unergy.io")
+    r = cliente.get(ME, HTTP_AUTHORIZATION="Bearer token-de-unergy")
+    assert r.status_code == 403
+
+
+def test_usuario_inactivo_es_401(cliente, grpc_falso, con_unergy_auth):
+    from apps.plataforma.models import Usuario
+
+    Usuario.objects.create(email="baja@unergy.io", nombre="Baja", rol="operaciones", activo=False)
+    grpc_falso["respuesta"] = _identidad("baja@unergy.io")
+    r = cliente.get(ME, HTTP_AUTHORIZATION="Bearer token-de-unergy")
+    assert r.status_code == 401
+
+
+def test_token_rechazado_es_401(cliente, grpc_falso, con_unergy_auth):
+    from apps.comun.integraciones.unergy_auth.cliente import TokenInvalido
+
+    grpc_falso["respuesta"] = TokenInvalido("vencido")
+    r = cliente.get(ME, HTTP_AUTHORIZATION="Bearer token-de-unergy")
+    assert r.status_code == 401
+
+
+def test_servicio_caido_es_503(cliente, grpc_falso, con_unergy_auth):
+    from apps.comun.integraciones.unergy_auth.cliente import ServicioNoDisponible
+
+    grpc_falso["respuesta"] = ServicioNoDisponible()
+    r = cliente.get(ME, HTTP_AUTHORIZATION="Bearer token-de-unergy")
+    assert r.status_code == 503
+
+
+@pytest.fixture
+def servidor_grpc():
+    """Un AuthService de verdad en un puerto local, para probar el código generado."""
+    import grpc
+
+    from apps.comun.integraciones.unergy_auth import auth_pb2, auth_pb2_grpc
+
+    class Servicio(auth_pb2_grpc.AuthServiceServicer):
+        def ValidateToken(self, request, context):
+            if request.token != "bueno":
+                return auth_pb2.UserResponse(
+                    is_valid=False, error=auth_pb2.ErrorResponse(code=401, message="vencido"),
+                )
+            return auth_pb2.UserResponse(
+                is_valid=True, user_id=7, username="ana", email="ana@unergy.io", groups=["ops"],
+            )
+
+    servidor = grpc.server(futures.ThreadPoolExecutor(max_workers=2))
+    auth_pb2_grpc.add_AuthServiceServicer_to_server(Servicio(), servidor)
+    puerto = servidor.add_insecure_port("127.0.0.1:0")
+    servidor.start()
+    yield puerto
+    servidor.stop(None)
+
+
+def test_cliente_grpc_contra_servidor_real(servidor_grpc, settings_override):
+    from apps.comun.integraciones.unergy_auth import cliente as unergy_auth
+
+    settings_override(GRPC_HOST="127.0.0.1", GRPC_PORT=str(servidor_grpc), GRPC_TIMEOUT=5)
+
+    identidad = unergy_auth.validar_token("bueno")
+    assert identidad.email == "ana@unergy.io"
+    assert identidad.grupos == ("ops",)
+
+    with pytest.raises(unergy_auth.TokenInvalido, match="vencido"):
+        unergy_auth.validar_token("malo")
+
+
+def test_cliente_grpc_sin_servidor_es_no_disponible(settings_override):
+    from apps.comun.integraciones.unergy_auth import cliente as unergy_auth
+
+    # Puerto 9 (discard): nadie escucha. Timeout corto para no frenar la suite.
+    settings_override(GRPC_HOST="127.0.0.1", GRPC_PORT="9", GRPC_TIMEOUT=0.5)
+    with pytest.raises(unergy_auth.ServicioNoDisponible):
+        unergy_auth.validar_token("cualquiera")

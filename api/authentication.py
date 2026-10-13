@@ -7,6 +7,9 @@ vez de llamar a nadie.
 **Los tokens ya emitidos siguen siendo válidos**: mismo algoritmo, misma clave y
 mismos claims. Un usuario con sesión abierta no nota la migración.
 
+Además, mientras dura la migración a Unergy Auth, un `Bearer` que no es nuestro
+se valida contra authentication-system por gRPC (`UnergyAuthAuthentication`).
+
 Dos formas de identificarse, y el ORDEN importa: si viene `X-API-Key` se usa
 esa y no se mira el `Authorization`. Es el mismo orden que en FastAPI — una
 integración que mande las dos por descuido no debe cambiar de identidad según
@@ -21,6 +24,7 @@ import hashlib
 from django.utils import timezone
 from rest_framework import authentication, exceptions
 
+from apps.comun.integraciones.unergy_auth import cliente as unergy_auth
 from apps.plataforma.models import ApiKey, Usuario
 from apps.plataforma.services import seguridad
 
@@ -116,7 +120,76 @@ class JWTAuthentication(authentication.BaseAuthentication):
 
         payload = seguridad.decodificar(cabecera[1].decode())
         if payload is None:
+            # No es un token nuestro (o ya venció): puede ser de Unergy Auth, y
+            # esa la valida la clase siguiente. Con Unergy Auth apagada no hay
+            # siguiente que lo acepte, y se responde como siempre.
+            if unergy_auth.habilitado():
+                return None
             raise exceptions.AuthenticationFailed("Token inválido o expirado.")
 
         usuario = Usuario.objects.filter(pk=payload.get("sub")).first()
+        return (_usuario_activo(usuario), None)
+
+
+class AuthNoDisponible(exceptions.APIException):
+    """503 propio y no `api.exceptions.ServicioNoDisponible`: importar
+    `api.exceptions` desde aquí es circular (importa `rest_framework.views`, que
+    carga `DEFAULT_AUTHENTICATION_CLASSES`)."""
+
+    status_code = 503
+    default_detail = "El servicio de autenticación no está disponible."
+
+
+class UnergyAuthAuthentication(authentication.BaseAuthentication):
+    """`Authorization: Bearer <token>` emitido por Unergy Auth (authentication-system).
+
+    Convive con `JWTAuthentication` durante la migración: esa acepta los tokens
+    propios y le cede a esta los que no puede decodificar.
+
+    El token lo valida authentication-system por gRPC; quién es el usuario en
+    Operaciones se decide aquí, **por email contra `usuarios`**, y su rol sigue
+    siendo el local. Por eso esta clase no usa el `GRPCAuthenticationMiddleware`
+    de la skill `add-auth`: ese pone en `request.user` un `auth.User` sin `rol`,
+    y `api/permissions.py` y cada FK a `usuarios` dejarían de funcionar.
+
+    - token rechazado por el servicio → 401 (el frontend manda al login);
+    - token válido pero el email no está en `usuarios` → 403: la persona existe
+      en Unergy pero no tiene acceso a Operaciones, y mandarla al login sería un
+      bucle;
+    - servicio caído → 503, no 401: no es culpa de la sesión.
+    """
+
+    keyword = "Bearer"
+
+    def authenticate_header(self, request):
+        # Ver el docstring de ApiKeyAuthentication.authenticate_header.
+        return self.keyword
+
+    def authenticate(self, request):
+        if not unergy_auth.habilitado():
+            return None
+
+        cabecera = authentication.get_authorization_header(request).split()
+        if not cabecera or cabecera[0].lower() != self.keyword.lower().encode():
+            return None
+        if len(cabecera) != 2:
+            raise exceptions.AuthenticationFailed(
+                "Encabezado Authorization mal formado."
+            )
+
+        try:
+            identidad = unergy_auth.validar_token(cabecera[1].decode())
+        except unergy_auth.TokenInvalido:
+            raise exceptions.AuthenticationFailed("Token inválido o expirado.")
+        except unergy_auth.ServicioNoDisponible:
+            raise AuthNoDisponible()
+
+        usuario = (
+            Usuario.objects.filter(email__iexact=identidad.email).first()
+            if identidad.email else None
+        )
+        if usuario is None:
+            raise exceptions.PermissionDenied(
+                "Tu cuenta de Unergy no tiene acceso a Operaciones."
+            )
         return (_usuario_activo(usuario), None)

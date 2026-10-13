@@ -1,0 +1,56 @@
+syntax = "proto3";
+package auth;
+
+// Definición del servicio de autenticación
+service AuthService {
+    rpc ValidateToken (TokenRequest) returns (UserResponse);
+    rpc ValidateCredentials (CredentialsRequest) returns (UserResponse);
+    rpc ValidateAPIKey (APIKeyRequest) returns (APIKeyResponse);
+    rpc GetUserInfo (UserRequest) returns (UserResponse);
+}
+
+// Petición con token
+message TokenRequest {
+    string token = 1;
+}
+
+// Petición con credenciales básicas
+message CredentialsRequest {
+    string username = 1;
+    string password = 2;
+}
+
+// Petición con ID de usuario
+message UserRequest {
+    int32 user_id = 1;
+}
+
+// Respuesta general del usuario (usada en ambos métodos)
+message UserResponse {
+    bool is_valid = 1;                  // Indica si el usuario es válido o no
+    int32 user_id = 2;                  // ID del usuario
+    string first_name = 3;              // Nombre
+    string last_name = 4;              // Apellido
+    string username = 5;                // Nombre de usuario
+    string email = 6;                   // Correo electrónico
+    repeated string groups = 7;         // Grupos a los que pertenece
+    repeated string permissions = 8;    // Permisos
+    repeated int32 owner = 9;           // Usuarios relacionados
+    ErrorResponse error = 10;           // Mensaje de error (si aplica)
+}
+
+message APIKeyRequest {
+    string key = 1;
+    string path = 2;
+}
+
+message APIKeyResponse {
+    bool is_valid = 1;
+    ErrorResponse error = 2;
+}
+
+// Definición del mensaje de error
+message ErrorResponse {
+    int32 code = 1;          // Código de error (por ejemplo, 401 para autenticación fallida)
+    string message = 2;      // Mensaje de error
+}
