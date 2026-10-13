@@ -6,6 +6,7 @@ from django.db.models import Q
 
 from apps.contratos import models as ct_models
 from apps.contratos.services import contrato_partes
+from apps.contratos.services.contrato_proyectos import CON_PLANTA
 from apps.proyectos import models as py_models
 
 LIMITE_MAXIMO = 500
@@ -25,8 +26,7 @@ def con_relaciones():
     """
     return (
         ct_models.ContratoServicio.objects
-        .select_related("proyecto", "inversionista")
-        .prefetch_related(contrato_partes.CON_PARTES)
+        .prefetch_related(CON_PLANTA, contrato_partes.CON_PARTES)
         .prefetch_related(
             "contrato_frontera_por_contrato_servicio_id__frontera",
             "cliente_documentos_comerciales_por_contrato_servicio_id",
@@ -44,7 +44,7 @@ def listar(tipo=None, proyecto_id=None, codigo_tsf=None, limite=LIMITE_MAXIMO):
         # Tres formas de que un contrato pertenezca a un proyecto, en orden de
         # fiabilidad: el FK, el código Sun Factory y —último recurso— el código
         # de cuatro dígitos dentro del nombre de referencia, que es texto libre.
-        criterio = Q(proyecto_id=proyecto_id)
+        criterio = Q(proyectos_vinculados__proyecto_id=proyecto_id)
         if codigo_tsf:
             criterio |= Q(codigo_sun_factory=codigo_tsf)
         nombre = (

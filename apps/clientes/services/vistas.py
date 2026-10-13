@@ -26,6 +26,7 @@ from apps.clientes.services.panel import (
 from apps.contratos.models import ContratoServicio
 from apps.contratos.services import grupos as grupos_servicio
 from apps.contratos.services.contrato_partes import ROLES_PPA, ROLES_SERVICIO, contratos_de
+from apps.contratos.services.contrato_proyectos import CON_PLANTA
 from apps.plataforma.services.fechas import hoy_col
 from apps.ppa.models import PpaContrato, PpaContratoProyecto
 from apps.proyectos.models import Proyecto, ProyectoInversionista
@@ -104,14 +105,14 @@ def _contratos_del_cliente(cliente_id: int, plant_ids: set[int]):
     """
     criterio = Q(pk__in=contratos_de({cliente_id}, ROLES_SERVICIO))
     if plant_ids:
-        criterio |= Q(proyecto_id__in=plant_ids)
+        criterio |= Q(proyectos_vinculados__proyecto_id__in=plant_ids)
     return list(
         ContratoServicio.objects
         .filter(criterio)
         # `enlace_drive` recorre los documentos de cada contrato: sin precargar
         # son tantas consultas como contratos.
         .prefetch_related("cliente_documentos_comerciales_por_contrato_servicio_id",
-                          "servicios")
+                          "servicios", CON_PLANTA)
     )
 
 

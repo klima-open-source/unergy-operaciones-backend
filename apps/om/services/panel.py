@@ -15,6 +15,7 @@ from apps.om.services.calculadora import calcular_proyecto, serie_indexacion
 from apps.plataforma.services.fechas import hoy_col
 from apps.proyectos import models as py_models
 from apps.contratos.services import contrato_partes
+from apps.contratos.services.contrato_proyectos import CON_PLANTA
 
 SERVICIO_OM = "mantenimiento"
 
@@ -30,8 +31,8 @@ def _contrato_por_proyecto() -> dict[int, object]:
     contratos: dict[int, object] = {}
     consulta = (
         ct_models.ContratoServicio.objects
-        .filter(servicio_aplica=SERVICIO_OM, proyecto__isnull=False)
-        .select_related("proyecto").prefetch_related(contrato_partes.CON_PARTES)
+        .filter(servicio_aplica=SERVICIO_OM, proyectos_vinculados__isnull=False)
+        .prefetch_related(CON_PLANTA, contrato_partes.CON_PARTES)
         .order_by("id")
     )
     for contrato in consulta:
@@ -163,7 +164,7 @@ def valor_de_proyecto(proyecto_id: int, periodo: str) -> float | None:
     """
     contrato = (
         ct_models.ContratoServicio.objects
-        .filter(servicio_aplica=SERVICIO_OM, proyecto_id=proyecto_id)
+        .filter(servicio_aplica=SERVICIO_OM, proyectos_vinculados__proyecto_id=proyecto_id)
         .order_by("id").first()
     )
     if contrato is None:

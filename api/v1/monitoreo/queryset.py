@@ -19,6 +19,7 @@ from apps.proyectos import models as py_models
 from apps.proyectos.services import portafolios as portafolios_service
 from apps.plataforma.services.fechas import hoy_col
 from apps.contratos.services import contrato_partes
+from apps.contratos.services.contrato_proyectos import CON_PLANTA
 
 logger = logging.getLogger("operaciones.monitoreo")
 
@@ -88,7 +89,7 @@ def _contrato_om(proyecto):
     return (
         ct_models.ContratoServicio.objects
         .filter(vigencia_service.filtro_vivos(hoy_col()))
-        .filter(proyecto=proyecto, servicio_aplica=SERVICIO_OM)
+        .filter(proyectos_vinculados__proyecto=proyecto, servicio_aplica=SERVICIO_OM)
         .first()
     )
 
@@ -115,8 +116,7 @@ def build_all_contratos() -> dict:
         ct_models.ContratoServicio.objects
         .filter(vigencia_service.filtro_vivos(hoy_col()))
         .filter(servicio_aplica=SERVICIO_OM)
-        .select_related("proyecto")
-        .prefetch_related(contrato_partes.CON_PARTES)
+        .prefetch_related(CON_PLANTA, contrato_partes.CON_PARTES)
     )
     for contrato in consulta:
         proyecto = contrato.proyecto

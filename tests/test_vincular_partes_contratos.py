@@ -86,67 +86,79 @@ def _contrato(**kw):
     return ContratoServicio.objects.create(**kw)
 
 
+def _factura(nombre, inversionista=None):
+    """Una factura que nombra a su inversionista con texto. Desde la rama de
+    inversionistas el del CONTRATO ya no es texto (es una participación de la
+    planta): las facturas son el caso que le queda a este comando."""
+    from apps.facturacion.models import ContratoFactura
+
+    return ContratoFactura.objects.create(
+        contrato=_contrato(servicio_aplica="mantenimiento"), tipo="inversionista",
+        fecha="2026-09", inversionista_nombre=nombre, inversionista=inversionista,
+    )
+
+
 def test_sin_aplicar_no_escribe_nada(entorno):
     """El comando toca producción: por defecto solo informa."""
-    from apps.contratos.models import ContratoServicio
+    from apps.facturacion.models import ContratoFactura
 
     _cliente("Quantum Energy Ingenieria S.A.S.", "900111222-3")
-    contrato = _contrato(inversionista_nombre="Quantum Energy Ingenieria S.A.S.")
+    contrato = _factura("Quantum Energy Ingenieria S.A.S.")
 
     salida = _correr()
 
-    assert ContratoServicio.objects.get(pk=contrato.id).inversionista_id is None
+    assert ContratoFactura.objects.get(pk=contrato.id).inversionista_id is None
     assert "no se escribió nada" in salida
 
 
 def test_aplicar_vincula_por_nombre(entorno):
-    from apps.contratos.models import ContratoServicio
+    from apps.facturacion.models import ContratoFactura
 
     cliente = _cliente("Quantum Energy Ingenieria S.A.S.", "900111222-3")
-    contrato = _contrato(inversionista_nombre="Quantum Energy Ingenieria S.A.S.")
+    contrato = _factura("Quantum Energy Ingenieria S.A.S.")
 
     _correr("--aplicar")
 
-    assert ContratoServicio.objects.get(pk=contrato.id).inversionista_id == cliente.id
+    assert ContratoFactura.objects.get(pk=contrato.id).inversionista_id == cliente.id
 
 
 def test_aplicar_vincula_el_inversionista(entorno):
-    """El que alimenta el reparto de costos, y el único sin columna de NIT."""
-    from apps.contratos.models import ContratoServicio
+    """El de la factura no tiene columna de NIT: solo el nombre."""
+    from apps.facturacion.models import ContratoFactura
 
     cliente = _cliente("Fondo Solar Uno S.A.S.", "902555666-7")
-    contrato = _contrato(inversionista_nombre="Fondo Solar Uno S.A.S.")
+    contrato = _factura("Fondo Solar Uno S.A.S.")
 
     _correr("--aplicar")
 
-    assert ContratoServicio.objects.get(pk=contrato.id).inversionista_id == cliente.id
+    assert ContratoFactura.objects.get(pk=contrato.id).inversionista_id == cliente.id
 
 
 def test_no_pisa_un_vinculo_ya_puesto(entorno):
     """Corregir un vínculo existente es decisión de alguien, no de un
     emparejamiento por texto."""
-    from apps.contratos.models import ContratoServicio
+    from apps.facturacion.models import ContratoFactura
 
     puesto = _cliente("El Vinculado A Mano")
     _cliente("Otra Empresa S.A.S.", "900999888-7")
-    contrato = _contrato(inversionista=puesto, inversionista_nombre="Otra Empresa S.A.S.")
+    contrato = _factura("Otra Empresa S.A.S.", inversionista=puesto)
 
     _correr("--aplicar")
 
-    assert ContratoServicio.objects.get(pk=contrato.id).inversionista_id == puesto.id
+    assert ContratoFactura.objects.get(pk=contrato.id).inversionista_id == puesto.id
 
 
 def test_sin_candidato_se_reporta_y_no_inventa_cliente(entorno):
     from apps.clientes.models import Cliente
-    from apps.contratos.models import ContratoServicio
+    from apps.facturacion.models import ContratoFactura
 
     _cliente("Nada Que Ver S.A.S.")
-    contrato = _contrato(inversionista_nombre="Empresa Inexistente Del Valle")
+    contrato = _factura("Empresa Inexistente Del Valle")
     cuantos = Cliente.objects.count()
 
     salida = _correr("--aplicar")
 
-    assert ContratoServicio.objects.get(pk=contrato.id).inversionista_id is None
+    assert ContratoFactura.objects.get(pk=contrato.id).inversionista_id is None
     assert Cliente.objects.count() == cuantos, "no debe crear clientes"
     assert "Sin cliente que empareje        : 1" in salida
 
@@ -158,8 +170,8 @@ def test_una_palabra_generica_en_comun_no_es_parecido(entorno):
     """ "Bia Energy" casaba con "BALI ENERGY" (cinco PPA) por la palabra "energy"."""
     _cliente("BALI ENERGY S.A.S.")
     _cliente("CSCI COLOMBIA SOLAR CORP")
-    bia = _contrato(inversionista_nombre=" Bia Energy S.A.S.")
-    nitro = _contrato(inversionista_nombre="NITRO ENERGY COLOMBIA S A S E S P")
+    bia = _factura(" Bia Energy S.A.S.")
+    nitro = _factura("NITRO ENERGY COLOMBIA S A S E S P")
 
     salida = _correr("--aplicar")
 

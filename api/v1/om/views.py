@@ -14,6 +14,7 @@ from api.logging import class_logger_wrapper, log_endpoint
 from api.permissions import RolePermission
 from apps.comun.periodo import ANIO_MAX, ANIO_MIN, anio_valido, periodo_valido
 from apps.contratos import models as ct_models
+from apps.contratos.services.contrato_proyectos import CON_PLANTA
 from apps.om import models as om_models
 from apps.om.services import factura as factura_service
 from apps.om.services import panel as panel_service
@@ -67,9 +68,9 @@ class OmViewSet(viewsets.GenericViewSet):
         contratos = (
             ct_models.ContratoServicio.objects
             .filter(servicio_aplica=SERVICIO_OM,
-                    proyecto__estado="en_operacion",
-                    proyecto__deleted_at__isnull=True)
-            .select_related("proyecto").order_by("id")
+                    proyectos_vinculados__proyecto__estado="en_operacion",
+                    proyectos_vinculados__proyecto__deleted_at__isnull=True)
+            .prefetch_related(CON_PLANTA).order_by("id")
         )
         filas = [
             {
@@ -169,7 +170,7 @@ class OmViewSet(viewsets.GenericViewSet):
         if fila.facturado and fila.valor_facturado_congelado is None:
             contrato = ct_models.ContratoServicio.objects.filter(
                 pk=contrato_id
-            ).select_related("proyecto").first()
+            ).prefetch_related(CON_PLANTA).first()
             if contrato is not None:
                 panel_service.congelar_valor(fila, contrato)
 
@@ -251,7 +252,7 @@ class OmViewSet(viewsets.GenericViewSet):
 
         contrato = ct_models.ContratoServicio.objects.filter(
             pk=entrada.validated_data["contrato_id"], servicio_aplica=SERVICIO_OM
-        ).select_related("proyecto").first()
+        ).prefetch_related(CON_PLANTA).first()
         if contrato is None:
             raise NotFound(
                 "El contrato indicado no es un contrato de mantenimiento válido"

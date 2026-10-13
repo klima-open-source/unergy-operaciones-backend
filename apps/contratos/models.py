@@ -100,6 +100,15 @@ class AlertaAniversario(Timer):
 # =====================================================================================
 
 
+#: Marca de "este atajo no se tocó" (None es un valor válido: quitar la planta).
+_SIN_CAMBIO = object()
+
+#: Los atajos de planta e inversionista de `Contrato` (no son columnas).
+ATAJOS_DE_PLANTA = frozenset({
+    "proyecto", "proyecto_id", "inversionista", "inversionista_id", "inversionista_nombre",
+})
+
+
 class GrupoContrato(models.TextChoices):
     """A qué grupo de Servicios pertenece un contrato. Los valores son los de
     `apps.contratos.services.grupos` (la fuente única del catálogo); las fachadas
@@ -199,9 +208,8 @@ class Contrato(Timer):
 
     # Las partes (comprador, vendedor, contratante, prestador) viven en
     # `contrato_partes`; su nombre y NIT, en la ficha del cliente. Los atajos de
-    # lectura con los nombres de siempre están al final de la clase.
-    # El inversionista sigue aquí hasta la rama de inversionistas.
-    inversionista_nombre = models.CharField(max_length=255, null=True, blank=True)
+    # lectura con los nombres de siempre están al final de la clase. El inversionista
+    # (y la planta) salen de `contrato_proyectos`: ver sus atajos más abajo.
 
     # --- Específicas de compraventa de energía (PPA), antes en ppa_contratos ---
     responsable = models.ForeignKey(
@@ -242,14 +250,11 @@ class Contrato(Timer):
                  ("internet", "internet")],
         null=True, blank=True,
     )
-    inversionista = models.ForeignKey(
-        "clientes.Cliente", on_delete=models.SET_NULL, db_column="inversionista_id",
-        null=True, blank=True, related_name="contratos_servicio_por_inversionista_id",
-    )
-    proyecto = models.ForeignKey(
-        "proyectos.Proyecto", on_delete=models.DO_NOTHING, db_column="proyecto_id",
-        null=True, blank=True, related_name="contratos_servicio_por_proyecto_id",
-    )
+    # La planta y el inversionista ya no son columnas que Django lea: viven en
+    # `contrato_proyectos` (planta y, en representación, la participación). Ver los
+    # atajos `proyecto` / `inversionista` más abajo. Las columnas `proyecto_id`,
+    # `inversionista_id` e `inversionista_nombre` siguen en la base, sin escribirse,
+    # hasta `contratos/0019` (paso 4c).
     # Tarifas escalares e indexación JSON: siguen siendo LA tarifa hasta la rama de
     # tarifas, que las pasa a `tarifas` colgando de `servicios` (plan 08, §2).
     tarifa_admin = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)
@@ -314,24 +319,140 @@ class Contrato(Timer):
     def _poner_parte(self, rol, cliente) -> None:
         self.__dict__.setdefault("_partes_pendientes", {})[rol] = cliente
 
+    # --- La planta y el inversionista: atajos sobre `contrato_proyectos` -----------
+    #
+    # `contrato.proyecto_id`, `contrato.inversionista`… se leen igual que cuando eran
+    # columnas, pero salen de la fila de `contrato_proyectos` de un contrato de
+    # servicio (una sola) y de su participación. Para un listado:
+    # `.prefetch_related(contrato_proyectos.CON_PLANTA)`. En un PPA valen None: sus
+    # plantas son `proyectos_vinculados`, varias.
+    #
+    # Escribirlos deja el valor pendiente y `save()` lo lleva a `contrato_proyectos`.
+    # El inversionista tiene que participar en la planta (`InversionistaFueraDeLaPlanta`).
+    # `inversionista_nombre` es el de la ficha del cliente: asignarlo no hace nada.
+
+    def _vinculo(self):
+        """La fila de `contrato_proyectos` de este contrato de servicio, o None."""
+        if "_vinculo_cache" not in self.__dict__:
+            filas = getattr(self, "_prefetched_objects_cache", {}).get("proyectos_vinculados")
+            if filas is None:
+                filas = (self.proyectos_vinculados.select_related(
+                    "proyecto", "proyecto_inversionista__inversionista__cliente",
+                ) if self.pk and self.grupo != GrupoContrato.PPA else [])
+            filas = list(filas)
+            self.__dict__["_vinculo_cache"] = (
+                filas[0] if len(filas) == 1 and self.grupo != GrupoContrato.PPA else None
+            )
+        return self.__dict__["_vinculo_cache"]
+
+    def _pendiente(self, clave):
+        return self.__dict__.get("_planta_pendiente", {}).get(clave, _SIN_CAMBIO)
+
+    def _poner_pendiente(self, clave, valor) -> None:
+        self.__dict__.setdefault("_planta_pendiente", {})[clave] = valor
+
+    @property
+    def proyecto_id(self):
+        valor = self._pendiente("proyecto_id")
+        if valor is not _SIN_CAMBIO:
+            return valor
+        vinculo = self._vinculo()
+        return vinculo.proyecto_id if vinculo else None
+
+    @proyecto_id.setter
+    def proyecto_id(self, valor):
+        self._poner_pendiente("proyecto_id", int(valor) if valor not in (None, "") else None)
+
+    @property
+    def proyecto(self):
+        pid = self.proyecto_id
+        if pid is None:
+            return None
+        vinculo = self._vinculo()
+        if vinculo is not None and vinculo.proyecto_id == pid:
+            return vinculo.proyecto
+        from apps.proyectos.models import Proyecto
+
+        return Proyecto.objects.filter(pk=pid).first()
+
+    @proyecto.setter
+    def proyecto(self, proyecto):
+        self.proyecto_id = proyecto.pk if proyecto is not None else None
+
+    @property
+    def inversionista_id(self):
+        valor = self._pendiente("inversionista_id")
+        if valor is not _SIN_CAMBIO:
+            return valor
+        vinculo = self._vinculo()
+        participacion = vinculo.proyecto_inversionista if vinculo else None
+        return participacion.inversionista.cliente_id if participacion else None
+
+    @inversionista_id.setter
+    def inversionista_id(self, valor):
+        self._poner_pendiente("inversionista_id", int(valor) if valor not in (None, "") else None)
+
+    @property
+    def inversionista(self):
+        cid = self.inversionista_id
+        if cid is None:
+            return None
+        vinculo = self._vinculo()
+        participacion = vinculo.proyecto_inversionista if vinculo else None
+        if participacion is not None and participacion.inversionista.cliente_id == cid:
+            return participacion.inversionista.cliente
+        from apps.clientes.models import Cliente
+
+        return Cliente.objects.filter(pk=cid).first()
+
+    @inversionista.setter
+    def inversionista(self, cliente):
+        self.inversionista_id = cliente.pk if cliente is not None else None
+
+    @property
+    def inversionista_nombre(self):
+        cliente = self.inversionista
+        return cliente.razon_social_nombre if cliente else None
+
+    @inversionista_nombre.setter
+    def inversionista_nombre(self, valor):
+        pass  # sale de la ficha del cliente; los llamadores viejos lo siguen asignando
+
     def save(self, *args, **kwargs):
-        # Los atajos de las partes no son columnas: fuera de `update_fields`.
-        # Si solo se tocaron partes, la lista queda vacía y Django no escribe la fila.
+        # Los atajos de las partes, la planta y el inversionista no son columnas:
+        # fuera de `update_fields`. Si solo se tocaron atajos, la lista queda vacía y
+        # Django no escribe la fila.
         if kwargs.get("update_fields") is not None:
             kwargs["update_fields"] = [
-                f for f in kwargs["update_fields"] if f not in _ATAJOS_DE_PARTES
+                f for f in kwargs["update_fields"]
+                if f not in _ATAJOS_DE_PARTES and f not in ATAJOS_DE_PLANTA
             ]
+        from apps.contratos.services import contrato_partes, contrato_proyectos, servicios
+
+        if self.grupo == GrupoContrato.REPRESENTACION_CGM:
+            inversionista = self._pendiente("inversionista_id")
+            if inversionista not in (_SIN_CAMBIO, None):
+                contrato_proyectos.validar_inversionista(self.proyecto_id, inversionista)
         super().save(*args, **kwargs)
         # Qué servicios cubre, desde el ÚNICO lugar que los escribe: así ningún
         # camino de escritura (API, CRM, admin) puede dejarlos desalineados con
         # `tipo_contrato` o `servicio_aplica`.
-        from apps.contratos.services import contrato_partes, contrato_proyectos, servicios
-
         servicios.registrar(self)
-        contrato_proyectos.sincronizar(self)
+        pendiente = self.__dict__.pop("_planta_pendiente", {})
+        contrato_proyectos.sincronizar(
+            self,
+            proyecto_id=pendiente.get("proyecto_id", _SIN_CAMBIO),
+            inversionista_id=pendiente.get("inversionista_id", _SIN_CAMBIO),
+        )
+        self.__dict__.pop("_vinculo_cache", None)
         pendientes = self.__dict__.pop("_partes_pendientes", None)
         if pendientes:
             contrato_partes.asignar(self, pendientes)
+
+    def refresh_from_db(self, *args, **kwargs):
+        for cache in ("_vinculo_cache", "_planta_pendiente", "_partes_cache", "_partes_pendientes"):
+            self.__dict__.pop(cache, None)
+        super().refresh_from_db(*args, **kwargs)
 
     class Meta:
         db_table = "contratos"

@@ -130,11 +130,6 @@ def borrar(cliente: Cliente) -> None:
     cliente.save(update_fields=["deleted_at"])
 
 
-#: Las columnas de `contratos` que apuntan a un cliente como parte del contrato.
-#: Comprador, vendedor, contratante y prestador están en `contrato_partes`, que la
-#: fusión mueve en `MERGE_COMPUESTO`. Queda el inversionista, hasta su rama.
-CAMPOS_PARTE_CONTRATO = ("inversionista_id",)
-
 
 def _escalar(cur, sql: str, params: dict) -> int:
     cur.execute(sql, params)
@@ -225,19 +220,6 @@ def reporte_merge(ganador: Cliente, perdedor: Cliente) -> tuple[list[dict], list
                 movimientos.append({"tabla": "proyecto_inversionistas", "a_mover": n - coli,
                                     "descartadas_por_colision": coli})
 
-        # contratos: las partes de PPA (comprador/vendedor) y de servicio
-        # (contratante/prestador/inversionista), todas en la tabla única desde el
-        # corte (plan 08). Sin unicidad por cliente. Las de servicio faltaban acá
-        # hasta la auditoría de Clientes 2026-08-27: fusionar un cliente que fuera
-        # parte de un contrato de servicio lo dejaba apuntando al perdedor.
-        n = sum(
-            _escalar(cur, f"SELECT count(*) FROM contratos WHERE {campo} = %(loser)s", p)
-            for campo in CAMPOS_PARTE_CONTRATO
-        )
-        if n:
-            movimientos.append({
-                "tabla": "contratos", "a_mover": n, "descartadas_por_colision": 0,
-            })
 
     campos_copiados = [
         {"campo": f, "valor": getattr(perdedor, f)}
@@ -266,12 +248,6 @@ def ejecutar_merge(ganador: Cliente, perdedor: Cliente, movimientos: list[dict],
         })
 
         with connection.cursor() as cur:
-            # 1) Las cinco columnas de parte de `contratos`.
-            for campo in CAMPOS_PARTE_CONTRATO:
-                cur.execute(
-                    f"UPDATE contratos SET {campo} = %(keeper)s WHERE {campo} = %(loser)s", p
-                )
-
             # 1 bis) El inversionista, antes que sus participaciones (paso 2): las
             #        del perdedor se repuntan al del ganador si ya lo era.
             _fusionar_inversionista(cur, p)

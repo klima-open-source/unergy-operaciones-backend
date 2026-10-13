@@ -19,6 +19,7 @@ from apps.arriendos.services.calculadora import (
 )
 from apps.contratos import models as ct_models
 from apps.contratos.services import plantas
+from apps.contratos.services.contrato_proyectos import CON_PLANTA
 from apps.plataforma.services.fechas import hoy_col
 from apps.proyectos import models as py_models
 
@@ -39,8 +40,8 @@ def _contrato_por_proyecto() -> dict[int, object]:
     contratos: dict[int, object] = {}
     consulta = (
         ct_models.ContratoServicio.objects
-        .filter(servicio_aplica=SERVICIO, proyecto__isnull=False)
-        .order_by("id")
+        .filter(servicio_aplica=SERVICIO, proyectos_vinculados__isnull=False)
+        .prefetch_related(CON_PLANTA).order_by("id")
     )
     for contrato in consulta:
         contratos.setdefault(contrato.proyecto_id, contrato)
@@ -176,7 +177,7 @@ def valor_de_proyecto(proyecto_id: int, periodo: str) -> tuple[float, float] | N
     """
     contrato = (
         ct_models.ContratoServicio.objects
-        .filter(servicio_aplica=SERVICIO, proyecto_id=proyecto_id)
+        .filter(servicio_aplica=SERVICIO, proyectos_vinculados__proyecto_id=proyecto_id)
         .order_by("id").first()
     )
     if contrato is None:
