@@ -337,7 +337,7 @@ provisional (el error de §5.9). `kwh_perdidos_estimado` sigue siendo el valor m
 - `fallas.en_garantia` / `garantia_detalle` (migración `monitoreo/0009`).
 - **Después de desplegar:** `python manage.py sembrar_tipos_fallas` crea los
   `fallas_cat_tipos` de la categoría nueva (el sembrado de FastAPI ya no corre).
-  Idempotente.
+  Idempotente. Se corre desde Actions → "comando en produccion".
 - `dominio.en_pendientes`: sin cerrar y en garantía, o de tracker, string, medidor
   o estación meteorológica. Es la pestaña Pendientes del frontend.
 - `monitoreo.avisar_fallas_programadas` (6:00, `config/horarios.py`) deja en la
