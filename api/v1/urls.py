@@ -40,6 +40,7 @@ urlpatterns = [
     path("", include("api.v1.monitoreo.urls")),
     path("", include("api.v1.notificaciones.urls")),
     path("", include("api.v1.operadores_red.urls")),
+    path("", include("api.v1.patrimonios.urls")),
     path("", include("api.v1.om.urls")),
     path("", include("api.v1.panel_contable.urls")),
     path("", include("api.v1.polizas.urls")),

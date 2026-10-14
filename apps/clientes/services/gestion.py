@@ -33,6 +33,7 @@ TABLAS_BLOQUEAN_BORRADO = [
     ("proyecto_inversionistas pi JOIN inversionistas i ON i.id = pi.inversionista_id",
      "i.cliente_id", "es inversionista de uno o más proyectos"),
     ("oportunidades", "cliente_id", "tiene una o más oportunidades comerciales registradas"),
+    ("patrimonios", "cliente_id", "es la ficha de un patrimonio autónomo"),
 ]
 
 # Fusión: mismo patrón que /proyectos/{ganador}/merge/{perdedor}. `dry_run` por
@@ -49,6 +50,7 @@ MERGE_SIMPLE = [  # (tabla, columna)
     ("proyecto_area_contacto", "cliente_id"),
     ("arr_arrendador", "cliente_id"),            # el dueño del terreno; de él sale su IVA
     ("contrato_factura", "inversionista_id"),    # a quién se le emitió la factura
+    ("patrimonios", "cliente_id"),               # la ficha de un patrimonio autónomo
 ]
 MERGE_COMPUESTO = [
     ("contactos", ["email", "tipo"]),               # UNIQUE (cliente_id, email, tipo)

@@ -134,12 +134,20 @@ class ProyectoInversionistaSerializer(serializers.ModelSerializer):
     cliente_id = serializers.IntegerField()
     cliente_nombre = serializers.CharField(source="cliente.razon_social_nombre",
                                            read_only=True, default="")
+    # El patrimonio autónomo por el que se tiene la parte (opcional): el cliente
+    # sigue siendo el dueño; al patrimonio se le factura y liquida.
+    patrimonio_id = serializers.PrimaryKeyRelatedField(
+        source="patrimonio", queryset=py_models.Patrimonio.objects.all(),
+        required=False, allow_null=True,
+    )
+    patrimonio_nombre = serializers.CharField(source="patrimonio.nombre", read_only=True,
+                                              default=None)
 
     class Meta:
         model = py_models.ProyectoInversionista
         fields = [
             "id", "proyecto_id", "cliente_id", "porcentaje_participacion",
-            "es_patrimonio_autonomo", "fecha_inicio", "fecha_fin",
+            "patrimonio_id", "patrimonio_nombre", "fecha_inicio", "fecha_fin",
             "cliente_nombre", "created_at", "updated_at",
         ]
         extra_kwargs = {
@@ -147,7 +155,6 @@ class ProyectoInversionistaSerializer(serializers.ModelSerializer):
             "created_at": {"read_only": True},
             "updated_at": {"read_only": True},
             "porcentaje_participacion": {"required": False, "allow_null": True},
-            "es_patrimonio_autonomo": {"required": False},
             "fecha_inicio": {"required": False, "allow_null": True},
             "fecha_fin": {"required": False, "allow_null": True},
         }

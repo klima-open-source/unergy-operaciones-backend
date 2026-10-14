@@ -11,6 +11,7 @@ Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 """
 
 from django.db import models
+from django.db.models import F, Q
 from django.utils import timezone
 
 from apps.plataforma.models import Timer
@@ -201,11 +202,59 @@ class Inversionista(Timer):
         db_table = "inversionistas"
 
 
+class Patrimonio(Timer):
+    """Un patrimonio autónomo (fiducia) por el que un inversionista tiene su parte de
+    una planta. Modelo de Sara (2026-10-14).
+
+    El DUEÑO de la participación es el inversionista (Ayura, Solenium…); al
+    patrimonio es a quien se le factura y se le liquida. Por eso el patrimonio no es
+    un inversionista: la participación apunta a él (`ProyectoInversionista.patrimonio`).
+
+    Jerarquía de dos niveles: un patrimonio GENERAL (la fiduciaria: Fiduciaria
+    Bancolombia, Fideicomisos BBVA) no tiene `padre`; un SUBPATRIMONIO (P.A. Valle
+    de Gandalf, código 17434) apunta a su general. Una planta se puede tener por un
+    subpatrimonio o directo por un general.
+
+    `cliente` es su ficha (razón social, NIT): lo que se factura apunta a
+    `clientes`. Quién lo contrató no se guarda: son los inversionistas de sus
+    participaciones."""
+
+    id = models.BigAutoField(primary_key=True)
+    nombre = models.CharField(max_length=255)
+    codigo = models.CharField(max_length=20, null=True, blank=True)
+    padre = models.ForeignKey(
+        "self", on_delete=models.PROTECT, db_column="padre_id", null=True, blank=True,
+        related_name="subpatrimonios",
+    )
+    cliente = models.ForeignKey(
+        "clientes.Cliente", on_delete=models.PROTECT, db_column="cliente_id",
+        null=True, blank=True, related_name="patrimonios",
+    )
+
+    class Meta:
+        db_table = "patrimonios"
+        ordering = ["nombre"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["codigo"], condition=Q(codigo__isnull=False),
+                name="uq_patrimonios_codigo",
+            ),
+            models.CheckConstraint(
+                name="ck_patrimonios_padre", condition=~Q(padre=F("id")),
+            ),
+        ]
+
+
 class ProyectoInversionista(Timer):
     """La participación de un inversionista en una planta, con su porcentaje.
 
     Apunta al inversionista (diagrama de Sara, 2026-10-13); el cliente se alcanza a
     través de él. Un mismo inversionista no está dos veces en la misma planta.
+
+    `patrimonio` (opcional): el patrimonio autónomo por el que el inversionista
+    tiene su parte. El inversionista sigue siendo el dueño; al patrimonio se le
+    factura y liquida (2026-10-14). Reemplaza a la bandera `es_patrimonio_autonomo`,
+    que nadie llenaba ni leía (`proyectos/0012`).
 
     `cliente` y `cliente_id` siguen existiendo como atajos de lectura y escritura
     --la API de inversionistas del proyecto recibe y devuelve `cliente_id`--: al
@@ -219,7 +268,10 @@ class ProyectoInversionista(Timer):
         related_name="participaciones",
     )
     porcentaje_participacion = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
-    es_patrimonio_autonomo = models.BooleanField(default=False)
+    patrimonio = models.ForeignKey(
+        "Patrimonio", on_delete=models.PROTECT, db_column="patrimonio_id",
+        null=True, blank=True, related_name="participaciones",
+    )
     fecha_inicio = models.DateField(null=True, blank=True)
     fecha_fin = models.DateField(null=True, blank=True)
 

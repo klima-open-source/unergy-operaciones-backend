@@ -66,6 +66,7 @@ def _con_relaciones():
         .select_related("operador_red", "portafolio")
         .prefetch_related(
             "inversionistas__inversionista__cliente",
+            "inversionistas__patrimonio",
             "info_tecnica",
             "inversores",
             "area_contactos__cliente",
@@ -846,7 +847,7 @@ class ProyectoViewSet(viewsets.GenericViewSet):
             filas = (
                 py_models.ProyectoInversionista.objects
                 .filter(proyecto_id=pk)
-                .select_related("inversionista__cliente")
+                .select_related("inversionista__cliente", "patrimonio")
             )
             return Response(
                 py_serializers.ProyectoInversionistaSerializer(filas, many=True).data
@@ -861,7 +862,7 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         inv = entrada.save(proyecto_id=int(pk))
         datos = py_serializers.ProyectoInversionistaSerializer(
             py_models.ProyectoInversionista.objects
-            .select_related("inversionista__cliente").get(pk=inv.id)
+            .select_related("inversionista__cliente", "patrimonio").get(pk=inv.id)
         ).data
         return Response(
             {**datos, "paneles_redivididos": _redividir_paneles(pk)},
@@ -895,6 +896,6 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         entrada.save()
         datos = py_serializers.ProyectoInversionistaSerializer(
             py_models.ProyectoInversionista.objects
-            .select_related("inversionista__cliente").get(pk=inv_id)
+            .select_related("inversionista__cliente", "patrimonio").get(pk=inv_id)
         ).data
         return Response({**datos, "paneles_redivididos": _redividir_paneles(pk)})
