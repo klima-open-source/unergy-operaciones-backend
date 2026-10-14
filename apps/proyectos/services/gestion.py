@@ -30,7 +30,6 @@ RELACIONES_BLOQUEANTES = [
     ("liquidaciones", "liquidaciones_por_proyecto_id"),
     ("asic_solicitudes", "asic_solicitudes_por_proyecto_id"),
     ("rec_procesos", "rec_procesos_por_proyecto_id"),
-    ("contratos_servicio", "contratos_servicio_por_proyecto_id"),
     ("fronteras", "fronteras"),
     ("generacion_diaria", "generacion_diaria_por_proyecto_id"),
 ]
@@ -63,7 +62,7 @@ TABLAS_CASCADE_SIN_RELACION = [
 #                      descarta la del perdedor.
 MERGE_SIMPLE = [
     "proyecto_inversores", "fronteras", "fallas",
-    "contratos", "asic_solicitudes", "rec_procesos",  # contratos: su FK `proyecto_id` (servicio)
+    "asic_solicitudes", "rec_procesos",
     "costos_variables", "gestion_registros", "cumplimiento_mensual",
 ]
 MERGE_COMPUESTO = [
@@ -96,6 +95,10 @@ def motivo_bloqueo_borrado(proyecto: Proyecto) -> str | None:
     for _nombre, relacion in RELACIONES_BLOQUEANTES:
         if getattr(proyecto, relacion).exists():
             return "registros operativos"
+    # Un contrato de servicio bloquea, como siempre. El vínculo con un PPA no:
+    # `contrato_proyectos` lo borra en cascada, igual que antes de la tabla única.
+    if proyecto.contratos_ppa.exclude(contrato__grupo="ppa").exists():
+        return "registros operativos"
     with connection.cursor() as cur:
         for tabla, columna in TABLAS_CASCADE_SIN_RELACION:
             cur.execute(f"SELECT 1 FROM {tabla} WHERE {columna} = %s LIMIT 1", [proyecto.id])

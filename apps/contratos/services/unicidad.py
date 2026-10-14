@@ -45,6 +45,7 @@ from datetime import date
 
 from apps.contratos.models import ContratoServicio
 from apps.contratos.services import grupos, vigencia
+from apps.contratos.services.contrato_proyectos import CON_PLANTA
 from apps.contratos.services.representacion_dedup import norm
 
 #: Los grupos cuyos contratos se comparan por SUBSERVICIO y no por grupo. En
@@ -93,9 +94,9 @@ def buscar_duplicado(
 
     candidatos = ContratoServicio.objects.filter(
         vigencia.filtro_vivos(hoy),
-        proyecto_id=proyecto_id,
-        proyecto__deleted_at__isnull=True,
-    )
+        proyectos_vinculados__proyecto_id=proyecto_id,
+        proyectos_vinculados__proyecto__deleted_at__isnull=True,
+    ).prefetch_related(CON_PLANTA)
     if excluir_id:
         candidatos = candidatos.exclude(pk=excluir_id)
 

@@ -413,8 +413,9 @@ class ClienteViewSet(viewsets.GenericViewSet):
         for rol in ROLES_SERVICIO:
             anotar(
                 ContratoServicio.objects
-                .filter(proyecto_id__in=ids, pk__in=contratos_de({cliente_id}, [rol]))
-                .values_list("proyecto_id", flat=True),
+                .filter(proyectos_vinculados__proyecto_id__in=ids,
+                        pk__in=contratos_de({cliente_id}, [rol]))
+                .values_list("proyectos_vinculados__proyecto_id", flat=True),
                 str(rol),
             )
         anotar(

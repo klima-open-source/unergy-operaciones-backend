@@ -150,19 +150,36 @@ def test_borrar_la_participacion_deja_el_contrato_pendiente(datos):
     assert _fila(contrato).proyecto_inversionista_id is None
 
 
-def test_registrar_solo_lee_sin_aplicar_y_escribe_con_aplicar(datos):
-    from django.core.management import call_command
+def test_los_atajos_leen_la_planta_y_el_inversionista(datos):
+    from apps.contratos.models import ContratoServicio
+    from apps.contratos.services.contrato_proyectos import CON_PLANTA
 
-    from apps.contratos.models import ContratoProyecto
+    _contrato("representacion", datos["compartida"], datos["suno"])
+    contrato = ContratoServicio.objects.prefetch_related(CON_PLANTA).get()
 
-    contrato = _contrato("representacion", datos["sola"])
-    ContratoProyecto.objects.filter(contrato=contrato).delete()  # como un contrato de antes
+    assert contrato.proyecto_id == datos["compartida"].id
+    assert contrato.proyecto.nombre_comercial == "Planta compartida"
+    assert contrato.inversionista_id == datos["suno"].id
+    assert contrato.inversionista_nombre == "Suno S.A.S."
 
-    call_command("registrar_proyectos_contratos")
-    assert not ContratoProyecto.objects.filter(contrato=contrato).exists()
 
-    call_command("registrar_proyectos_contratos", aplicar=True)
-    assert _fila(contrato).proyecto_inversionista_id == datos["bia_en_sola"].id
+def test_se_filtra_por_planta_y_por_inversionista(datos):
+    from apps.contratos.models import ContratoServicio
+
+    a = _contrato("representacion", datos["compartida"], datos["suno"])
+    _contrato("mantenimiento", datos["sola"])
+
+    assert list(ContratoServicio.objects.filter(
+        proyectos_vinculados__proyecto=datos["compartida"])) == [a]
+    assert list(ContratoServicio.objects.filter(
+        proyectos_vinculados__proyecto_inversionista__inversionista__cliente=datos["suno"])) == [a]
+
+
+def test_un_inversionista_que_no_participa_en_la_planta_se_rechaza(datos):
+    from apps.contratos.services.contrato_proyectos import InversionistaFueraDeLaPlanta
+
+    with pytest.raises(InversionistaFueraDeLaPlanta):
+        _contrato("representacion", datos["sola"], datos["suno"])
 
 
 def test_fusionar_clientes_que_comparten_planta_conserva_al_representado(datos, monkeypatch):

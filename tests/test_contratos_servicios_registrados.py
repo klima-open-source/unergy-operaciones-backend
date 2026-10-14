@@ -202,12 +202,15 @@ def _pedir(metodo, url, datos_usuario, cuerpo=None, **kwargs):
 
 def _partes():
     """Un contrato nuevo exige sus partes vinculadas a un cliente (y el inversionista
-    en representación/CGM)."""
+    en representación/CGM, que es uno de los inversionistas de la planta)."""
     from apps.clientes.models import Cliente
+    from apps.proyectos.models import Proyecto, ProyectoInversionista
 
     cliente = Cliente.objects.create(razon_social_nombre="Cliente QA")
+    planta = Proyecto.objects.create(nombre_comercial="Planta QA")
+    ProyectoInversionista.objects.create(proyecto=planta, cliente=cliente)
     return {"contratante_id": cliente.id, "prestador_id": cliente.id,
-            "inversionista_id": cliente.id}
+            "inversionista_id": cliente.id, "proyecto_id": planta.id}
 
 
 def test_crear_un_contrato_de_representacion_y_cgm_por_la_api(datos):

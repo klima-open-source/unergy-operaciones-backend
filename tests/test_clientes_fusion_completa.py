@@ -87,7 +87,6 @@ def test_toda_tabla_que_apunta_a_un_cliente_entra_a_la_fusion():
         set(gestion.MERGE_SIMPLE)
         | {(t, "cliente_id") for t, _ in gestion.MERGE_COMPUESTO}
         | set(gestion.MERGE_ROL_UNICO)
-        | {("contratos", c) for c in gestion.CAMPOS_PARTE_CONTRATO}
     )
     a_proposito_fuera = {("email_envios", "cliente_id")}  # un log de correos
 
