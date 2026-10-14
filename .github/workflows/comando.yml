@@ -40,6 +40,7 @@ on:
           - "sembrar_tipos_fallas"
           - "DESHACER garantia de fallas (monitoreo 0009)"
           - "exportar_partes_sin_cliente (solo lee)"
+          - "exportar_inversionistas_de_contratos (solo lee)"
           - "DESHACER paso 2 (corte de contratos)"
           - "DESHACER paso 0 (diagnostico)"
       confirmar:
@@ -101,6 +102,7 @@ jobs:
               manage migrate monitoreo 0008
               ;;
             "exportar_partes_sin_cliente (solo lee)")    manage exportar_partes_sin_cliente ;;
+            "exportar_inversionistas_de_contratos (solo lee)") manage exportar_inversionistas_de_contratos ;;
             "DESHACER paso 2 (corte de contratos)")
               confirmado
               manage migrate contratos 0008
