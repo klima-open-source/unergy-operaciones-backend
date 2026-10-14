@@ -15,7 +15,8 @@ from api.logging import class_logger_wrapper, log_endpoint
 from api.pagination import recortar
 from api.permissions import RolePermission
 from apps.liquidaciones import models as lq_models
-from apps.liquidaciones.services import impuestos, panel, resumen_panel
+from apps.clientes.services import impuestos
+from apps.liquidaciones.services import panel, resumen_panel
 from apps.mandatos import models as md_models
 
 from . import serializers as lq_serializers
