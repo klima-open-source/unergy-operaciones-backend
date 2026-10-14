@@ -65,7 +65,7 @@ def _con_relaciones():
         py_models.Proyecto.objects
         .select_related("operador_red", "portafolio")
         .prefetch_related(
-            "inversionistas__cliente",
+            "inversionistas__inversionista__cliente",
             "info_tecnica",
             "inversores",
             "area_contactos__cliente",
@@ -846,7 +846,7 @@ class ProyectoViewSet(viewsets.GenericViewSet):
             filas = (
                 py_models.ProyectoInversionista.objects
                 .filter(proyecto_id=pk)
-                .select_related("cliente")
+                .select_related("inversionista__cliente")
             )
             return Response(
                 py_serializers.ProyectoInversionistaSerializer(filas, many=True).data
@@ -855,13 +855,13 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         entrada = py_serializers.ProyectoInversionistaSerializer(data=request.data)
         entrada.is_valid(raise_exception=True)
         if py_models.ProyectoInversionista.objects.filter(
-            proyecto_id=pk, cliente_id=entrada.validated_data["cliente_id"],
+            proyecto_id=pk, inversionista__cliente_id=entrada.validated_data["cliente_id"],
         ).exists():
             raise Conflict("Este cliente ya es inversionista de este proyecto")
         inv = entrada.save(proyecto_id=int(pk))
         datos = py_serializers.ProyectoInversionistaSerializer(
             py_models.ProyectoInversionista.objects
-            .select_related("cliente").get(pk=inv.id)
+            .select_related("inversionista__cliente").get(pk=inv.id)
         ).data
         return Response(
             {**datos, "paneles_redivididos": _redividir_paneles(pk)},
@@ -887,9 +887,14 @@ class ProyectoViewSet(viewsets.GenericViewSet):
             inv, data=request.data, partial=True,
         )
         entrada.is_valid(raise_exception=True)
+        nuevo_cliente = entrada.validated_data.get("cliente_id")
+        if nuevo_cliente is not None and py_models.ProyectoInversionista.objects.filter(
+            proyecto_id=pk, inversionista__cliente_id=nuevo_cliente,
+        ).exclude(pk=inv.pk).exists():
+            raise Conflict("Este cliente ya es inversionista de este proyecto")
         entrada.save()
         datos = py_serializers.ProyectoInversionistaSerializer(
             py_models.ProyectoInversionista.objects
-            .select_related("cliente").get(pk=inv_id)
+            .select_related("inversionista__cliente").get(pk=inv_id)
         ).data
         return Response({**datos, "paneles_redivididos": _redividir_paneles(pk)})

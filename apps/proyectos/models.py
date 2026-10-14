@@ -186,9 +186,10 @@ class Inversionista(Timer):
     la que apunta su participación en cada planta (`proyecto_inversionistas`).
     El nombre y el NIT se leen de la ficha del cliente: aquí no se copian.
 
-    Diagrama de Sara (2026-10-13). Hoy la escribe solo `ProyectoInversionista.save()`
-    al registrar una participación; `poblar_inversionistas` crea las de las
-    participaciones que ya existían."""
+    Diagrama de Sara (2026-10-13). La escribe `ProyectoInversionista.save()` al
+    registrar una participación con un cliente que todavía no era inversionista.
+    Las participaciones anteriores se vincularon con `poblar_inversionistas`
+    (borrado en el paso 3, `proyectos/0010`; está en el historial de git)."""
 
     id = models.BigAutoField(primary_key=True)
     cliente = models.OneToOneField(
@@ -203,17 +204,19 @@ class Inversionista(Timer):
 class ProyectoInversionista(Timer):
     """La participación de un inversionista en una planta, con su porcentaje.
 
-    `inversionista` es el vínculo del diagrama. `cliente` es el de siempre y sigue
-    siendo el que leen los ~15 sitios que preguntan "de quién es esta planta";
-    mientras convivan, `save()` deriva el inversionista del cliente para que no
-    puedan discrepar. Quitar `cliente_id` es un paso posterior."""
+    Apunta al inversionista (diagrama de Sara, 2026-10-13); el cliente se alcanza a
+    través de él. Un mismo inversionista no está dos veces en la misma planta.
+
+    `cliente` y `cliente_id` siguen existiendo como atajos de lectura y escritura
+    --la API de inversionistas del proyecto recibe y devuelve `cliente_id`--: al
+    asignar un cliente, `save()` busca o crea su inversionista. En consultas a la
+    base el camino es `inversionista__cliente…`; `cliente_id` NO es una columna."""
 
     id = models.BigAutoField(primary_key=True)
     proyecto = models.ForeignKey("Proyecto", on_delete=models.DO_NOTHING, db_column="proyecto_id", related_name="inversionistas")
-    cliente = models.ForeignKey("clientes.Cliente", on_delete=models.DO_NOTHING, db_column="cliente_id", related_name="proyecto_inversionistas_por_cliente_id")
     inversionista = models.ForeignKey(
         "Inversionista", on_delete=models.PROTECT, db_column="inversionista_id",
-        null=True, blank=True, related_name="participaciones",
+        related_name="participaciones",
     )
     porcentaje_participacion = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     es_patrimonio_autonomo = models.BooleanField(default=False)
@@ -222,14 +225,50 @@ class ProyectoInversionista(Timer):
 
     class Meta:
         db_table = "proyecto_inversionistas"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["proyecto", "inversionista"], name="uq_proyecto_inversionistas",
+            ),
+            # Redundante con la PK, a propósito: es el destino de la llave compuesta
+            # de `contrato_proyectos`, que exige que la participación sea de la
+            # misma planta que el contrato (`contratos/0017`).
+            models.UniqueConstraint(
+                fields=["id", "proyecto"], name="uq_proyecto_inversionistas_id_proyecto",
+            ),
+        ]
+
+    @property
+    def cliente_id(self):
+        pendiente = getattr(self, "_cliente_pendiente", None)
+        if pendiente is not None:
+            return pendiente
+        return self.inversionista.cliente_id if self.inversionista_id else None
+
+    @cliente_id.setter
+    def cliente_id(self, valor):
+        self._cliente_pendiente = valor
+
+    @property
+    def cliente(self):
+        if getattr(self, "_cliente_pendiente", None) is not None:
+            from apps.clientes.models import Cliente
+
+            return Cliente.objects.get(pk=self._cliente_pendiente)
+        return self.inversionista.cliente if self.inversionista_id else None
+
+    @cliente.setter
+    def cliente(self, cliente):
+        self._cliente_pendiente = cliente.pk if cliente is not None else None
 
     def save(self, *args, **kwargs):
-        if self.cliente_id and (
-            self.inversionista_id is None or self.inversionista.cliente_id != self.cliente_id
-        ):
-            self.inversionista, _ = Inversionista.objects.get_or_create(cliente_id=self.cliente_id)
+        pendiente = getattr(self, "_cliente_pendiente", None)
+        if pendiente is not None:
+            self.inversionista, _ = Inversionista.objects.get_or_create(cliente_id=pendiente)
+            self._cliente_pendiente = None
             if kwargs.get("update_fields") is not None:
-                kwargs["update_fields"] = {*kwargs["update_fields"], "inversionista"}
+                kwargs["update_fields"] = (
+                    set(kwargs["update_fields"]) - {"cliente", "cliente_id"}
+                ) | {"inversionista"}
         super().save(*args, **kwargs)
 
 

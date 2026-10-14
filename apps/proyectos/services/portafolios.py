@@ -80,7 +80,7 @@ def sembrar_si_esta_vacio() -> None:
     proyectos = (
         py_models.Proyecto.objects
         .filter(operativos_q(), deleted_at__isnull=True, portafolio__isnull=True)
-        .prefetch_related("inversionistas__cliente")
+        .prefetch_related("inversionistas__inversionista__cliente")
     )
 
     creados: list = []

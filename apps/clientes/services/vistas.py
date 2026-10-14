@@ -205,7 +205,7 @@ def panel_360(cliente: Cliente, hoy: date | None = None) -> dict:
     )
     participaciones = list(
         ProyectoInversionista.objects
-        .filter(cliente_id=cliente_id)
+        .filter(inversionista__cliente_id=cliente_id)
         .order_by("proyecto_id", "fecha_inicio")
     )
 

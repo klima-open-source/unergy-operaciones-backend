@@ -59,7 +59,7 @@ class Command(BaseCommand):
         participacion: dict[int, dict[str, float]] = {}
         for r in ProyectoInversionista.objects.filter(
             Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=hoy)
-        ).select_related("cliente"):
+        ).select_related("inversionista__cliente"):
             if r.porcentaje_participacion is None:
                 continue
             nombre = ((r.cliente.razon_social_nombre if r.cliente else "") or "").strip().upper()

@@ -800,8 +800,9 @@ def listar(periodo: str, tipo: str) -> dict:
             ProyectoInversionista.objects
             .filter(id__in=pi_ids)
             .values_list(
-                "id", "cliente_id", "cliente__iva_pct", "cliente__retencion_pct",
-                "cliente__reteiva_pct", "cliente__reteica_pct",
+                "id", "inversionista__cliente_id", "inversionista__cliente__iva_pct",
+                "inversionista__cliente__retencion_pct", "inversionista__cliente__reteiva_pct",
+                "inversionista__cliente__reteica_pct",
             )
         ):
             rates_por_pi[pi_id] = {

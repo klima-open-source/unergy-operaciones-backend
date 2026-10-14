@@ -62,7 +62,7 @@ TABLAS_CASCADE_SIN_RELACION = [
 #   MERGE_UNO_A_UNO  : `proyecto_id` UNIQUE → si el ganador ya tiene fila, se
 #                      descarta la del perdedor.
 MERGE_SIMPLE = [
-    "proyecto_inversores", "proyecto_inversionistas", "fronteras", "fallas",
+    "proyecto_inversores", "fronteras", "fallas",
     "contratos", "asic_solicitudes", "rec_procesos",  # contratos: su FK `proyecto_id` (servicio)
     "costos_variables", "gestion_registros", "cumplimiento_mensual",
 ]
@@ -74,6 +74,10 @@ MERGE_COMPUESTO = [
     ("mapeo_celda_concepto", ["concepto"]),
     ("alias_fuente_ingreso", ["columna_origen"]),
     ("contrato_proyectos", ["contrato_id"]),
+    # UNIQUE (proyecto_id, inversionista_id): si el mismo inversionista está en las
+    # dos plantas, queda la participación del ganador. Antes de descartar la del
+    # perdedor, los contratos que la representaban pasan a la del ganador (paso 1 bis).
+    ("proyecto_inversionistas", ["inversionista_id"]),
     # UNIQUE (proyecto_id, tipo): si el ganador ya tiene puntero para ese tipo,
     # se descarta el del perdedor.
     ("proyecto_area_contacto", ["tipo"]),
@@ -202,6 +206,21 @@ def ejecutar_merge(ganador: Proyecto, perdedor: Proyecto, movimientos: list[dict
                     f"UPDATE asic_cambios_contratos SET {campo} = %(keeper)s "
                     f"WHERE {campo} = %(loser)s", p
                 )
+
+            # 1 bis) Representación: el contrato que apuntaba a una participación del
+            #        perdedor que se va a descartar pasa a la del mismo inversionista
+            #        en el ganador. La llave compuesta de `contrato_proyectos` se
+            #        comprueba al COMMIT, con las dos tablas ya movidas.
+            cur.execute(
+                "UPDATE contrato_proyectos SET proyecto_inversionista_id = ("
+                "  SELECT g.id FROM proyecto_inversionistas l JOIN proyecto_inversionistas g"
+                "    ON g.inversionista_id = l.inversionista_id AND g.proyecto_id = %(keeper)s"
+                "  WHERE l.id = contrato_proyectos.proyecto_inversionista_id) "
+                "WHERE proyecto_inversionista_id IN ("
+                "  SELECT l.id FROM proyecto_inversionistas l JOIN proyecto_inversionistas g"
+                "    ON g.inversionista_id = l.inversionista_id AND g.proyecto_id = %(keeper)s"
+                "  WHERE l.proyecto_id = %(loser)s)", p
+            )
 
             # 2) UNIQUE compuesto: se descarta la colisión, se repunta el resto.
             for t, claves in MERGE_COMPUESTO:

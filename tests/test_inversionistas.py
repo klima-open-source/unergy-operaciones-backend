@@ -1,9 +1,9 @@
 """`inversionistas`: una fila por cliente que es inversionista de alguna planta.
 
-La participación (`proyecto_inversionistas`) sigue guardando `cliente_id` --la leen
-~15 sitios-- y ahora también `inversionista_id`, el vínculo del diagrama. Mientras
-convivan, `save()` deriva el segundo del primero para que no puedan discrepar, y
-`poblar_inversionistas` vincula las participaciones que ya existían.
+La participación (`proyecto_inversionistas`) apunta al inversionista; el cliente se
+alcanza por él. `cliente` y `cliente_id` siguen como atajos --la API de
+inversionistas del proyecto los recibe y devuelve--: al asignarlos, `save()` busca
+o crea el inversionista.
 """
 import pytest
 
@@ -96,33 +96,22 @@ def test_cambiar_el_cliente_cambia_el_inversionista(datos):
     assert part.inversionista.cliente_id == datos["suno"].id
 
 
-def test_poblar_solo_lee_sin_aplicar(datos):
-    from django.core.management import call_command
+def test_el_cliente_se_lee_por_el_inversionista(datos):
+    from apps.proyectos.models import ProyectoInversionista
 
-    from apps.proyectos.models import Inversionista, ProyectoInversionista
+    ProyectoInversionista.objects.create(proyecto=datos["planta"], cliente=datos["bia"])
+    part = ProyectoInversionista.objects.select_related("inversionista__cliente").get()
 
-    ProyectoInversionista.objects.bulk_create([  # como las filas de antes: sin pasar por save()
-        ProyectoInversionista(proyecto=datos["planta"], cliente=datos["bia"]),
-    ])
-    call_command("poblar_inversionistas")
-
-    assert not Inversionista.objects.exists()
-    assert ProyectoInversionista.objects.get().inversionista_id is None
+    assert part.cliente_id == datos["bia"].id
+    assert part.cliente.razon_social_nombre == "Bia Energy S.A.S."
+    assert ProyectoInversionista.objects.filter(inversionista__cliente=datos["bia"]).count() == 1
 
 
-def test_poblar_crea_y_vincula_las_que_ya_existian(datos):
-    from django.core.management import call_command
+def test_un_inversionista_no_esta_dos_veces_en_la_misma_planta(datos):
+    from django.db import IntegrityError, transaction
 
-    from apps.proyectos.models import Inversionista, ProyectoInversionista
+    from apps.proyectos.models import ProyectoInversionista
 
-    ProyectoInversionista.objects.bulk_create([
-        ProyectoInversionista(proyecto=datos["planta"], cliente=datos["bia"]),
-        ProyectoInversionista(proyecto=datos["otra"], cliente=datos["bia"]),
-        ProyectoInversionista(proyecto=datos["planta"], cliente=datos["suno"]),
-    ])
-    call_command("poblar_inversionistas", aplicar=True)
-    call_command("poblar_inversionistas", aplicar=True)  # idempotente
-
-    assert Inversionista.objects.count() == 2
-    for part in ProyectoInversionista.objects.select_related("inversionista"):
-        assert part.inversionista.cliente_id == part.cliente_id
+    ProyectoInversionista.objects.create(proyecto=datos["planta"], cliente=datos["bia"])
+    with pytest.raises(IntegrityError), transaction.atomic():
+        ProyectoInversionista.objects.create(proyecto=datos["planta"], cliente=datos["bia"])

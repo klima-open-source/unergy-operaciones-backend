@@ -79,7 +79,7 @@ class ClasificacionEnergiaViewSet(viewsets.GenericViewSet):
             ClasificacionEnergiaMensual.objects
             .filter(anio=year, mes=month)
             .select_related("proyecto", "contrato_ppa")
-            .prefetch_related("proyecto__inversionistas__cliente")
+            .prefetch_related("proyecto__inversionistas__inversionista__cliente")
         )
         if categoria:
             qs = qs.filter(categoria=categoria)

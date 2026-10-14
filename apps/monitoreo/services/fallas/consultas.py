@@ -141,7 +141,7 @@ def filtrar(params) -> QuerySet:
         hoy = hoy_col()
         proyectos = (
             ProyectoInversionista.objects
-            .filter(cliente_id=params["cliente_id"])
+            .filter(inversionista__cliente_id=params["cliente_id"])
             .filter(Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=hoy))
             .values("proyecto_id")
         )
