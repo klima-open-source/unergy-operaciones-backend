@@ -34,12 +34,12 @@ from apps.proyectos.models import Proyecto
 
 from .consultas import (
     GESCON_PUBLICADA, _asc_nulls_first,
-    _contratos_venta_ocultos, _contratos_vigentes, _query_contratos_venta,
+    _contratos_vigentes, _query_contratos_venta,
     _resolve_gescon, _ventanas_ungc,
 )
 from .periodos import (
     UNGC_COMERCIALIZADOR, _con_segmento, _estado_segmento, _fecha_corte,
-    _recortar, _responsable_payload, _restar_intervalos,
+    _recortar, _restar_intervalos,
 )
 
 
@@ -166,7 +166,7 @@ def _piscina_compra_ungc(first_day: date, last_day: date, corte: date) -> list[d
     return sorted(por_contrato.values(), key=lambda c: c["nombre"])
 
 
-def plantas_contratos(year: int, month: int, incluir_todos: bool = False) -> dict:
+def plantas_contratos(year: int, month: int) -> dict:
     """Todas las plantas agrupadas por contrato: venta, compra, bolsa y externas."""
     total_dias = calendar.monthrange(year, month)[1]
     first_day = date(year, month, 1)
@@ -182,7 +182,7 @@ def plantas_contratos(year: int, month: int, incluir_todos: bool = False) -> dic
     # es el RESIDUO de esto, no el complemento del conjunto de plantas: así una
     # planta liberada a mitad de mes aparece en las dos.
     assigned_windows: dict[int, list] = defaultdict(list)
-    for c in _query_contratos_venta(year, month, solo_relevantes=not incluir_todos):
+    for c in _query_contratos_venta(year, month):
         plantas_list = []
         if c.numero_codigo_contrato:
             for asic in _resolve_gescon(c.numero_codigo_contrato, year, month):
@@ -210,24 +210,10 @@ def plantas_contratos(year: int, month: int, incluir_todos: bool = False) -> dic
             # Clave GESCON (contrato_interno en asic_solicitudes) para el detalle
             "numero_codigo_contrato": c.numero_codigo_contrato,
             "comprador_nombre": c.comprador_nombre,
-            **_responsable_payload(c),
             "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
             "fecha_fin": c.fecha_fin.isoformat() if c.fecha_fin else None,
             "plantas": plantas_list,
         })
-
-    # Contratos escondidos por responsable: no se muestran, pero sus plantas
-    # siguen asignadas. Sus días cuentan como asignados para que la planta no
-    # reaparezca como bolsa (ver `_contratos_venta_ocultos`).
-    if not incluir_todos:
-        for c in _contratos_venta_ocultos(year, month):
-            if not c.numero_codigo_contrato:
-                continue
-            for asic in _resolve_gescon(c.numero_codigo_contrato, year, month):
-                if asic.proyecto_id and asic.proyecto_id in plantas_map:
-                    seg = _recortar(asic.fecha_inicio, asic.fecha_fin, first_day, last_day)
-                    if seg:
-                        assigned_windows[asic.proyecto_id].append(seg)
 
     # ── (b) COMPRA UNGC ─────────────────────────────────────────────────────
     compra_out = _piscina_compra_ungc(first_day, last_day, corte)
@@ -237,7 +223,7 @@ def plantas_contratos(year: int, month: int, incluir_todos: bool = False) -> dic
     # registro en GESCON/ASIC. Un PPA de compra que sí llegó a GESCON ya está en
     # (b) y se excluye acá para no duplicarlo.
     gescon_compra_ids = {c["contrato_ppa_id"] for c in compra_out if c.get("contrato_ppa_id")}
-    vigentes = _contratos_vigentes(year, month, solo_relevantes=not incluir_todos)
+    vigentes = _contratos_vigentes(year, month)
     externos = [
         c for c in vigentes
         if (c.tipo_contrato or "venta") == "compra" and c.id not in gescon_compra_ids
@@ -249,7 +235,6 @@ def plantas_contratos(year: int, month: int, incluir_todos: bool = False) -> dic
             "id": c.id,
             "nombre": c.nombre_interno or c.numero_codigo_contrato or f"Contrato {c.id}",
             "numero_codigo_contrato": c.numero_codigo_contrato,
-            **_responsable_payload(c),
             "vendedor_nombre": c.vendedor_nombre,
             "vendedor_nit": c.vendedor_nit,
             "tarifa_base": float(c.tarifa_base) if c.tarifa_base is not None else None,

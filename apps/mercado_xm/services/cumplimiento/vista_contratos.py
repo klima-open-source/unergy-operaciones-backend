@@ -9,16 +9,14 @@ Se apoya directo en `plantas_contratos`, que ya resuelve lo difícil (vigencias,
 relevos, recortes intra-mes): acá **no se reimplementa nada de eso**, solo se
 filtra por día y se enriquece con lo que falta.
 
-Dos reglas definen qué se ve, y las dos son fáciles de malinterpretar:
+**Es la foto de un día, no del mes.** Cada fila de planta trae su ventana dentro
+del mes (`segmento_inicio`/`segmento_fin`); solo pasa la que cubre el día pedido.
+Una planta que salió el 19 no aparece el 20, aunque haya estado en el contrato
+casi todo agosto.
 
-1. **Es la foto de un día, no del mes.** Cada fila de planta trae su ventana
-   dentro del mes (`segmento_inicio`/`segmento_fin`); solo pasa la que cubre el
-   día pedido. Una planta que salió el 19 no aparece el 20, aunque haya estado en
-   el contrato casi todo agosto.
-
-2. **El filtro de responsable es estricto.** `responsable=Unergy` deja SOLO los de
-   Unergy; un contrato sin responsable asignado tampoco pasa. Lo excluido no
-   desaparece: se cuenta en `excluidos` con su motivo.
+Trae todos los contratos de venta vigentes: hasta el 2026-10-14 un filtro por
+empresa responsable (`responsable=Unergy`) dejaba fuera los que gestiona un
+tercero; se quitó junto con `ppa_responsables`.
 """
 
 from __future__ import annotations
@@ -93,14 +91,13 @@ def _pct(crudo) -> tuple[float | None, bool]:
     return (min(v / 100.0, 1.0), True) if v > 1.0 else (v, False)
 
 
-def construir(fecha: date, responsable: str | None = "Unergy",
-              incluir_todos: bool = False) -> dict:
+def construir(fecha: date) -> dict:
     """La vista completa para `fecha`. Ver el docstring del módulo."""
     from apps.mercado_xm.services.cumplimiento.piscinas import plantas_contratos
 
     year, month = fecha.year, fecha.month
     # El núcleo canónico. No se toca: ya trae vigencias, relevos y recortes.
-    piscinas = plantas_contratos(year, month, incluir_todos=incluir_todos)
+    piscinas = plantas_contratos(year, month)
 
     # ── datos de apoyo, en dos consultas ────────────────────────────────────
     compromisos = {
@@ -117,17 +114,10 @@ def construir(fecha: date, responsable: str | None = "Unergy",
     for p, port in proyectos:
         por_nombre.setdefault(_norm(p.nombre_comercial), (p, port))
 
-    contratos_out, excluidos, avisos = [], [], []
+    contratos_out, avisos = [], []
 
     for c in piscinas.get("venta", []) or []:
         filas = [f for f in (c.get("plantas") or []) if _cubre(f, fecha)]
-        resp = (c.get("responsable") or "").strip() or None
-
-        if responsable and _norm(resp) != _norm(responsable):
-            excluidos.append({"contrato": c.get("nombre"), "responsable": resp,
-                              "n_plantas": len(filas), "motivo": "responsable"})
-            continue
-
         if not filas:
             # Vigente en el mes pero sin plantas ese día. No es lo mismo que "no
             # existe": se reporta con 0 plantas en vez de esconderlo.
@@ -192,7 +182,6 @@ def construir(fecha: date, responsable: str | None = "Unergy",
             "contrato": c.get("nombre"),
             "codigo": c.get("numero_codigo_contrato"),
             "comprador": c.get("comprador_nombre"),
-            "responsable": resp,
             "portafolio": _dominante(portafolios),
             "min_mes_mwh": mn,
             "max_mes_mwh": mx,
@@ -206,10 +195,8 @@ def construir(fecha: date, responsable: str | None = "Unergy",
     contratos_out.sort(key=lambda c: _norm(c["contrato"]))
     return {
         "fecha": fecha.isoformat(),
-        "responsable": responsable,
         "mes_consultado": f"{year}-{month:02d}",
         "contratos": contratos_out,
-        "excluidos": excluidos,
         "avisos": avisos,
         "totales": {
             "n_contratos": len(contratos_out),

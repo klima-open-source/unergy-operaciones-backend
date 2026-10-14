@@ -10,11 +10,10 @@ Dos cosas que NO cambiaron y no deben cambiar:
   `apps/mercado_xm/services/gescon_vigencia.py` y lo comparten `/asic`,
   `/alertas` y esta vista. Duplicarlo es como se produce el falso positivo de
   "planta activa en dos contratos a la vez".
-- **`_contratos_vigentes(solo_relevantes=True)` es el default a propósito.**
-  Todas las vistas de /mem/cumplimiento ocultan los contratos de un responsable
-  marcado `incluir_en_cumplimiento=False`. `/descubrimientos` y
-  `/cerrar-periodo` pasan False adrede: cerrar-periodo PERSISTE registros
-  mensuales, y dejar contratos fuera del cierre cambiaría datos históricos.
+- **Todas las vistas ven todos los contratos PPA vigentes.** Hasta el
+  2026-10-14 un catálogo `ppa_responsables` escondía los "externos" (los que
+  gestiona un tercero); Sara decidió quitar ese filtro sin reemplazarlo por una
+  bandera. Cierre, descubrimientos y garantías ya trabajaban con todos.
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ from django.db.models import F, Q
 from apps.mercado_xm.models import AsicSolicitud
 from apps.mercado_xm.services.gescon_vigencia import resolver_vigencias
 from apps.plataforma.services.fechas import hoy_col
-from apps.ppa.models import PpaContrato, PpaResponsable
+from apps.ppa.models import PpaContrato
 from apps.contratos.services import contrato_partes
 
 from .periodos import UNGC_COMERCIALIZADOR, _recortar, _restar_intervalos
@@ -92,32 +91,8 @@ def _get_bolsa_avg(year: int, month: int) -> dict:
     }
 
 
-def _ids_responsables_ocultos() -> set:
-    """Responsables marcados como NO relevantes: sus contratos los gestiona un
-    tercero y no deben aparecer en las vistas de /mem/cumplimiento."""
-    return set(
-        PpaResponsable.objects
-        .filter(incluir_en_cumplimiento=False)
-        .values_list("id", flat=True)
-    )
-
-
-def _filtro_responsable_relevante() -> Q | None:
-    """Deja pasar los contratos sin responsable y los de un responsable
-    relevante. `None` si no hay ninguno oculto (no filtra)."""
-    ocultos = _ids_responsables_ocultos()
-    if not ocultos:
-        return None
-    return Q(responsable_id__isnull=True) | ~Q(responsable_id__in=ocultos)
-
-
-def _contratos_vigentes(year: int, month: int | None = None,
-                        solo_relevantes: bool = True) -> list:
-    """Contratos PPA activos en el período, sin los borrados. `month=None` → el año.
-
-    Contrato SIN responsable = se incluye: nada se esconde por omisión, solo por
-    marca explícita.
-    """
+def _contratos_vigentes(year: int, month: int | None = None) -> list:
+    """Contratos PPA activos en el período, sin los borrados. `month=None` → el año."""
     if month:
         first_day, last_day = _mes(year, month)
     else:
@@ -125,18 +100,12 @@ def _contratos_vigentes(year: int, month: int | None = None,
 
     qs = (
         PpaContrato.objects
-        # el responsable se lee en las filas de la matriz: precargarlo evita N+1
-        .select_related("responsable")
-        # y las partes: el comprador se muestra en cada fila
+        # las partes: el comprador se muestra en cada fila
         .prefetch_related(contrato_partes.CON_PARTES)
         .filter(deleted_at__isnull=True)
         .filter(Q(fecha_inicio__isnull=True) | Q(fecha_inicio__lte=last_day))
         .filter(Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=first_day))
     )
-    if solo_relevantes:
-        clausula = _filtro_responsable_relevante()
-        if clausula is not None:
-            qs = qs.filter(clausula)
     # `nullslast` de SQLAlchemy: en Django es el `F(...).asc(nulls_last=True)`
     # que produce el mismo ORDER BY … NULLS LAST.
     return list(qs.order_by(_asc_nulls_last("nombre_interno"), "id"))
@@ -304,8 +273,7 @@ def _fin_efectivo_asic(asic, last_day: date) -> date | None:
     return v.fecha_fin_efectiva if v else asic.fecha_fin
 
 
-def _query_contratos_venta(year: int | None = None, month: int | None = None,
-                           solo_relevantes: bool = True) -> list:
+def _query_contratos_venta(year: int | None = None, month: int | None = None) -> list:
     """Contratos PPA de venta (`tipo_contrato != 'compra'`).
 
     Replica EXACTAMENTE el filtro con que `/simulador` arma `contratos_venta`:
@@ -315,24 +283,6 @@ def _query_contratos_venta(year: int | None = None, month: int | None = None,
     if year is None:
         year = hoy_col().year
     return [
-        c for c in _contratos_vigentes(year, month, solo_relevantes=solo_relevantes)
+        c for c in _contratos_vigentes(year, month)
         if (c.tipo_contrato or "venta") != "compra"
-    ]
-
-
-def _contratos_venta_ocultos(year: int, month: int) -> list:
-    """Contratos de venta vigentes que el filtro de responsables esconde.
-
-    Esconder un contrato NO libera a sus plantas: siguen en ese contrato, solo
-    que no se muestra. Quien arme la asignación planta→contrato con los
-    contratos visibles tiene que descontar también estos, o sus plantas
-    reaparecen como "sin contrato" o como bolsa. Vacío si no hay responsables
-    ocultos.
-    """
-    if not _ids_responsables_ocultos():
-        return []
-    visibles = {c.id for c in _query_contratos_venta(year, month, solo_relevantes=True)}
-    return [
-        c for c in _query_contratos_venta(year, month, solo_relevantes=False)
-        if c.id not in visibles
     ]

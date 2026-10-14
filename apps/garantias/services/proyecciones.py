@@ -33,13 +33,12 @@ def _balance(anio: int, mes: int, corte: date | None = None) -> dict:
         calcular_balance, calcular_balance_proyectado,
     )
 
-    # incluir_todos=True: la garantía es la exposición de TODA la empresa ante XM, así
-    # que NO se aplica el filtro de "responsables ocultos" de Cumplimiento (p. ej.
-    # "Externo"). XM cobra esos contratos igual; excluirlos subcontaría la garantía.
+    # La garantía es la exposición de TODA la empresa ante XM: cuenta todos los
+    # contratos, también los que gestiona un tercero (XM los cobra igual).
     hoy = corte or hoy_col()
     if (anio, mes) > (hoy.year, hoy.month):
-        return calcular_balance_proyectado(anio, mes, hoy=hoy, incluir_todos=True)
-    return calcular_balance(anio, mes, hoy=hoy, incluir_todos=True)
+        return calcular_balance_proyectado(anio, mes, hoy=hoy)
+    return calcular_balance(anio, mes, hoy=hoy)
 
 
 def _precio_bolsa(hasta: date | None = None) -> float | None:

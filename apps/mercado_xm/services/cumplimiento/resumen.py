@@ -24,13 +24,13 @@ from .anual import _anual_meses_para_contrato, _build_fetch_sets
 from .consultas import (
     _contratos_vigentes, _get_bolsa_avg, _query_contratos_venta, _resolve_gescon,
 )
-from .periodos import _responsable_payload, _rollup_cumplimiento
+from .periodos import _rollup_cumplimiento
 from .xm_api import _fetch_month, _fetch_range, _fetch_recent_avg, _unergy_token
 
 logger = logging.getLogger("operaciones.cumplimiento")
 
 
-def resumen(year: int, month: int, incluir_todos: bool = False) -> dict:
+def resumen(year: int, month: int) -> dict:
     """Cumplimiento de todos los contratos PPA en un período.
 
     Deduplica `sub_project` y hace UNA sola llamada a la API de generación por
@@ -43,7 +43,7 @@ def resumen(year: int, month: int, incluir_todos: bool = False) -> dict:
     dia_actual = today.day if es_mes_actual else total_dias
 
     # ── 1. Contratos y compromisos ────────────────────────────────────────────
-    contratos = _contratos_vigentes(year, month, solo_relevantes=not incluir_todos)
+    contratos = _contratos_vigentes(year, month)
     compromisos_map = {
         c.contrato_id: c
         for c in PpaCompromisoEnergia.objects.filter(año=year, mes=month)
@@ -180,7 +180,6 @@ def resumen(year: int, month: int, incluir_todos: bool = False) -> dict:
             "nombre_interno": c.nombre_interno,
             "numero_codigo_contrato": c.numero_codigo_contrato,
             "comprador_nombre": c.comprador_nombre,
-            **_responsable_payload(c),
             "energia_minima_mwh": min_mwh,
             "energia_maxima_mwh": max_mwh,
             "gen_total_mwh": gen_total_c,
@@ -331,7 +330,6 @@ def _matriz_un_contrato(contrato, year: int, today) -> dict:
         "nombre_interno": contrato.nombre_interno,
         "numero_codigo_contrato": contrato.numero_codigo_contrato,
         "comprador_nombre": contrato.comprador_nombre,
-        **_responsable_payload(contrato),
         "meses": meses,
         "proyectos": proyectos,
         "n_plantas": n_plantas,
@@ -339,16 +337,12 @@ def _matriz_un_contrato(contrato, year: int, today) -> dict:
     }
 
 
-def anual_matriz(year: int, incluir_todos: bool = False) -> dict:
-    """Matriz anual contrato → proyectos × 12 meses (solo venta).
-
-    Por defecto oculta los contratos de responsables no relevantes: además de
-    limpiar la vista, ahorra sus llamadas a la API de Unergy.
-    """
+def anual_matriz(year: int) -> dict:
+    """Matriz anual contrato → proyectos × 12 meses (solo venta)."""
     today = hoy_col()
 
     # 1. Contratos de venta (mismo universo que el simulador, sin restricción de mes)
-    contratos = _query_contratos_venta(year, solo_relevantes=not incluir_todos)
+    contratos = _query_contratos_venta(year)
 
     # 2. GESCON por contrato/mes + compromisos por contrato
     gpm_por_contrato: dict = {}
@@ -415,7 +409,6 @@ def anual_matriz(year: int, incluir_todos: bool = False) -> dict:
             "nombre_interno": c.nombre_interno,
             "numero_codigo_contrato": c.numero_codigo_contrato,
             "comprador_nombre": c.comprador_nombre,
-            **_responsable_payload(c),
             "meses": meses,
             "proyectos": proyectos,
             "n_plantas": n_plantas,

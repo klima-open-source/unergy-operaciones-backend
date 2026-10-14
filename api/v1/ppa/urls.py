@@ -1,6 +1,6 @@
 """Rutas de PPA.
 
-`responsables`, `partes`, `resumen-global` e `ipp/mensual` son acciones de
+`partes`, `resumen-global` e `ipp/mensual` son acciones de
 LISTA, y `DefaultRouter` las registra antes de la ruta de detalle: el `{pk}` no
 se las come. `tests/test_resolucion_rutas.py` lo verifica.
 """

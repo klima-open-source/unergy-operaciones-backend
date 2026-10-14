@@ -31,7 +31,7 @@ from .xm_api import _fetch_month, _fetch_range, _unergy_token
 logger = logging.getLogger("operaciones.cumplimiento")
 
 
-def energia_transada(year: int, month: int, incluir_todos: bool = False) -> dict:
+def energia_transada(year: int, month: int) -> dict:
     """Energía transada por planta en el mes — SOLO datos reales, sin proyección.
 
     Para cada planta representada: la generación del período (mes cerrado
@@ -81,7 +81,7 @@ def energia_transada(year: int, month: int, incluir_todos: bool = False) -> dict
 
     # ── 2. Asignaciones GESCON de contratos de venta vigentes ─────────────────
     contratos_venta = [
-        c for c in _contratos_vigentes(year, month, solo_relevantes=not incluir_todos)
+        c for c in _contratos_vigentes(year, month)
         if (getattr(c, "tipo_contrato", None) or "venta") != "compra"
     ]
     asignaciones: dict[int, list[dict]] = defaultdict(list)

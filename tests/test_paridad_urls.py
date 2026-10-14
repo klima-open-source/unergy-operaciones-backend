@@ -394,6 +394,14 @@ def test_las_rutas_portadas_coinciden_con_las_de_fastapi():
         # Los servicios de una planta ya no se prenden a mano: salen de sus
         # contratos vigentes (rama `retiro-banderas`, 2026-10-07).
         ("/api/v1/proyectos/{}/servicios", "PATCH"),
+        # Cumplimiento ya no esconde los contratos que gestiona un tercero: el
+        # catalogo `ppa_responsables` y su administracion se fueron (2026-10-14,
+        # decision del equipo; rama `retiro-responsables`).
+        ("/api/v1/ppa/responsables", "GET"),
+        ("/api/v1/ppa/responsables", "POST"),
+        ("/api/v1/ppa/responsables/{}", "PATCH"),
+        ("/api/v1/ppa/responsables/{}", "DELETE"),
+        ("/api/v1/ppa/responsables/asignar", "POST"),
     }
 
     faltan = fastapi - django_ - RETIRADAS

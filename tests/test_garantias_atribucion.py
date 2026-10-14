@@ -78,7 +78,7 @@ def test_garantia_por_contrato_reparte_el_total_por_los_pesos():
     ]
     filas = garantia_por_contrato(
         2026, 9, total_garantia=4000.0,
-        resumen_fn=lambda y, m, incluir_todos=True: {"contratos": contratos},
+        resumen_fn=lambda y, m: {"contratos": contratos},
         plc_fn=lambda: {"UNERGY 008-2025"},
     )
     d = {f["codigo"]: f for f in filas}

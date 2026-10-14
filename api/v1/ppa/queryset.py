@@ -24,7 +24,6 @@ def con_relaciones():
     return (
         ppa_models.PpaContrato.objects
         .filter(deleted_at__isnull=True)
-        .select_related("responsable")
         .prefetch_related(
             contrato_partes.CON_PARTES,
             "proyectos_vinculados__proyecto",

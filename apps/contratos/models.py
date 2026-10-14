@@ -222,10 +222,6 @@ class Contrato(Timer):
     # (y la planta) salen de `contrato_proyectos`: ver sus atajos más abajo.
 
     # --- Específicas de compraventa de energía (PPA), antes en ppa_contratos ---
-    responsable = models.ForeignKey(
-        "ppa.PpaResponsable", on_delete=models.SET_NULL, db_column="responsable_id",
-        null=True, blank=True, related_name="contratos",
-    )
     # venta | compra (antes ppa_contratos.tipo_contrato).
     tipo_contrato = models.CharField(
         max_length=20, choices=Compraventa.choices, null=True, blank=True,
@@ -691,7 +687,7 @@ class ContratoProyecto(models.Model):
 #: API siga teniendo exactamente los campos de antes de la tabla única: con
 #: `exclude` y la tabla ancha se colaban en la lectura y, peor, en la escritura.
 COLUMNAS_SOLO_PPA = (
-    "numero_codigo_contrato", "nombre_interno", "responsable", "tipo_contrato",
+    "numero_codigo_contrato", "nombre_interno", "tipo_contrato",
     "periodicidad_indexacion", "periodo_indexacion_base",
     "valor_indexacion_base", "cantidad_minima_kwh_mes", "cantidad_maxima_kwh_mes",
     "periodicidad_facturacion", "tiempo_pago", "condiciones_pago", "gescon_codigo",

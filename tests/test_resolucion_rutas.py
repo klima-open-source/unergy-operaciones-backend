@@ -58,8 +58,6 @@ CASOS = [
      "monitoring_inverters_power"),
     ("/api/v1/generacion-solar/proyecto/7/historial", "historial"),
     # `ppa/{pk}` contra sus acciones de lista con nombre literal.
-    ("/api/v1/ppa/responsables", "responsables"),
-    ("/api/v1/ppa/responsables/3", "responsable"),
     ("/api/v1/ppa/partes", "partes"),
     ("/api/v1/ppa/resumen-global", "resumen_global"),
     ("/api/v1/ppa/ipp/mensual", "ipp_mensual"),

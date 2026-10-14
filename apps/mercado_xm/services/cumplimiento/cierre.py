@@ -3,10 +3,9 @@
 Puerto de `/cerrar-periodo`, `/historico`, `/historico/{id}` y
 `/historico/{id}/facturar`.
 
-**El cierre no filtra por responsable, y no es un descuido.** Persiste el
-snapshot mensual: dejar contratos fuera cambiaría el histórico guardado, no solo
-lo que se ve en pantalla — marcar un responsable como no relevante borraría su
-cierre. Por eso `_contratos_vigentes(..., solo_relevantes=False)`.
+**El cierre cuenta todos los contratos PPA vigentes.** Persiste el snapshot
+mensual: dejar contratos fuera cambiaría el histórico guardado, no solo lo que se
+ve en pantalla.
 
 **Un registro facturado es inmutable desde acá.** Reejecutar el cierre de un mes
 ya facturado devuelve el registro tal cual, sin tocarlo.
@@ -65,10 +64,9 @@ def cerrar_periodo(anio: int, mes: int) -> dict:
     dia_actual = today.day if es_mes_actual else total_dias
 
     # ── 1. Contratos y compromisos ────────────────────────────────────────────
-    # Sin filtro de responsable A PROPÓSITO: esto PERSISTE el cierre mensual. Dejar
-    # contratos fuera cambiaría el histórico guardado, no solo lo que se ve en
-    # pantalla — y marcar un responsable como no relevante borraría su cierre.
-    contratos = _contratos_vigentes(year, month, solo_relevantes=False)
+    # Todos los vigentes: esto PERSISTE el cierre mensual, y dejar contratos fuera
+    # cambiaría el histórico guardado.
+    contratos = _contratos_vigentes(year, month)
     if not contratos:
         raise NotFound("No hay contratos PPA registrados")
 

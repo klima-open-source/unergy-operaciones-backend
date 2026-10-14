@@ -31,12 +31,6 @@ from apps.plataforma.services.fechas import hoy_col
 # equivocado. Se usa `hoy_col()` (CLAUDE.md).
 
 
-INCLUIR_TODOS_DESC = (
-    "Incluye también los contratos cuya empresa responsable está marcada como no "
-    "relevante (incluir_en_cumplimiento=false). Por defecto se omiten en todas las "
-    "vistas de /mem/cumplimiento."
-)
-
 UNGC_COMERCIALIZADOR = "UNGC"
 
 def _vigencia_window(fecha_inicio, fecha_fin, first_day: date, last_day: date):
@@ -149,15 +143,6 @@ def _con_segmento(entry: dict, ini: date | None, fin: date | None,
     entry["segmento_fin"] = seg[1].isoformat()
     entry["estado"] = _estado_segmento(seg[0], seg[1], corte)
     return entry
-
-def _responsable_payload(contrato) -> dict:
-    """Empresa responsable del PPA, aplanada para las filas de las vistas."""
-    r = contrato.responsable
-    return {
-        "responsable_id": contrato.responsable_id,
-        "responsable": r.nombre if r else None,
-        "responsable_relevante": r.incluir_en_cumplimiento if r else True,
-    }
 
 def _rollup_cumplimiento(meses: list[dict]) -> dict:
     """Deriva el rollup anual de cumplimiento a partir de los 12 meses de un contrato.

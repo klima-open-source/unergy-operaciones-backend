@@ -44,7 +44,6 @@ class CompromisoEntradaSerializer(serializers.Serializer):
 class ContratoSerializer(serializers.ModelSerializer):
     """Lectura. `carpeta_link` sale de los documentos comerciales precargados."""
 
-    responsable_id = serializers.IntegerField(allow_null=True)
     comprador_id = serializers.IntegerField(allow_null=True)
     vendedor_id = serializers.IntegerField(allow_null=True)
     proyectos = serializers.SerializerMethodField()
@@ -62,7 +61,7 @@ class ContratoSerializer(serializers.ModelSerializer):
     class Meta:
         model = ppa_models.PpaContrato
         fields = [
-            "id", "numero_codigo_contrato", "nombre_interno", "responsable_id",
+            "id", "numero_codigo_contrato", "nombre_interno",
             "comprador_id", "vendedor_id", "comprador_nombre", "comprador_nit",
             "vendedor_nombre", "vendedor_nit", "fecha_inicio", "fecha_fin",
             "tarifa_base", "indice_indexacion", "periodicidad_indexacion",
@@ -106,11 +105,10 @@ class ContratoSerializer(serializers.ModelSerializer):
 class ContratoEscrituraSerializer(serializers.ModelSerializer):
     """Escritura de un contrato PPA.
 
-    **Las tres relaciones viajan como `<rol>_id`, igual que en la lectura.** Si
-    se dejan con el nombre que les da el ORM (`comprador`, `vendedor`,
-    `responsable`), DRF descarta en silencio las claves que manda el frontend
-    —`comprador_id` y compañía— y el contrato se crea SIN partes y SIN
-    responsable, devolviendo 201. Fue exactamente lo que pasó entre el port a
+    **Las partes viajan como `<rol>_id`, igual que en la lectura.** Si se dejan
+    con el nombre que les da el ORM (`comprador`, `vendedor`), DRF descarta en
+    silencio las claves que manda el frontend —`comprador_id` y compañía— y el
+    contrato se crea SIN partes, devolviendo 201. Fue exactamente lo que pasó entre el port a
     Django (2026-09-04) y este arreglo; `PPAContratoCreate` de FastAPI las
     recibía con `_id` y el front nunca cambió. Ver `docs/DIAGNOSTICO_PPA.md` §3.
 
@@ -118,10 +116,6 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
     pasar de largo.
     """
 
-    responsable_id = serializers.PrimaryKeyRelatedField(
-        source="responsable", queryset=ppa_models.PpaResponsable.objects.all(),
-        required=False, allow_null=True,
-    )
     comprador_id = serializers.PrimaryKeyRelatedField(
         source="comprador", queryset=cl_models.Cliente.objects.all(),
         required=False, allow_null=True,
@@ -141,7 +135,7 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
         model = ppa_models.PpaContrato
         fields = [
             # Las partes, solo por su cliente: nombre y NIT son los de la ficha.
-            "numero_codigo_contrato", "nombre_interno", "responsable_id",
+            "numero_codigo_contrato", "nombre_interno",
             "comprador_id", "vendedor_id", "fecha_inicio", "fecha_fin",
             "tarifa_base", "indice_indexacion", "periodicidad_indexacion",
             "periodo_indexacion_base", "valor_indexacion_base",
@@ -180,30 +174,6 @@ class ContratoCreacionSerializer(ContratoEscrituraSerializer):
     class Meta(ContratoEscrituraSerializer.Meta):
         fields = ContratoEscrituraSerializer.Meta.fields + ["tarifas", "compromisos"]
         extra_kwargs = ContratoEscrituraSerializer.Meta.extra_kwargs
-
-
-class ResponsableSerializer(serializers.ModelSerializer):
-    n_contratos = serializers.IntegerField(read_only=True, default=0)
-
-    class Meta:
-        model = ppa_models.PpaResponsable
-        fields = ["id", "nombre", "incluir_en_cumplimiento", "n_contratos"]
-
-
-class ResponsableEntradaSerializer(serializers.Serializer):
-    nombre = serializers.CharField()
-    incluir_en_cumplimiento = serializers.BooleanField(default=True)
-
-
-class ResponsableUpdateSerializer(serializers.Serializer):
-    nombre = serializers.CharField(required=False, allow_null=True)
-    incluir_en_cumplimiento = serializers.BooleanField(required=False)
-
-
-class AsignarResponsableSerializer(serializers.Serializer):
-    contrato_ids = serializers.ListField(child=serializers.IntegerField())
-    # `null` desasigna.
-    responsable_id = serializers.IntegerField(required=False, allow_null=True)
 
 
 class IppMensualSerializer(serializers.Serializer):

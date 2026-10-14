@@ -14,7 +14,6 @@ from django.db import models
 from django.utils import timezone
 
 from apps.contratos.models import Contrato, ContratoProyecto, GrupoContrato
-from apps.plataforma.models import Timer
 
 
 class PpaContratoManager(models.Manager):
@@ -44,16 +43,6 @@ class PpaContrato(Contrato):
     class Meta:
         proxy = True
         verbose_name = "Contrato PPA"
-
-
-class PpaResponsable(Timer):
-    id = models.BigAutoField(primary_key=True)
-    nombre = models.CharField(max_length=120)
-    incluir_en_cumplimiento = models.BooleanField(default=True)
-
-    class Meta:
-        db_table = "ppa_responsables"
-        unique_together = [("nombre",)]
 
 
 class PpaTarifa(models.Model):

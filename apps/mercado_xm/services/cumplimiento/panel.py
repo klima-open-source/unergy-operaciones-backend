@@ -24,7 +24,7 @@ from apps.ppa.models import PpaCompromisoEnergia
 from .anual import _anual_meses_para_contrato, _build_fetch_sets
 from .consultas import _query_contratos_venta, _resolve_gescon
 from .periodos import (
-    _consolidar_meses, _panel_cache_get, _panel_cache_set, _responsable_payload,
+    _consolidar_meses, _panel_cache_get, _panel_cache_set,
     _rollup_cumplimiento, _totales_tabla,
 )
 from .xm_api import _fetch_month, _fetch_range, _fetch_recent_avg, _unergy_token
@@ -32,8 +32,7 @@ from .xm_api import _fetch_month, _fetch_range, _fetch_recent_avg, _unergy_token
 logger = logging.getLogger("operaciones.cumplimiento")
 
 
-def panel_anual(year: int, incluir_plantas: bool = True, refrescar: bool = False,
-                incluir_todos: bool = False) -> dict:
+def panel_anual(year: int, incluir_plantas: bool = True, refrescar: bool = False) -> dict:
     """Todo lo que dibuja la pestaña Cumplimiento de /mem/cumplimiento, en una llamada.
 
     Devuelve, para el año pedido:
@@ -46,16 +45,14 @@ def panel_anual(year: int, incluir_plantas: bool = True, refrescar: bool = False
 
     Cacheado 15 minutos en memoria (`?refrescar=true` para saltarla).
     """
-    # incluir_todos va en la llave: si no, la respuesta filtrada y la completa se
-    # pisarían entre sí en la caché.
-    cache_key = f"panel-anual:{year}:{int(incluir_plantas)}:{int(incluir_todos)}"
+    cache_key = f"panel-anual:{year}:{int(incluir_plantas)}"
     if not refrescar:
         cached = _panel_cache_get(cache_key)
         if cached is not None:
             return {**cached, "desde_cache": True}
 
     today = hoy_col()
-    contratos = _query_contratos_venta(year, solo_relevantes=not incluir_todos)
+    contratos = _query_contratos_venta(year)
 
     # GESCON por contrato/mes + compromisos, igual que get_anual_matriz.
     gpm_por_contrato: dict = {}
