@@ -109,3 +109,5 @@ class DocumentoSerializer(serializers.Serializer):
     nombre_arrendatario = serializers.CharField(allow_null=True)
     valor_individual = serializers.FloatField(allow_null=True)
     fecha_subida = serializers.DateTimeField(allow_null=True)
+    # El pago de TSF del que se trajo (UUID); null en los subidos por ZIP.
+    originabot_pago_id = serializers.CharField(allow_null=True, required=False)

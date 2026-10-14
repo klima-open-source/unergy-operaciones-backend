@@ -68,6 +68,12 @@ class Proyecto(Timer):
     # desde TSF»; para los demás se resuelve por `origina_code` la primera vez que
     # hace falta (sincronizar las plantas de un PPA).
     originabot_minifarm_id = models.IntegerField(null=True, blank=True)
+    # El proyecto y el terreno de esa minigranja en originabot. Se guardan la
+    # primera vez que hacen falta (traer las cuentas de cobro de arriendos, que
+    # originabot lista por terreno) para no pedir la minigranja de cada planta en
+    # cada consulta. Ver `apps/arriendos/services/cuentas_cobro_originabot.py`.
+    originabot_proyecto_id = models.IntegerField(null=True, blank=True)
+    originabot_terreno_id = models.IntegerField(null=True, blank=True)
     # ECS (Estudio de Conexión Simplificado): el insumo principal del punto de
     # conexión en TSF (servicio `requests`, expuesto por originabot en
     # /api/connection/supplies-info/). Lo escribe «Sincronizar con TSF» desde la

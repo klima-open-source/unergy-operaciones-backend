@@ -86,10 +86,22 @@ class ArrDocumento(models.Model):
     nombre_arrendatario = models.CharField(max_length=255, null=True, blank=True)
     valor_individual = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
     fecha_subida = models.DateTimeField(default=timezone.now)
+    # El pago de originabot (`payment.Payment`, un UUID) del que se trajo este
+    # documento con «Traer de TSF». Un pago de TSF puede cubrir varias plantas del
+    # mismo terreno: hay un documento por pago Y planta. Los subidos por ZIP no
+    # lo tienen (su `pago_id` es el número de la carpeta).
+    originabot_pago_id = models.CharField(max_length=40, null=True, blank=True)
 
     class Meta:
         db_table = "arr_documento"
         unique_together = [("arr_arrendador", "arr_proyecto", "pago_id", "periodo")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["originabot_pago_id", "proyecto"],
+                condition=models.Q(originabot_pago_id__isnull=False),
+                name="uq_arr_documento_originabot_pago_proyecto",
+            ),
+        ]
 
 
 class ArrSeleccionMensual(Timer):

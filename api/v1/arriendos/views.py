@@ -8,10 +8,13 @@ from rest_framework.exceptions import NotFound, PermissionDenied, ValidationErro
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
+from api.exceptions import NoProcesable
 from api.logging import class_logger_wrapper, log_endpoint
 from api.permissions import RolePermission
 from apps.arriendos import models as ar_models
+from apps.arriendos.services import cuentas_cobro_originabot
 from apps.arriendos.services import documentos as documentos_service
+from apps.comun.integraciones.originabot import OriginabotError
 from apps.arriendos.services import panel as panel_service
 from apps.contratos import models as ct_models
 
@@ -46,6 +49,7 @@ class ArriendoViewSet(viewsets.GenericViewSet):
     POST   /api/v1/arriendos/documentos/upload
     POST   /api/v1/arriendos/documentos/upload-cuenta-cobro
     GET    /api/v1/arriendos/documentos/file/{doc_id}[?secundario=true]
+    GET|POST /api/v1/arriendos/originabot/cuentas-cobro/{periodo}  (TSF)
     DELETE /api/v1/arriendos/documentos/{doc_id}
 
     **Un contrato puede tener varios arrendadores** y cada uno factura su parte
@@ -299,6 +303,33 @@ class ArriendoViewSet(viewsets.GenericViewSet):
             "ok": True, "id": documento.id,
             "nombre_archivo": documento.nombre_archivo,
         })
+
+    @action(
+        detail=False, methods=["get", "post"],
+        url_path=r"originabot/cuentas-cobro/(?P<periodo>[\w-]+)",
+    )
+    @log_endpoint(name="Operaciones | Arriendos | Cuentas de cobro de TSF")
+    def cuentas_cobro_originabot(self, request, periodo=None):
+        """Las cuentas de cobro de TSF del período («Traer de TSF» en Costos).
+
+        GET: lo que hay en TSF para cada planta con contrato de arriendo, con su
+        valor y si tiene documento; no escribe. POST `{pagos: [uuid…]}`: descarga
+        el documento de esos pagos y lo guarda. Ver
+        `apps/arriendos/services/cuentas_cobro_originabot.py`. Con el token de
+        Unergy Auth de quien pide: originabot decide con sus permisos.
+        """
+        _periodo(periodo)
+        if not request.auth:
+            raise PermissionDenied("Para traer de TSF entra con Unergy Auth.")
+        try:
+            if request.method == "GET":
+                return Response(cuentas_cobro_originabot.consultar(periodo, request.auth))
+            pagos = request.data.get("pagos")
+            if not isinstance(pagos, list) or not all(isinstance(p, str) for p in pagos) or not pagos:
+                raise ValidationError({"pagos": "Lista de ids de pago de TSF."})
+            return Response(cuentas_cobro_originabot.importar(periodo, request.auth, pagos))
+        except OriginabotError as exc:
+            raise NoProcesable(str(exc))
 
     @action(
         detail=False, methods=["post"],

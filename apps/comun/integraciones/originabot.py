@@ -5,7 +5,8 @@ Bearer de la persona que hizo el cambio en Operaciones (`request.auth`, ver
 `api.authentication.UnergyAuthAuthentication`), y originabot decide con SUS
 permisos. Un token del login propio de Operaciones no le sirve a originabot.
 
-Solo lo que necesita la unión de PPAs (`apps/ppa/services/originabot_sync.py`).
+Lo usan la unión de PPAs (`apps/ppa/services/originabot_sync.py`) y las cuentas
+de cobro de arriendos (`apps/arriendos/services/cuentas_cobro_originabot.py`).
 """
 from __future__ import annotations
 
@@ -88,3 +89,46 @@ class ClienteOriginabot:
             m for m in (datos.get("results", []) if isinstance(datos, dict) else [])
             if isinstance(m.get("id"), int)
         ]
+
+    def minigranja(self, minifarm_id: int) -> dict:
+        """El detalle de una minigranja: `project.id` y `project.terrain_id` salen de aquí."""
+        return self._pedir("GET", f"/api/investment/minifarm/{minifarm_id}/")
+
+    # ── Pagos de arriendo (`payment.Payment`) ─────────────────────────────────
+
+    def pagos_de_terreno(self, terreno_id: int, anio: int) -> list[dict]:
+        """Los pagos de arriendo de un terreno en un año, todas las páginas.
+
+        Cada pago es de UN propietario y UNA fecha, y puede cubrir varios
+        proyectos del terreno (`rent[].project`). `support_document.file` es la
+        cuenta de cobro o factura que subió el propietario (URL firmada).
+        """
+        pagos: list[dict] = []
+        pagina = 1
+        while pagina <= 50:  # tope: un `next` roto no deja un bucle infinito
+            datos = self._pedir(
+                "GET", "/api/v2/origination/payment/payment/payment/",
+                params={"terrain": terreno_id, "year": anio, "page": pagina, "page_size": 100},
+            )
+            pagos.extend(datos.get("results") or [])
+            if not datos.get("next"):
+                break
+            pagina += 1
+        return pagos
+
+    @staticmethod
+    def descargar(url: str) -> bytes:
+        """Un archivo de originabot por su URL firmada (Backblaze/S3).
+
+        SIN el token: la firma va en la URL, y el Bearer de Unergy Auth no tiene
+        por qué salir hacia el bucket.
+        """
+        try:
+            r = httpx.get(url, timeout=60.0, follow_redirects=True)
+        except httpx.HTTPError as exc:
+            raise OriginabotError("No se pudo descargar el documento de TSF.") from exc
+        if r.status_code >= 400:
+            raise OriginabotError(
+                f"TSF no entregó el documento ({r.status_code}); puede que su enlace haya vencido."
+            )
+        return r.content

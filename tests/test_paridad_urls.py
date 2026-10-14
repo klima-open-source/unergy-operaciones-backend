@@ -178,6 +178,8 @@ RUTAS_NUEVAS = {
     ("/api/v1/operadores-red/originabot", "POST"),
     ("/api/v1/clientes/originabot", "POST"),
     ("/api/v1/clientes/originabot-arrendador", "POST"),
+    ("/api/v1/arriendos/originabot/cuentas-cobro/{}", "GET"),
+    ("/api/v1/arriendos/originabot/cuentas-cobro/{}", "POST"),
     ("/api/v1/proyectos/{}/originabot/minigranja", "POST"),
     # 2026-10-13: PPAs unidos con originabot (apps/ppa/services/originabot_sync.py).
     ("/api/v1/ppa/originabot/opciones", "GET"),

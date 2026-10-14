@@ -49,7 +49,7 @@ def carpeta(periodo: str, codigo_contrato: str) -> Path:
     return destino
 
 
-def _escribir(destino: Path, nombre: str, contenido: bytes) -> Path:
+def escribir(destino: Path, nombre: str, contenido: bytes) -> Path:
     ruta = destino / nombre
     ruta.write_bytes(contenido)
     return ruta
@@ -64,13 +64,13 @@ def subir(datos: dict, principal, secundario=None) -> object:
     nombre = datos["nombre_resultante"]
     if not nombre.endswith(extension):
         nombre += extension
-    ruta = _escribir(destino, nombre, principal.read())
+    ruta = escribir(destino, nombre, principal.read())
 
     nombre_sec = ruta_sec = None
     if secundario is not None and secundario.name:
         ext_sec = Path(secundario.name).suffix or ".pdf"
         nombre_sec = f'{nombre.rsplit(".", 1)[0]}_enviada{ext_sec}'
-        ruta_sec = str(_escribir(destino, nombre_sec, secundario.read()))
+        ruta_sec = str(escribir(destino, nombre_sec, secundario.read()))
 
     valores = {
         "codigo_contrato": datos["codigo_contrato"],
@@ -133,7 +133,7 @@ def subir_cuenta_cobro(datos: dict, principal, secundario=None) -> dict:
 
     # El original se conserva una sola vez, sin renombrar.
     ext = Path(principal.name or "documento.pdf").suffix or ".pdf"
-    ruta_original = _escribir(
+    ruta_original = escribir(
         destino, f"_original_pago{pago_id}{ext}", contenido
     )
 
@@ -141,7 +141,7 @@ def subir_cuenta_cobro(datos: dict, principal, secundario=None) -> dict:
     if secundario is not None and secundario.name:
         ext_sec = Path(secundario.name).suffix or ".pdf"
         nombre_sec = f"_enviada_pago{pago_id}{ext_sec}"
-        ruta_sec = str(_escribir(destino, nombre_sec, secundario.read()))
+        ruta_sec = str(escribir(destino, nombre_sec, secundario.read()))
 
     mapa: dict | None = None
     asociados = sin_match = 0
@@ -162,7 +162,7 @@ def subir_cuenta_cobro(datos: dict, principal, secundario=None) -> dict:
             )),
             f"documento_pago{pago_id}.pdf",
         )
-        ruta_copia = _escribir(destino, nombre, contenido)
+        ruta_copia = escribir(destino, nombre, contenido)
 
         documento = _documento_del_predio(
             arr_proyecto_id, arr_arrendador_id, periodo, pago_id
