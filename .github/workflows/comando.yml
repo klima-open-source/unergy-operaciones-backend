@@ -41,6 +41,10 @@ on:
           - "DESHACER garantia de fallas (monitoreo 0009)"
           - "exportar_partes_sin_cliente (solo lee)"
           - "exportar_inversionistas_de_contratos (solo lee)"
+          - "cargar_patrimonios (solo lee)"
+          - "cargar_patrimonios --aplicar"
+          - "vincular_participaciones_pendientes (solo lee)"
+          - "vincular_participaciones_pendientes --aplicar"
           - "DESHACER paso 2 (corte de contratos)"
           - "DESHACER paso 0 (diagnostico)"
       confirmar:
@@ -103,6 +107,10 @@ jobs:
               ;;
             "exportar_partes_sin_cliente (solo lee)")    manage exportar_partes_sin_cliente ;;
             "exportar_inversionistas_de_contratos (solo lee)") manage exportar_inversionistas_de_contratos ;;
+            "cargar_patrimonios (solo lee)")            manage cargar_patrimonios ;;
+            "cargar_patrimonios --aplicar")             manage cargar_patrimonios --aplicar ;;
+            "vincular_participaciones_pendientes (solo lee)") manage vincular_participaciones_pendientes ;;
+            "vincular_participaciones_pendientes --aplicar")  manage vincular_participaciones_pendientes --aplicar ;;
             "DESHACER paso 2 (corte de contratos)")
               confirmado
               manage migrate contratos 0008
