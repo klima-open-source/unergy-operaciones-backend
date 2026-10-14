@@ -31,6 +31,7 @@ from django.db.models import Q
 
 from apps.contabilidad.services.costos import elegir_contrato_representacion
 from apps.contratos.models import ContratoServicio
+from apps.contratos.services import tarifas as tarifas_service
 from apps.contratos.services.contrato_proyectos import CON_PLANTA
 from apps.contratos.services import grupos, vigencia
 from apps.plataforma.services.fechas import hoy_col
@@ -50,7 +51,7 @@ class Command(BaseCommand):
             vigencia.filtro_vivos(hoy),
             grupos.filtro_subservicio(grupos.REPRESENTACION),
             proyectos_vinculados__isnull=False,
-        ).prefetch_related(CON_PLANTA)
+        ).prefetch_related(CON_PLANTA, tarifas_service.con_tarifas())
         for c in contratos:
             if c.proyecto_id in plantas:
                 por_planta.setdefault(c.proyecto_id, []).append(c)

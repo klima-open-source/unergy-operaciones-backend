@@ -47,9 +47,6 @@ on:
           - "vincular_participaciones_pendientes --aplicar"
           - "copiar_portafolios (solo lee)"
           - "copiar_portafolios --aplicar"
-          - "subida 1: los cuatro comandos --aplicar"
-          - "registrar_tarifas (solo lee)"
-          - "registrar_tarifas --aplicar"
           - "DESHACER paso 2 (corte de contratos)"
           - "DESHACER paso 0 (diagnostico)"
       confirmar:
@@ -118,17 +115,6 @@ jobs:
             "vincular_participaciones_pendientes --aplicar")  manage vincular_participaciones_pendientes --aplicar ;;
             "copiar_portafolios (solo lee)")             manage copiar_portafolios ;;
             "copiar_portafolios --aplicar")              manage copiar_portafolios --aplicar ;;
-            # Los cuatro de la subida 1, en orden y en UNA ejecución (Sara, 15-oct).
-            # Cada uno se detiene sin escribir si algo no cuadra, y `set -e` corta
-            # la cadena ahí: los siguientes no corren.
-            "subida 1: los cuatro comandos --aplicar")
-              manage cargar_patrimonios --aplicar
-              manage vincular_participaciones_pendientes --aplicar
-              manage registrar_tarifas --aplicar
-              manage copiar_portafolios --aplicar
-              ;;
-            "registrar_tarifas (solo lee)")              manage registrar_tarifas ;;
-            "registrar_tarifas --aplicar")               manage registrar_tarifas --aplicar ;;
             "DESHACER paso 2 (corte de contratos)")
               confirmado
               manage migrate contratos 0008

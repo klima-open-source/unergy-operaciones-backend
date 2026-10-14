@@ -19,6 +19,7 @@ from apps.proyectos import models as py_models
 from apps.proyectos.services import portafolios as portafolios_service
 from apps.plataforma.services.fechas import hoy_col
 from apps.contratos.services import contrato_partes
+from apps.contratos.services import tarifas as tarifas_service
 from apps.contratos.services.contrato_proyectos import CON_PLANTA
 
 logger = logging.getLogger("operaciones.monitoreo")
@@ -102,8 +103,8 @@ def _contrato_a_dict(contrato, proyecto) -> dict:
         "contratista": contrato.prestador_nombre or PRESTADOR_POR_DEFECTO,
         # La tarifa está mensual; el valor del año 1 son doce meses.
         "valor_estimado_ano1_cop": (
-            str(round(float(contrato.tarifa_base) * 12))
-            if contrato.tarifa_base else "0"
+            str(round(float(contrato.tarifa_anual) * 12))
+            if contrato.tarifa_anual else "0"
         ),
         "garantias_equipos": "",
         "numero_contrato": contrato.numero_contrato or "",
@@ -116,7 +117,7 @@ def build_all_contratos() -> dict:
         ct_models.ContratoServicio.objects
         .filter(vigencia_service.filtro_vivos(hoy_col()))
         .filter(servicio_aplica=SERVICIO_OM)
-        .prefetch_related(CON_PLANTA, contrato_partes.CON_PARTES)
+        .prefetch_related(CON_PLANTA, contrato_partes.CON_PARTES, tarifas_service.con_tarifas())
     )
     for contrato in consulta:
         proyecto = contrato.proyecto

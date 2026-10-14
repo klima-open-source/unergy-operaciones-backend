@@ -26,6 +26,7 @@ from apps.clientes.services.panel import (
 from apps.contratos.models import ContratoServicio
 from apps.contratos.services import grupos as grupos_servicio
 from apps.contratos.services.contrato_partes import ROLES_PPA, ROLES_SERVICIO, contratos_de
+from apps.contratos.services import tarifas as tarifas_service
 from apps.contratos.services.contrato_proyectos import CON_PLANTA
 from apps.plataforma.services.fechas import hoy_col
 from apps.ppa.models import PpaContrato, PpaContratoProyecto
@@ -112,7 +113,7 @@ def _contratos_del_cliente(cliente_id: int, plant_ids: set[int]):
         # `enlace_drive` recorre los documentos de cada contrato: sin precargar
         # son tantas consultas como contratos.
         .prefetch_related("cliente_documentos_comerciales_por_contrato_servicio_id",
-                          "servicios", CON_PLANTA)
+                          tarifas_service.con_tarifas(), CON_PLANTA)
     )
 
 
@@ -136,11 +137,9 @@ def servicios_contratos(cliente_id: int, hoy: date | None = None) -> list[dict]:
         columna vive una sola vez, en `apps/contratos/services/grupos.py`.
 
         Un `servicio_aplica` fuera del catálogo (`promotor`, `rec` — valores que
-        existieron en el enum) cae a `tarifa_base`, que es lo que hacía la
-        cadena de `if` que esto reemplazó.
+        existieron en el enum) no tiene tarifa: devuelve None.
         """
-        valor = grupos_servicio.tarifa_de(c, subservicio)
-        return _num(valor if valor is not None else c.tarifa_base)
+        return _num(grupos_servicio.tarifa_de(c, subservicio))
 
     # Un contrato aparece bajo CADA subservicio que cubre, no solo bajo el que
     # diga `servicio_aplica`. Los 91 contratos que cubren representación y CGM
@@ -281,7 +280,8 @@ def panel_360(cliente: Cliente, hoy: date | None = None) -> dict:
         "subservicios": grupos_servicio.subservicios_de(c),
         "tarifa_representacion": _num(c.tarifa_representacion),
         "tarifa_cgm": _num(c.tarifa_cgm),
-        "tarifa_base": _num(c.tarifa_base),
+        # Mantenimiento y arriendo: su valor anual (la columna `tarifa_base` es del PPA).
+        "tarifa_base": _num(c.tarifa_anual),
         "indice_indexacion": c.indice_indexacion,
         "fecha_indexacion": _fecha(c.fecha_indexacion),
     } for c in contratos_serv]

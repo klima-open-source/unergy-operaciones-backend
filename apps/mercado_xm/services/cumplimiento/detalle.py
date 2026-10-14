@@ -16,7 +16,8 @@ from typing import Optional
 from rest_framework.exceptions import NotFound
 
 from apps.plataforma.services.fechas import hoy_col
-from apps.ppa.models import PpaCompromisoEnergia, PpaContrato, PpaTarifa
+from apps.contratos.services import tarifas as tarifas_service
+from apps.ppa.models import PpaCompromisoEnergia, PpaContrato
 
 from .consultas import _get_bolsa_avg, _resolve_gescon
 from .xm_api import _fetch_month, _fetch_recent_avg, _unergy_token
@@ -38,9 +39,8 @@ def cumplimiento_de_contrato(contrato_id: int, year: int, month: int) -> dict:
     compromiso = PpaCompromisoEnergia.objects.filter(
         contrato_id=contrato_id, año=year, mes=month,
     ).first()
-    tarifa_row = PpaTarifa.objects.filter(
-        contrato_id=contrato_id, año=year, mes=month,
-    ).first()
+    precio_mes = tarifas_service.precios_ppa(year, month, contrato_ids=[contrato_id]).get(
+        contrato_id)
 
     # ── 3. Período ────────────────────────────────────────────
     today = hoy_col()
@@ -186,7 +186,7 @@ def cumplimiento_de_contrato(contrato_id: int, year: int, month: int) -> dict:
 
     # ── 8. Valoración COP con precios de bolsa ───────────────
     bolsa = _get_bolsa_avg(year, month)
-    tarifa_ppa = float(tarifa_row.tarifa) if tarifa_row and tarifa_row.tarifa else None
+    tarifa_ppa = float(precio_mes) if precio_mes else None
     precio_bolsa = bolsa["precio_promedio"]
 
     valoracion = None

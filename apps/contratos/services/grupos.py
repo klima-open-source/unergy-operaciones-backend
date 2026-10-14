@@ -90,17 +90,18 @@ SUBSERVICIOS_DE_CONTRATO_SERVICIO = frozenset(
 )
 
 # ── Tarifas ───────────────────────────────────────────────────────────────
-#: Subservicio → columna de `ContratoServicio` con su tarifa.
+#: Subservicio → atajo de `ContratoServicio` con su tarifa.
 #:
-#: Reemplaza la cadena de `if` de `apps/clientes/services/vistas.py`. Los tres
-#: subservicios de Operación comparten `tarifa_base`: la tabla no tiene una
-#: columna por cada uno.
+#: Reemplaza la cadena de `if` de `apps/clientes/services/vistas.py`. Los atajos
+#: salen de la tabla `tarifas` (rama de servicios y tarifas): mantenimiento y
+#: arriendo dan su valor anual; internet, el mensual.
 COLUMNA_TARIFA: dict[str, str] = {
     REPRESENTACION: "tarifa_representacion",
     CGM: "tarifa_cgm",
-    MANTENIMIENTO: "tarifa_base",
-    ARRIENDO: "tarifa_base",
-    INTERNET: "tarifa_base",
+    MANTENIMIENTO: "tarifa_anual",
+    ARRIENDO: "tarifa_anual",
+    INTERNET: "tarifa_mensual",
+    ADMINISTRACION: "tarifa_admin",
 }
 
 #: Subservicio → columna con su calendario de indexación, donde exista.

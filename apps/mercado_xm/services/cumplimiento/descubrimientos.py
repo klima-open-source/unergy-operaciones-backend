@@ -13,7 +13,8 @@ import logging
 
 from django.db.models import Sum
 
-from apps.ppa.models import PpaCompromisoEnergia, PpaTarifa
+from apps.contratos.services import tarifas as tarifas_service
+from apps.ppa.models import PpaCompromisoEnergia
 from apps.proyectos.models import GeneracionDiaria
 
 from .consultas import _contratos_vigentes, _get_bolsa_avg, _resolve_gescon
@@ -46,11 +47,10 @@ def descubrimientos(year: int, month_from: int = 1, month_to: int = 12) -> dict:
         }
 
         tarifas = {
-            t.contrato_id: float(t.tarifa)
-            for t in PpaTarifa.objects.filter(
-                contrato_id__in=[c.id for c in contratos], año=year, mes=m,
-            )
-            if t.tarifa is not None
+            contrato_id: float(valor)
+            for contrato_id, valor in tarifas_service.precios_ppa(
+                year, m, contrato_ids=[c.id for c in contratos],
+            ).items()
         }
 
         # Generación real del mes, sumada desde `generacion_diaria`.

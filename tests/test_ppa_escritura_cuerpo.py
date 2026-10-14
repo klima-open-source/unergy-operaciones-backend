@@ -282,7 +282,7 @@ def test_un_segundo_put_de_tarifas_reemplaza_todo(datos):
 def test_un_put_de_tarifas_vacio_deja_el_contrato_sin_tarifas(datos):
     """Mandar una lista vacía borra la tabla entera del contrato: el front no
     debe llamar a esto cuando el usuario simplemente no cargó tarifas."""
-    from apps.ppa.models import PpaTarifa
+    from apps.contratos.models import Tarifa
 
     pk = _crear(datos, CUERPO_MINIMO).data["id"]
     _poner_tarifas(datos, pk, [{"año": 2026, "mes": 1, "tarifa": 300}])
@@ -291,7 +291,7 @@ def test_un_put_de_tarifas_vacio_deja_el_contrato_sin_tarifas(datos):
 
     assert respuesta.status_code == 200
     assert respuesta.data == []
-    assert PpaTarifa.objects.filter(contrato_id=pk).count() == 0
+    assert Tarifa.objects.filter(servicio__contrato_id=pk).count() == 0
 
 
 def test_un_mes_fuera_de_rango_no_entra(datos):
@@ -402,7 +402,8 @@ def test_el_contrato_se_crea_completo_en_una_transaccion(datos):
     """Contrato, plantas, tarifas y compromisos de un solo golpe. Antes eran
     tres peticiones sin transacción común, y de ahí salieron 13 contratos sin
     tarifas y 14 sin compromisos."""
-    from apps.ppa.models import PpaCompromisoEnergia, PpaContratoProyecto, PpaTarifa
+    from apps.contratos.models import Tarifa
+    from apps.ppa.models import PpaCompromisoEnergia, PpaContratoProyecto
     from apps.proyectos.models import Proyecto
 
     planta = Proyecto.objects.create(nombre_comercial="Planta Uno")
@@ -417,7 +418,7 @@ def test_el_contrato_se_crea_completo_en_una_transaccion(datos):
     assert respuesta.status_code == 201, respuesta.data
     pk = respuesta.data["id"]
     assert PpaContratoProyecto.objects.filter(contrato_id=pk).count() == 1
-    assert PpaTarifa.objects.filter(contrato_id=pk).count() == 1
+    assert Tarifa.objects.filter(servicio__contrato_id=pk, mes__isnull=False).count() == 1
     assert PpaCompromisoEnergia.objects.filter(contrato_id=pk).count() == 1
 
 

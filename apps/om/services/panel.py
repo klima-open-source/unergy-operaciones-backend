@@ -15,6 +15,7 @@ from apps.om.services.calculadora import calcular_proyecto, serie_indexacion
 from apps.plataforma.services.fechas import hoy_col
 from apps.proyectos import models as py_models
 from apps.contratos.services import contrato_partes
+from apps.contratos.services import tarifas as tarifas_service
 from apps.contratos.services.contrato_proyectos import CON_PLANTA
 
 SERVICIO_OM = "mantenimiento"
@@ -32,7 +33,7 @@ def _contrato_por_proyecto() -> dict[int, object]:
     consulta = (
         ct_models.ContratoServicio.objects
         .filter(servicio_aplica=SERVICIO_OM, proyectos_vinculados__isnull=False)
-        .prefetch_related(CON_PLANTA, contrato_partes.CON_PARTES)
+        .prefetch_related(CON_PLANTA, contrato_partes.CON_PARTES, tarifas_service.con_tarifas())
         .order_by("id")
     )
     for contrato in consulta:
@@ -125,7 +126,7 @@ def _fila_con_contrato(proyecto, contrato, periodo, ipc, seleccion, documentos):
         # falta, la «Fecha de inicio O&M» que edita el diálogo.
         fecha_inicio_om=contrato.fecha_inicio_om or contrato.fecha_inicio,
         valor_base_anual=(
-            float(contrato.tarifa_base) if contrato.tarifa_base else None
+            float(contrato.tarifa_anual) if contrato.tarifa_anual else None
         ),
         periodo=periodo,
         ipc_tasas=ipc,
@@ -183,7 +184,7 @@ def valor_de_proyecto(proyecto_id: int, periodo: str) -> float | None:
         fecha_firma_contrato=contrato.fecha_firma_contrato,
         fecha_inicio_om=contrato.fecha_inicio_om or contrato.fecha_inicio,
         valor_base_anual=(
-            float(contrato.tarifa_base) if contrato.tarifa_base else None
+            float(contrato.tarifa_anual) if contrato.tarifa_anual else None
         ),
         periodo=periodo,
         ipc_tasas=tasas_ipc(),
@@ -208,7 +209,7 @@ def indexacion(contrato) -> dict:
     hoy = date.today()
     serie = serie_indexacion(
         contrato.fecha_inicio_om or contrato.fecha_inicio,
-        float(contrato.tarifa_base) if contrato.tarifa_base else None,
+        float(contrato.tarifa_anual) if contrato.tarifa_anual else None,
         tasas_ipc(), hoy.year, hoy.month,
     )
     return {
@@ -245,7 +246,7 @@ def congelar_valor(seleccion, contrato) -> None:
         fecha_firma_contrato=contrato.fecha_firma_contrato,
         fecha_inicio_om=contrato.fecha_inicio_om or contrato.fecha_inicio,
         valor_base_anual=(
-            float(contrato.tarifa_base) if contrato.tarifa_base else None
+            float(contrato.tarifa_anual) if contrato.tarifa_anual else None
         ),
         periodo=seleccion.periodo,
         ipc_tasas=tasas_ipc(),

@@ -204,12 +204,8 @@ def crear_ppa(
         contratos_service.fijar_proyectos(contrato, proyecto_ids)
 
         if tarifas:
-            ppa_models.PpaTarifa.objects.bulk_create([
-                ppa_models.PpaTarifa(contrato=contrato, **fila) for fila in tarifas
-            ])
-        # Paso 1 de tarifas: `ppa_tarifas` se copia a `tarifas` (lo de `save()` corrió
-        # antes de que existieran estas filas).
-        tarifas_service.sincronizar(contrato)
+            # Al servicio de compra o venta que `save()` acaba de registrar.
+            tarifas_service.poner_filas_ppa(contrato, tarifas)
         if compromisos:
             ppa_models.PpaCompromisoEnergia.objects.bulk_create([
                 ppa_models.PpaCompromisoEnergia(contrato=contrato, **fila)

@@ -40,6 +40,21 @@ class ContratoSerializer(serializers.ModelSerializer):
     # Ver `docs/SERVICIOS_AGRUPACION.md`.
     grupo = serializers.SerializerMethodField()
     subservicios = serializers.SerializerMethodField()
+    # Las tarifas salen de `tarifas` (rama de servicios y tarifas) con los mismos
+    # nombres y formas de cuando eran columnas: el front no cambia. `tarifa_base`
+    # de un contrato de servicio es el valor anual de mantenimiento o arriendo.
+    tarifa_representacion = serializers.DecimalField(max_digits=10, decimal_places=6, read_only=True, allow_null=True)
+    tarifa_cgm = serializers.DecimalField(max_digits=10, decimal_places=6, read_only=True, allow_null=True)
+    tarifa_admin = serializers.DecimalField(max_digits=8, decimal_places=4, read_only=True, allow_null=True)
+    tarifa_mensual = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True, allow_null=True)
+    tarifa_base = serializers.DecimalField(source="tarifa_anual", max_digits=18, decimal_places=4,
+                                           read_only=True, allow_null=True)
+    indexacion_representacion = serializers.JSONField(read_only=True, allow_null=True)
+    indexacion_cgm = serializers.JSONField(read_only=True, allow_null=True)
+    indexacion_anual = serializers.JSONField(read_only=True, allow_null=True)
+    indexacion_mensual = serializers.JSONField(read_only=True, allow_null=True)
+    # El cargo de administración, aparte de los subservicios (no cuenta para la planta).
+    cargos = serializers.SerializerMethodField()
 
     class Meta:
         model = ct_models.ContratoServicio
@@ -59,6 +74,9 @@ class ContratoSerializer(serializers.ModelSerializer):
 
     def get_grupo(self, obj) -> str | None:
         return grupos_service.grupo_de_contrato(obj)
+
+    def get_cargos(self, obj) -> list[str]:
+        return [s.servicio for s in obj.servicios.all() if s.servicio in grupos_service.CARGOS]
 
     def get_subservicios(self, obj) -> list[str]:
         return grupos_service.subservicios_de(obj)
@@ -126,6 +144,18 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
         source="inversionista", queryset=cl_models.Cliente.objects.all(),
         allow_null=True, required=False,
     )
+    # Las tarifas se escriben en los atajos del contrato y `save()` las lleva a
+    # `tarifas`. `tarifa_base` de un contrato de servicio va a `tarifa_anual`.
+    tarifa_representacion = serializers.DecimalField(max_digits=10, decimal_places=6, required=False, allow_null=True)
+    tarifa_cgm = serializers.DecimalField(max_digits=10, decimal_places=6, required=False, allow_null=True)
+    tarifa_admin = serializers.DecimalField(max_digits=8, decimal_places=4, required=False, allow_null=True)
+    tarifa_mensual = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
+    tarifa_base = serializers.DecimalField(source="tarifa_anual", max_digits=18, decimal_places=4,
+                                           required=False, allow_null=True)
+    indexacion_representacion = serializers.JSONField(required=False, allow_null=True)
+    indexacion_cgm = serializers.JSONField(required=False, allow_null=True)
+    indexacion_anual = serializers.JSONField(required=False, allow_null=True)
+    indexacion_mensual = serializers.JSONField(required=False, allow_null=True)
     # Se acepta por compatibilidad y no se guarda: el nombre es el de la ficha.
     inversionista_nombre = serializers.CharField(
         allow_null=True, allow_blank=True, required=False, write_only=True,

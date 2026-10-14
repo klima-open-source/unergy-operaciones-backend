@@ -30,9 +30,9 @@ class PpaContrato(Contrato):
     `contratos` con `grupo = 'ppa'`, y conserva su id (plan 08, decisión 1). Conserva
     el nombre y la API de los lectores — todas las columnas PPA (numero_codigo_contrato,
     tipo_contrato, valor_indexacion_base, comprador, …) son columnas de `contratos`, así
-    que se acceden y se filtran igual. Las tarifas mensuales están en `PpaTarifa`
-    (`contrato.tarifas`), los compromisos en `PpaCompromisoEnergia`
-    (`contrato.compromisos`)."""
+    que se acceden y se filtran igual. La base y los precios mes a mes están en el
+    servicio de compra o venta y en `tarifas` (`contratos.services.tarifas`); los
+    compromisos, en `PpaCompromisoEnergia` (`contrato.compromisos`)."""
 
     objects = PpaContratoManager()
 
@@ -43,18 +43,6 @@ class PpaContrato(Contrato):
     class Meta:
         proxy = True
         verbose_name = "Contrato PPA"
-
-
-class PpaTarifa(models.Model):
-    id = models.BigAutoField(primary_key=True)
-    contrato = models.ForeignKey("contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_id", related_name="tarifas")
-    año = models.IntegerField()
-    mes = models.IntegerField()
-    tarifa = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
-
-    class Meta:
-        db_table = "ppa_tarifas"
-        unique_together = [("año", "contrato", "mes")]
 
 
 class PpaCompromisoEnergia(models.Model):

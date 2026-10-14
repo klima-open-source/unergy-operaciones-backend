@@ -41,15 +41,16 @@ def _base():
 
 
 def test_contrato_serializer_expone_tarifas_mensuales():
-    from apps.ppa.models import PpaContrato, PpaTarifa
+    from apps.contratos.services import tarifas as tarifas_service
+    from apps.ppa.models import PpaContrato
     from api.v1.ppa.serializers import ContratoSerializer
 
     c = PpaContrato.objects.create(
         id=9101, numero_codigo_contrato="UNERGY-TEST", nombre_interno="Test",
         tipo_contrato="venta", fecha_inicio=date(2024, 1, 1),
     )
-    PpaTarifa.objects.create(id=9101, contrato=c, año=2024, mes=1, tarifa=5.0)
-    PpaTarifa.objects.create(id=9102, contrato=c, año=2024, mes=2, tarifa=5.26)
+    tarifas_service.poner_filas_ppa(c, [{"año": 2024, "mes": 1, "tarifa": 5.0},
+                                        {"año": 2024, "mes": 2, "tarifa": 5.26}])
 
     data = ContratoSerializer(c).data
     assert data["tipo_contrato"] == "venta"

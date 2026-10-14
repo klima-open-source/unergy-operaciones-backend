@@ -25,7 +25,8 @@ from api.exceptions import ServicioNoDisponible
 
 from apps.mercado_xm.models import CumplimientoMensual
 from apps.plataforma.services.fechas import hoy_col
-from apps.ppa.models import PpaCompromisoEnergia, PpaTarifa
+from apps.contratos.services import tarifas as tarifas_service
+from apps.ppa.models import PpaCompromisoEnergia
 
 from .consultas import _contratos_vigentes, _get_bolsa_avg, _resolve_gescon
 from .periodos import _build_cumplimiento_out
@@ -76,9 +77,8 @@ def cerrar_periodo(anio: int, mes: int) -> dict:
     }
 
     tarifas_map = {
-        t.contrato_id: float(t.tarifa)
-        for t in PpaTarifa.objects.filter(año=year, mes=month)
-        if t.tarifa is not None
+        contrato_id: float(valor)
+        for contrato_id, valor in tarifas_service.precios_ppa(year, month).items()
     }
 
     # ── 2. GESCON assignments ─────────────────────────────────────────────────

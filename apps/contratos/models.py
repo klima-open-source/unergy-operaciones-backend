@@ -103,6 +103,13 @@ class AlertaAniversario(Timer):
 #: Marca de "este atajo no se tocó" (None es un valor válido: quitar la planta).
 _SIN_CAMBIO = object()
 
+#: Los atajos de tarifa de `Contrato` (no son columnas: salen de `tarifas`).
+ATAJOS_DE_TARIFA = frozenset({
+    "tarifa_base", "tarifa_representacion", "tarifa_cgm", "tarifa_admin", "tarifa_anual",
+    "tarifa_mensual",
+    "indexacion_representacion", "indexacion_cgm", "indexacion_anual", "indexacion_mensual",
+})
+
 #: Los atajos de planta e inversionista de `Contrato` (no son columnas).
 ATAJOS_DE_PLANTA = frozenset({
     "proyecto", "proyecto_id", "inversionista", "inversionista_id", "inversionista_nombre",
@@ -209,7 +216,6 @@ class Contrato(Timer):
     fecha_firma_contrato = models.DateField(null=True, blank=True)
     fecha_inicio = models.DateField(null=True, blank=True)
     fecha_fin = models.DateField(null=True, blank=True)
-    tarifa_base = models.DecimalField(max_digits=18, decimal_places=4, null=True, blank=True)
     periodicidad_pago = models.CharField(
         max_length=10, choices=PeriodicidadPago.choices, null=True, blank=True
     )
@@ -260,17 +266,12 @@ class Contrato(Timer):
     # `contrato_proyectos` (planta y, en representación, la participación). Ver los
     # atajos `proyecto` / `inversionista` más abajo. Las columnas `proyecto_id`,
     # `inversionista_id` e `inversionista_nombre` siguen en la base, sin escribirse,
-    # hasta `contratos/0019` (paso 4c).
-    # Tarifas escalares e indexación JSON: siguen siendo LA tarifa hasta la rama de
-    # tarifas, que las pasa a `tarifas` colgando de `servicios` (plan 08, §2).
-    tarifa_admin = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)
-    tarifa_cgm = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
-    tarifa_representacion = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
-    tarifa_mensual = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
-    indexacion_anual = models.JSONField(null=True, blank=True)
-    indexacion_mensual = models.JSONField(null=True, blank=True)
-    indexacion_cgm = models.JSONField(null=True, blank=True)
-    indexacion_representacion = models.JSONField(null=True, blank=True)
+    # hasta `contratos/0023` (paso 4c).
+    # Las tarifas viven en el servicio (base e índice) y en `tarifas` (valor por
+    # periodo): `tarifa_base`, `tarifa_representacion`, `tarifa_cgm`, `tarifa_admin`,
+    # `tarifa_mensual` y los cuatro `indexacion_*` son atajos (ver `ATAJOS_DE_TARIFA`),
+    # igual que `tarifa_anual` (la base de mantenimiento y arriendo). Las columnas
+    # siguen en la base, sin escribirse, hasta que el paso 3 de tarifas las borre.
     fecha_inicio_om = models.DateField(null=True, blank=True)
     fecha_indexacion = models.DateField(null=True, blank=True)
     responsable_iva = models.BooleanField(default=False)
@@ -431,6 +432,7 @@ class Contrato(Timer):
             kwargs["update_fields"] = [
                 f for f in kwargs["update_fields"]
                 if f not in _ATAJOS_DE_PARTES and f not in ATAJOS_DE_PLANTA
+                and f not in ATAJOS_DE_TARIFA
             ]
         from apps.contratos.services import contrato_partes, contrato_proyectos, servicios, tarifas
 
@@ -443,7 +445,7 @@ class Contrato(Timer):
         # camino de escritura (API, CRM, admin) puede dejarlos desalineados con
         # `tipo_contrato` o `servicio_aplica`.
         servicios.registrar(self)
-        tarifas.sincronizar(self)
+        tarifas.aplicar(self)
         pendiente = self.__dict__.pop("_planta_pendiente", {})
         contrato_proyectos.sincronizar(
             self,
@@ -456,7 +458,8 @@ class Contrato(Timer):
             contrato_partes.asignar(self, pendientes)
 
     def refresh_from_db(self, *args, **kwargs):
-        for cache in ("_vinculo_cache", "_planta_pendiente", "_partes_cache", "_partes_pendientes"):
+        for cache in ("_vinculo_cache", "_planta_pendiente", "_partes_cache", "_partes_pendientes",
+                      "_tarifas_pendientes"):
             self.__dict__.pop(cache, None)
         super().refresh_from_db(*args, **kwargs)
 
@@ -470,10 +473,6 @@ class Contrato(Timer):
                     | Q(fecha_inicio__isnull=True)
                     | Q(fecha_fin__gte=F("fecha_inicio"))
                 ),
-            ),
-            models.CheckConstraint(
-                name="ck_contratos_tarifa",
-                condition=Q(tarifa_base__isnull=True) | Q(tarifa_base__gte=0),
             ),
             # El grupo y `servicio_aplica` dicen lo mismo, o la fila no entra.
             models.CheckConstraint(
@@ -523,6 +522,31 @@ for _rol in RolParte.values:
                             ("_nombre", "razon_social_nombre"), ("_nit", "nit_cedula")):
         setattr(Contrato, f"{_rol}{_sufijo}", _atajo_de_parte(_rol, _campo))
         _ATAJOS_DE_PARTES.add(f"{_rol}{_sufijo}")
+
+
+def _atajo_de_tarifa(nombre: str):
+    """`contrato.tarifa_cgm`, `contrato.indexacion_representacion`…, sobre el servicio
+    y sus `tarifas`.
+
+    Escribirlo deja el valor pendiente y `save()` lo lleva a su servicio
+    (`services/tarifas.py::aplicar`)."""
+
+    def leer(self):
+        pendientes = self.__dict__.get("_tarifas_pendientes") or {}
+        if nombre in pendientes:
+            return pendientes[nombre]
+        from apps.contratos.services import tarifas
+
+        return tarifas.leer(self, nombre)
+
+    def escribir(self, valor):
+        self.__dict__.setdefault("_tarifas_pendientes", {})[nombre] = valor
+
+    return property(leer, escribir)
+
+
+for _nombre in ATAJOS_DE_TARIFA:
+    setattr(Contrato, _nombre, _atajo_de_tarifa(_nombre))
 
 
 class Servicio(Timer):

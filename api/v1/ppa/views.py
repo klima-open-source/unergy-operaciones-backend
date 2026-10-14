@@ -242,15 +242,11 @@ class PpaViewSet(
         entrada.is_valid(raise_exception=True)
 
         with transaction.atomic():
-            ppa_models.PpaTarifa.objects.filter(contrato=contrato).delete()
-            ppa_models.PpaTarifa.objects.bulk_create([
-                ppa_models.PpaTarifa(contrato=contrato, **fila)
-                for fila in entrada.validated_data
-            ])
-            tarifas_service.sincronizar(contrato)  # paso 1: copia a `tarifas`
-        filas = ppa_models.PpaTarifa.objects.filter(
-            contrato=contrato
-        ).order_by("año", "mes")
+            try:
+                tarifas_service.poner_filas_ppa(contrato, entrada.validated_data)
+            except ValueError as exc:
+                raise NoProcesable(str(exc))
+        filas = tarifas_service.filas_ppa(contrato)
         return Response(ppa_serializers.TarifaSerializer(filas, many=True).data)
 
     @action(detail=True, methods=["put"], url_path="compromisos")

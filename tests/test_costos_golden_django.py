@@ -152,11 +152,17 @@ def test_golden_valores_facturas_modulo():
     # Ids altos y propios: las pruebas golden comparten el proceso y a veces la BD
     # en memoria; con ids únicos no chocan con los de otras (p. ej. la de facturación).
     Proyecto.objects.create(id=9001, nombre_comercial="Planta X")
-    ContratoServicio.objects.create(
+    contrato = ContratoServicio.objects.create(
         id=9001, proyecto_id=9001, servicio_aplica="representacion", estado="firmado",
         tarifa_representacion=6.0, tarifa_cgm=5.0, tarifa_admin=0.038,
         fecha_firma_contrato=date(2024, 1, 1),
     )
+    # Cubre representación Y CGM: la tarifa de CGM cuelga de su servicio, que se
+    # registra con la lista (como lo hace la API) y entonces recibe su tarifa.
+    from apps.contratos.services import servicios, tarifas
+
+    servicios.registrar(contrato, ["representacion", "cgm"])
+    tarifas.aplicar(contrato)
 
     out = costos.valores_facturas_modulo(9001, "2025-06", kwh=1000.0, ingreso=1000000.0)
 

@@ -33,6 +33,7 @@ from datetime import date
 
 from apps.contratos.models import AlertaAniversario, ContratoServicio
 from apps.contratos.services import vigencia as vigencia_service
+from apps.contratos.services import tarifas as tarifas_service
 from apps.contratos.services.contrato_proyectos import CON_PLANTA
 from apps.om.models import OmIpcTasa
 from apps.plataforma.services.fechas import hoy_col
@@ -185,7 +186,7 @@ def contratos_de_representacion() -> list[dict]:
     filas = ContratoServicio.objects.filter(
         vigencia_service.filtro_vivos(hoy_col()),
         servicio_aplica="representacion", fecha_firma_contrato__isnull=False,
-    ).prefetch_related(CON_PLANTA)
+    ).prefetch_related(CON_PLANTA, tarifas_service.con_tarifas())
     return [{
         "id": r.id,
         "firma": r.fecha_firma_contrato,

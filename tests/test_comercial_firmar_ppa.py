@@ -158,14 +158,11 @@ def test_se_vinculan_TODAS_las_plantas_de_la_oferta(datos):
 def test_los_precios_anuales_se_expanden_recortados_al_periodo(datos):
     """Octubre 2026 a marzo 2027: seis meses, no veinticuatro. Un contrato que
     arranca en octubre no tiene tarifa de enero a septiembre de ese año."""
-    from apps.ppa.models import PpaTarifa
+    from apps.contratos.services import tarifas as tarifas_service
 
     resultado = _firmar(datos)
 
-    filas = list(
-        PpaTarifa.objects.filter(contrato_id=resultado.contrato.id)
-        .order_by("año", "mes").values_list("año", "mes")
-    )
+    filas = [(t.anio, t.mes) for t in tarifas_service.filas_ppa(resultado.contrato)]
     assert filas == [(2026, 10), (2026, 11), (2026, 12), (2027, 1), (2027, 2), (2027, 3)]
     assert resultado.tarifas == 6
 
@@ -290,7 +287,7 @@ SOLO_FECHAS = {
 def test_el_precio_sale_de_la_propuesta_aceptada(datos):
     """Firmar con SOLO las fechas: el precio, el indexador y el mes base los
     pone la version. Es el punto del versionado."""
-    from apps.ppa.models import PpaTarifa
+    from apps.contratos.services import tarifas as tarifas_service
 
     _version_aceptada(datos)
 
@@ -299,10 +296,7 @@ def test_el_precio_sale_de_la_propuesta_aceptada(datos):
     contrato = resultado.contrato
     assert contrato.indice_indexacion == "IPP serie Oferta Interna provisional"
     assert contrato.periodo_indexacion_base == "2026-05"
-    tarifas = {
-        (t.año, t.mes): float(t.tarifa)
-        for t in PpaTarifa.objects.filter(contrato_id=contrato.id)
-    }
+    tarifas = {(t.anio, t.mes): float(t.valor) for t in tarifas_service.filas_ppa(contrato)}
     assert tarifas[(2026, 10)] == 330.0
     assert tarifas[(2027, 1)] == 318.0
 

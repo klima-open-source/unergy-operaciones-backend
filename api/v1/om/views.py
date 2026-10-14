@@ -14,6 +14,7 @@ from api.logging import class_logger_wrapper, log_endpoint
 from api.permissions import RolePermission
 from apps.comun.periodo import ANIO_MAX, ANIO_MIN, anio_valido, periodo_valido
 from apps.contratos import models as ct_models
+from apps.contratos.services import tarifas as tarifas_service
 from apps.contratos.services.contrato_proyectos import CON_PLANTA
 from apps.om import models as om_models
 from apps.om.services import factura as factura_service
@@ -70,7 +71,7 @@ class OmViewSet(viewsets.GenericViewSet):
             .filter(servicio_aplica=SERVICIO_OM,
                     proyectos_vinculados__proyecto__estado="en_operacion",
                     proyectos_vinculados__proyecto__deleted_at__isnull=True)
-            .prefetch_related(CON_PLANTA).order_by("id")
+            .prefetch_related(CON_PLANTA, tarifas_service.con_tarifas()).order_by("id")
         )
         filas = [
             {
@@ -79,7 +80,7 @@ class OmViewSet(viewsets.GenericViewSet):
                 "nombre_proyecto": factura_service.nombre_proyecto_de(c),
                 "fecha_inicio": c.fecha_inicio,
                 "valor_base_anual": (
-                    float(c.tarifa_base) if c.tarifa_base else None
+                    float(c.tarifa_anual) if c.tarifa_anual else None
                 ),
                 "estado": c.estado or "firmado",
             }

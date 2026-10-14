@@ -6,6 +6,7 @@ from django.db.models import Q
 
 from apps.contratos import models as ct_models
 from apps.contratos.services import contrato_partes
+from apps.contratos.services import tarifas as tarifas_service
 from apps.contratos.services.contrato_proyectos import CON_PLANTA
 from apps.proyectos import models as py_models
 
@@ -30,7 +31,8 @@ def con_relaciones():
         .prefetch_related(
             "contrato_frontera_por_contrato_servicio_id__frontera",
             "cliente_documentos_comerciales_por_contrato_servicio_id",
-            "servicios",
+            # Los servicios con sus tarifas: los atajos `tarifa_*` / `indexacion_*`.
+            tarifas_service.con_tarifas(),
         )
     )
 

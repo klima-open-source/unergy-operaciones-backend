@@ -209,9 +209,9 @@ class ContratoServicioViewSet(
             servicios_service.registrar(contrato, servicios)
         except servicios_service.ServiciosInvalidos as exc:
             raise ValidationError({"servicios": str(exc)})
-        # Un servicio que entra con la lista necesita su tarifa (la deriva de las
-        # columnas, como en `save()`).
-        tarifas_service.sincronizar(contrato)
+        # La tarifa de un servicio que entró con la lista quedó pendiente en el
+        # `save()` (todavía no existía el servicio): ahora sí tiene dónde ir.
+        tarifas_service.aplicar(contrato)
 
     @staticmethod
     def _fronteras(contrato, frontera_ids):

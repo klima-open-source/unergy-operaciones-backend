@@ -19,6 +19,7 @@ from apps.arriendos.services.calculadora import (
 )
 from apps.contratos import models as ct_models
 from apps.contratos.services import plantas
+from apps.contratos.services import tarifas as tarifas_service
 from apps.contratos.services.contrato_proyectos import CON_PLANTA
 from apps.plataforma.services.fechas import hoy_col
 from apps.proyectos import models as py_models
@@ -41,7 +42,7 @@ def _contrato_por_proyecto() -> dict[int, object]:
     consulta = (
         ct_models.ContratoServicio.objects
         .filter(servicio_aplica=SERVICIO, proyectos_vinculados__isnull=False)
-        .prefetch_related(CON_PLANTA).order_by("id")
+        .prefetch_related(CON_PLANTA, tarifas_service.con_tarifas()).order_by("id")
     )
     for contrato in consulta:
         contratos.setdefault(contrato.proyecto_id, contrato)
@@ -64,7 +65,7 @@ def arrendadores_de(contrato) -> list:
     return [SimpleNamespace(
         id=None,
         nombre=contrato.prestador_nombre or "Arrendador",
-        valor_base=contrato.tarifa_base,
+        valor_base=contrato.tarifa_anual,
         responsable_iva=contrato.responsable_iva,
         anticipo_pagado_desde=None,
         anticipo_pagado_hasta=None,
@@ -231,7 +232,7 @@ def indexacion(contrato, arrendador=None) -> dict:
     """
     base = (
         _canon_mensual(arrendador.valor_base) if arrendador is not None
-        else _canon_mensual(contrato.tarifa_base)
+        else _canon_mensual(contrato.tarifa_anual)
     )
     hoy = date.today()
     serie = serie_indexacion(

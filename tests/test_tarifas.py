@@ -1,10 +1,11 @@
-"""Tarifas por servicio y el cargo de administración (rama de servicios y tarifas, paso 1).
+"""Tarifas por servicio y el cargo de administración (rama de servicios y tarifas, paso 2).
 
 Esquema de Sara (2026-10-14): la base y el índice en el servicio; `tarifas`, el valor
-de cada periodo (año, o año y mes en los PPA). Mientras convivan con las columnas de
-`contratos` y con `ppa_tarifas`, `sincronizar` los deriva de ellas
-(`apps/contratos/services/tarifas.py`). La administración es un cargo adicional: un
-servicio con su tarifa en %, que no cuenta para qué servicios tiene la planta
+de cada periodo (año, o año y mes en los PPA). Los atajos de siempre del contrato
+(`tarifa_cgm`, `indexacion_representacion`, `tarifa_base`…) se leen y se escriben
+sobre ellos (`apps/contratos/services/tarifas.py`), y los precios mes a mes de los
+PPA, que vivían en `ppa_tarifas`, también. La administración es un cargo adicional:
+un servicio con su tarifa en %, que no cuenta para qué servicios tiene la planta
 (decisión de Sara, 2026-10-13).
 """
 from datetime import date
@@ -74,6 +75,13 @@ def _contrato(**kw):
     return ContratoServicio.objects.create(**kw)
 
 
+def _ppa(**kw):
+    from apps.ppa.models import PpaContrato
+
+    kw.setdefault("tipo_contrato", "venta")
+    return PpaContrato.objects.create(**kw)
+
+
 def _servicio(contrato, servicio):
     """(base, índice, [(año, mes, valor)…]) del servicio, o None si no existe."""
     from apps.contratos.models import Servicio
@@ -85,18 +93,29 @@ def _servicio(contrato, servicio):
             [(t.anio, t.mes, t.valor) for t in s.tarifas.order_by("anio", "mes")])
 
 
-# ── Del historial a las filas (puro) ──────────────────────────────────────────
+# ── Los atajos de siempre, sobre el servicio y `tarifas` ──────────────────────
 
-def test_el_historial_da_una_fila_por_anio_sin_mes():
-    from apps.contratos.services import tarifas
-
-    filas = tarifas.filas_desde_historial([
+def test_el_historial_de_representacion_entra_y_sale_con_la_misma_forma(datos):
+    historial = [
         {"año": 2024, "ipc": None, "valor": 6.0, "esBase": True},
         {"año": 2025, "ipc": 5.2, "valor": 6.312},
-        {"año": None, "valor": 1},  # sin año: no es un periodo
-    ])
-    assert [(f["anio"], f["mes"], f["valor"]) for f in filas] == [
-        (2024, None, Decimal("6.0")), (2025, None, Decimal("6.312"))]
+    ]
+    contrato = _contrato(proyecto=datos["planta"], indexacion_representacion=historial,
+                         tarifa_representacion=Decimal("6"))
+    contrato.refresh_from_db()
+
+    assert _servicio(contrato, "representacion") == (
+        Decimal("6"), "ipc", [(2024, None, Decimal("6")), (2025, None, Decimal("6.312"))])
+    # El índice aplicado ya no se guarda: sale de comparar 6,312 con 6.
+    assert contrato.indexacion_representacion == historial
+    assert contrato.tarifa_representacion == Decimal("6")
+
+
+def test_sin_historial_hay_base_y_no_hay_anios(datos):
+    contrato = _contrato(proyecto=datos["planta"], tarifa_representacion=Decimal("5"))
+    assert _servicio(contrato, "representacion") == (Decimal("5"), "ipc", [])
+    # Sin años no hay historial que mostrar: como cuando el JSON estaba vacío.
+    assert contrato.indexacion_representacion is None
 
 
 def test_el_indice_de_texto_libre_se_reconoce():
@@ -104,35 +123,47 @@ def test_el_indice_de_texto_libre_se_reconoce():
 
     ipp = SimpleNamespace(indice_indexacion="IPP serie oferta interna (marzo 2025)")
     assert tarifas.tipo_indexacion_de(ipp, "representacion") == "ipp"
-    assert tarifas.tipo_indexacion_de(SimpleNamespace(indice_indexacion=None), "cgm") == "ipc"
     # Lo que no se indexa queda sin tipo: solo existen IPC e IPP.
     assert tarifas.tipo_indexacion_de(ipp, "administracion") is None
     assert tarifas.tipo_indexacion_de(SimpleNamespace(indice_indexacion="Fijo"), "venta") is None
 
 
-# ── Al guardar un contrato de servicio ────────────────────────────────────────
-
-def test_guardar_pone_la_base_en_el_servicio_y_el_historial_en_tarifas(datos):
-    contrato = _contrato(
-        proyecto=datos["planta"], tarifa_representacion=Decimal("6"),
-        indexacion_representacion=[{"año": 2024, "valor": 6, "esBase": True},
-                                   {"año": 2025, "ipc": 5.2, "valor": 6.312}],
-    )
-    assert _servicio(contrato, "representacion") == (
-        Decimal("6"), "ipc", [(2024, None, Decimal("6")), (2025, None, Decimal("6.312"))])
+def test_cambiar_el_indice_del_contrato_cambia_el_de_sus_servicios(datos):
+    contrato = _contrato(proyecto=datos["planta"], tarifa_representacion=Decimal("5"))
+    contrato.indice_indexacion = "IPP"
+    contrato.save()
+    assert _servicio(contrato, "representacion")[1] == "ipp"
 
 
-def test_sin_historial_queda_solo_la_base_sin_inventar_anio(datos):
-    contrato = _contrato(proyecto=datos["planta"], tarifa_representacion=Decimal("5"),
-                         fecha_firma_contrato=date(2023, 4, 1))
-    assert _servicio(contrato, "representacion") == (Decimal("5"), "ipc", [])
-
-
-def test_mantenimiento_toma_su_base_anual_de_tarifa_base(datos):
+def test_mantenimiento_guarda_el_anual_y_da_el_mensual(datos):
     contrato = _contrato(servicio_aplica="mantenimiento", proyecto=datos["planta"],
-                         tarifa_base=Decimal("12000000"))
-    assert _servicio(contrato, "mantenimiento") == (Decimal("12000000"), "ipc", [])
+                         fecha_firma_contrato=date(2023, 1, 1), tarifa_anual=Decimal("48000000"),
+                         indexacion_anual=[{"anio": 2023, "valor": 48000000, "ipc_aplicado": None},
+                                           {"anio": 2024, "valor": 52454400, "ipc_aplicado": 9.28}])
+    contrato.refresh_from_db()
 
+    assert contrato.tarifa_anual == Decimal("48000000")
+    assert contrato.tarifa_base == Decimal("48000000")  # el mismo dato, nombre del PPA
+    assert contrato.tarifa_mensual == Decimal("4371200.00")  # el año vigente / 12
+    assert [f["valor"] for f in contrato.indexacion_mensual] == [4000000.0, 4371200.0]
+    assert contrato.indexacion_anual[1]["ipc_aplicado"] == pytest.approx(9.28)
+
+
+def test_la_tarifa_de_cgm_espera_a_que_exista_su_servicio(datos):
+    """La API registra la lista de servicios DESPUÉS del `save()`: la tarifa de CGM
+    queda pendiente y entra cuando el servicio existe."""
+    from apps.contratos.services import servicios, tarifas
+
+    contrato = _contrato(proyecto=datos["planta"], tarifa_representacion=Decimal("6"),
+                         tarifa_cgm=Decimal("5"))
+    assert _servicio(contrato, "cgm") is None
+    servicios.registrar(contrato, ["representacion", "cgm"])
+    tarifas.aplicar(contrato)
+
+    assert _servicio(contrato, "cgm") == (Decimal("5"), "ipc", [])
+
+
+# ── El cargo de administración ────────────────────────────────────────────────
 
 def test_guardar_deriva_el_cargo_de_administracion(datos):
     from apps.contratos.services import grupos
@@ -141,6 +172,7 @@ def test_guardar_deriva_el_cargo_de_administracion(datos):
                          tarifa_admin=Decimal("0.038"))
 
     assert _servicio(contrato, "administracion") == (Decimal("0.038"), None, [])
+    assert contrato.tarifa_admin == Decimal("0.038")
     # Cargo adicional: no es un subservicio del contrato.
     assert grupos.subservicios_de(contrato) == ["representacion"]
 
@@ -188,60 +220,61 @@ def test_administracion_en_dos_contratos_de_la_planta_avisa(datos):
     assert len(avisos) == 1 and "administración" in avisos[0]
 
 
-# ── PPA: `tarifa_base` y `ppa_tarifas` van al servicio de compra o venta ──────
+def test_dos_inversionistas_de_la_misma_planta_no_se_cobran_dos_veces(datos):
+    """Minigranja: un contrato de representación por inversionista, cada uno con su
+    administración sobre su parte. No es un cobro doble."""
+    from apps.clientes.models import Cliente
+    from apps.contratos.services import tarifas
+    from apps.proyectos.models import ProyectoInversionista
 
-def _ppa(**kw):
-    from apps.ppa.models import PpaContrato
+    bia = Cliente.objects.create(razon_social_nombre="Bia")
+    suno = Cliente.objects.create(razon_social_nombre="Suno")
+    for cliente in (bia, suno):
+        ProyectoInversionista.objects.create(proyecto=datos["planta"], cliente=cliente)
+    _contrato(proyecto=datos["planta"], inversionista=bia, estado="firmado",
+              tarifa_admin=Decimal("0.038"))
+    de_suno = _contrato(proyecto=datos["planta"], inversionista=suno, estado="firmado",
+                        tarifa_admin=Decimal("0.038"))
 
-    kw.setdefault("tipo_contrato", "venta")
-    return PpaContrato.objects.create(**kw)
+    assert tarifas.avisos_de_administracion(de_suno) == []
 
 
-def test_un_ppa_con_solo_base_queda_con_la_base_y_sin_filas(datos):
-    contrato = _ppa(tarifa_base=Decimal("308"),
-                    indice_indexacion="IPP serie oferta interna (marzo 2025)")
+# ── PPA: la base y los precios del mes, en el servicio de compra o venta ──────
+
+def test_la_base_del_ppa_se_lee_y_se_escribe_en_su_servicio(datos):
+    contrato = _ppa(tarifa_base=Decimal("308"), indice_indexacion="IPP")
+    contrato.refresh_from_db()
+    assert contrato.tarifa_base == Decimal("308")
     assert _servicio(contrato, "venta") == (Decimal("308"), "ipp", [])
 
+    contrato.tarifa_base = Decimal("310")
+    contrato.save()
+    assert _servicio(contrato, "venta")[0] == Decimal("310")
 
-def test_los_precios_mensuales_del_ppa_pasan_con_su_mes(datos):
+
+def test_los_precios_del_mes_reemplazan_la_tabla_entera(datos):
     from apps.contratos.services import tarifas
-    from apps.ppa.models import PpaTarifa
 
     contrato = _ppa(tipo_contrato="compra")
-    PpaTarifa.objects.bulk_create([
-        PpaTarifa(contrato=contrato, año=2025, mes=1, tarifa=Decimal("300")),
-        PpaTarifa(contrato=contrato, año=2025, mes=2, tarifa=Decimal("302.5")),
-        PpaTarifa(contrato=contrato, año=2025, mes=3, tarifa=None),  # sin precio: no pasa
+    tarifas.poner_filas_ppa(contrato, [
+        {"año": 2025, "mes": 1, "tarifa": 300},
+        {"año": 2025, "mes": 2, "tarifa": None},  # sin precio: no se guarda
     ])
-    assert tarifas.sincronizar(contrato) is True
-    assert _servicio(contrato, "compra") == (
-        None, "ipc", [(2025, 1, Decimal("300")), (2025, 2, Decimal("302.5"))])
-    assert tarifas.sincronizar(contrato) is False  # idempotente
+    tarifas.poner_filas_ppa(contrato, [{"año": 2025, "mes": 3, "tarifa": 302.5}])
+
+    assert _servicio(contrato, "compra")[2] == [(2025, 3, Decimal("302.5"))]
+    assert tarifas.precios_ppa(2025, 3) == {contrato.id: Decimal("302.5")}
+    assert tarifas.precios_ppa(2025, 1) == {}
 
 
-def test_crear_un_ppa_con_tarifas_las_copia(datos):
-    from apps.ppa.services import escritura
+def test_los_precios_del_mes_no_tocan_los_anios_de_otro_servicio(datos):
+    """Las filas por año (sin mes) de representación no se mezclan con las del PPA."""
+    from apps.contratos.services import tarifas
 
-    resultado = escritura.crear_ppa(
-        tipo_contrato="venta", datos={"indice_indexacion": "Fijo"}, proyecto_ids=[],
-        tarifas=[{"año": 2026, "mes": 5, "tarifa": Decimal("410")}],
-    )
-    assert _servicio(resultado.contrato, "venta") == (None, None, [(2026, 5, Decimal("410"))])
+    rep = _contrato(proyecto=datos["planta"], tarifa_representacion=Decimal("6"),
+                    indexacion_representacion=[{"año": 2025, "valor": 6}])
+    contrato = _ppa()
+    tarifas.poner_filas_ppa(contrato, [{"año": 2025, "mes": 1, "tarifa": 300}])
 
-
-def test_registrar_tarifas_solo_lee_sin_aplicar(datos):
-    from django.core.management import call_command
-
-    from apps.contratos.models import Servicio, Tarifa
-
-    contrato = _contrato(proyecto=datos["planta"], tarifa_representacion=Decimal("6"),
-                         indexacion_representacion=[{"año": 2024, "valor": 6}])
-    # Como un contrato de antes del paso 1.
-    Tarifa.objects.all().delete()
-    Servicio.objects.filter(contrato=contrato).update(tarifa_base=None, tipo_indexacion=None)
-
-    call_command("registrar_tarifas")
-    assert not Tarifa.objects.exists()
-    call_command("registrar_tarifas", aplicar=True)
-    assert _servicio(contrato, "representacion") == (
-        Decimal("6"), "ipc", [(2024, None, Decimal("6"))])
+    assert tarifas.precios_ppa(2025, 1) == {contrato.id: Decimal("300")}
+    assert _servicio(rep, "representacion")[2] == [(2025, None, Decimal("6"))]

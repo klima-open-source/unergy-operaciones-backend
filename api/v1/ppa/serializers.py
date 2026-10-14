@@ -3,6 +3,7 @@
 from rest_framework import serializers
 
 from apps.clientes import models as cl_models
+from apps.contratos.services import tarifas as tarifas_service
 from apps.ppa import models as ppa_models
 from apps.contratos.services.vigencia import validar_fechas_del_contrato
 
@@ -12,10 +13,15 @@ class ProyectoRefSerializer(serializers.Serializer):
     nombre_comercial = serializers.CharField(allow_null=True)
 
 
-class TarifaSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ppa_models.PpaTarifa
-        fields = ["id", "año", "mes", "tarifa"]
+class TarifaSerializer(serializers.Serializer):
+    """Un precio del mes, con la forma de cuando vivía en `ppa_tarifas`: ahora es
+    una fila de `tarifas` del servicio de compra o venta del contrato."""
+
+    id = serializers.IntegerField(read_only=True)
+    año = serializers.IntegerField(source="anio", read_only=True)
+    mes = serializers.IntegerField(read_only=True)
+    tarifa = serializers.DecimalField(source="valor", max_digits=18, decimal_places=4,
+                                      read_only=True)
 
 
 class TarifaEntradaSerializer(serializers.Serializer):
@@ -47,7 +53,11 @@ class ContratoSerializer(serializers.ModelSerializer):
     comprador_id = serializers.IntegerField(allow_null=True)
     vendedor_id = serializers.IntegerField(allow_null=True)
     proyectos = serializers.SerializerMethodField()
-    tarifas = TarifaSerializer(many=True, read_only=True)
+    # Los precios del mes y la base salen del servicio de compra o venta
+    # (`services/tarifas.py`); la forma es la de siempre.
+    tarifas = serializers.SerializerMethodField()
+    tarifa_base = serializers.DecimalField(max_digits=18, decimal_places=4, read_only=True,
+                                           allow_null=True)
     compromisos_energia = CompromisoSerializer(
         source="compromisos", many=True, read_only=True
     )
@@ -90,6 +100,9 @@ class ContratoSerializer(serializers.ModelSerializer):
             for v in obj.proyectos_vinculados.all()
         ]
 
+    def get_tarifas(self, obj) -> list:
+        return TarifaSerializer(tarifas_service.filas_ppa(obj), many=True).data
+
     def get_carpeta_link(self, obj) -> str | None:
         """El enlace de Drive vive como documento comercial `tipo='contrato'`.
 
@@ -130,6 +143,10 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
     carpeta_link = serializers.CharField(
         required=False, allow_null=True, allow_blank=True
     )
+    # Atajo sobre el servicio de compra o venta: sin declararlo, DRF lo tomaría
+    # como propiedad de solo lectura y descartaría lo que llega.
+    tarifa_base = serializers.DecimalField(max_digits=18, decimal_places=4,
+                                           required=False, allow_null=True)
 
     class Meta:
         model = ppa_models.PpaContrato
