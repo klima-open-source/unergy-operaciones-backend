@@ -225,3 +225,24 @@ def test_la_participacion_se_registra_a_traves_de_un_patrimonio(datos):
     assert respuesta.data["patrimonio_id"] == datos["gandalf"].id
     assert respuesta.data["patrimonio_nombre"] == "P.A. Valle de Gandalf"
     assert "es_patrimonio_autonomo" not in respuesta.data
+
+
+# ── Liquidaciones: el resumen va a nombre de quien se factura ─────────────────
+
+def test_el_resumen_de_liquidaciones_usa_el_patrimonio_y_sus_tasas(datos):
+    from decimal import Decimal
+
+    from apps.liquidaciones.services.panel import clientes_por_inversionista
+    from apps.proyectos.models import ProyectoInversionista
+
+    datos["fiduciaria"].retencion_pct = Decimal("4")
+    datos["fiduciaria"].save()
+    datos["ayura"].retencion_pct = Decimal("11")
+    datos["ayura"].save()
+    p = ProyectoInversionista(proyecto=datos["planta"], patrimonio=datos["gandalf"])
+    p.cliente = datos["ayura"]
+    p.save()
+
+    fila = clientes_por_inversionista([p.id])[p.id]
+    assert fila["cliente_id"] == datos["fiduciaria"].id
+    assert fila["retencion_pct"] == 4.0  # las del patrimonio, no las del dueño
