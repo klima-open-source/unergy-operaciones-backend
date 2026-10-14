@@ -2,6 +2,16 @@
 Desglose de impuestos de las facturas de servicio (Representación, CGM,
 Administración) en tiempo de LECTURA — no se guardan en el panel.
 
+Lo usan liquidaciones y contabilidad (antes cada una tenía su copia idéntica).
+
+**De dónde sale cada %** (`tasas_efectivas`): la tasa general del cliente
+(`clientes.iva_pct`, `retencion_pct`, `reteiva_pct`, `reteica_pct`), salvo que haya
+una excepción en `cliente_tasa_servicio` para ese cliente y ese servicio --en una
+planta o en todas--. No es una copia de las tasas del cliente: es la excepción a
+ellas. Precedencia: excepción de la planta > excepción del servicio > tasa general,
+y un % vacío en la excepción hereda el general. El caso real (2026-10-14): Solenium
+retiene 4 % en general y 11 % en Administración (la retención depende del concepto).
+
 La base (Rep/CGM/Admin) sale del ER y en el panel está con signo NEGATIVO
 (reduce el "valor a pagar"). Sobre esa base se generan, por inversionista, las
 líneas de impuesto usando las tasas del CLIENTE:
@@ -15,7 +25,7 @@ Efecto neto en valor a pagar = base + IVA − retenciones (confirmado con la usu
 2026-07-15). Como valor a pagar = Σ líneas con signo, basta sumar estas líneas.
 """
 
-from apps.clientes.models import ClienteTasaServicio
+
 
 SERVICIOS_FACTURA = ("Representación", "CGM", "Administración")
 _ABBR = {"Representación": "Rep", "CGM": "CGM", "Administración": "Adm"}
@@ -29,7 +39,9 @@ def overrides_tasa_servicio(cliente_ids) -> dict:
     out: dict = {}
     if not ids:
         return out
-    for row in ClienteTasaServicio.objects.filter(cliente_id__in=ids):
+    from apps.clientes import models as cl_models
+
+    for row in cl_models.ClienteTasaServicio.objects.filter(cliente_id__in=ids):
         out.setdefault((row.cliente_id, row.servicio), {})[row.proyecto_id] = {
             "iva_pct": float(row.iva_pct) if row.iva_pct is not None else None,
             "retencion_pct": float(row.retencion_pct) if row.retencion_pct is not None else None,

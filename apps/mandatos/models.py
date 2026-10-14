@@ -15,38 +15,6 @@ from django.utils import timezone
 
 from apps.plataforma.models import Timer
 
-class Mandato(Timer):
-    id = models.BigAutoField(primary_key=True)
-    cmu = models.CharField(max_length=20, db_index=True)
-    periodo = models.DateField()
-    proyecto = models.CharField(max_length=255, null=True, blank=True)
-    tercero = models.CharField(max_length=255, null=True, blank=True)
-    inversionista = models.ForeignKey("MandatoInversionista", on_delete=models.SET_NULL, db_column="inversionista_id", null=True, blank=True, related_name="mandatos_por_inversionista_id")
-    estado = models.CharField(max_length=21, choices=[("pendiente_envio", "pendiente_envio"), ("enviado_revisoria", "enviado_revisoria"), ("con_correcciones", "con_correcciones"), ("corregido", "corregido"), ("firmado", "firmado"), ("enviado_inversionista", "enviado_inversionista"), ("sin_inversionista", "sin_inversionista")], default="pendiente_envio")
-    observacion = models.TextField(null=True, blank=True)
-    fecha_envio_revisoria = models.DateField(null=True, blank=True)
-    fecha_firmado = models.DateField(null=True, blank=True)
-    fecha_envio_inversionista = models.DateField(null=True, blank=True)
-    pdf_firmado_ruta = models.CharField(max_length=1000, null=True, blank=True)
-    pdf_firmado_nombre = models.CharField(max_length=500, null=True, blank=True)
-    archivo_zip_nombre = models.CharField(max_length=500, null=True, blank=True)
-    correo_ref_revisoria = models.CharField(max_length=255, null=True, blank=True)
-    correo_ref_envio = models.CharField(max_length=255, null=True, blank=True)
-
-    class Meta:
-        db_table = "mandatos"
-        unique_together = [("cmu", "periodo")]
-
-
-class MandatoInversionista(Timer):
-    id = models.BigAutoField(primary_key=True)
-    nombre = models.CharField(max_length=255)
-    activo = models.BooleanField(default=True)
-
-    class Meta:
-        db_table = "mandato_inversionistas"
-
-
 class MandatoCorreo(models.Model):
     id = models.BigAutoField(primary_key=True)
     message_id = models.CharField(max_length=998)

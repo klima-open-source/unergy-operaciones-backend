@@ -10,7 +10,7 @@ cargados y no toca la base. Eso la hace testeable sola, que es como estaba
 pensada en el router original.
 """
 
-from apps.liquidaciones.services.impuestos import (
+from apps.clientes.services.impuestos import (
     impuestos_de_factura, tasas_efectivas,
 )
 
