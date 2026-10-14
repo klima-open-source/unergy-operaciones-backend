@@ -116,8 +116,13 @@ def restablecer(token: str, contrasena_nueva: str) -> None:
 
 # Grupo de Unergy Auth (authentication-system) → rol con el que se da de alta en
 # Operaciones a quien entra por primera vez. Solo estos grupos crean cuenta: el
-# resto de Unergy necesita que un admin la cree a mano.
+# resto de Unergy necesita que un admin la cree a mano. EN ORDEN DE PRIORIDAD:
+# quien está en varios recibe el primero (un administrador que además es de
+# operaciones entra como admin), sin importar el orden en que lleguen sus grupos.
+# `is_administrator` es el grupo de administradores de toda la plataforma en
+# authentication-system (`permissions/api_permissions.py`).
 ROL_POR_GRUPO_UNERGY = {
+    "is_administrator": pl_models.Rol.ADMIN,
     "operation_staff": pl_models.Rol.OPERACIONES,
 }
 
@@ -130,7 +135,8 @@ def alta_desde_unergy(email: str, nombre: str, grupos) -> "pl_models.Usuario | N
     propio. Si ya existe —también inactivo— no se toca: una baja manual manda
     sobre el grupo, y quien llama ya resolvió ese caso.
     """
-    rol = next((ROL_POR_GRUPO_UNERGY[g] for g in grupos if g in ROL_POR_GRUPO_UNERGY), None)
+    suyos = set(grupos)
+    rol = next((r for g, r in ROL_POR_GRUPO_UNERGY.items() if g in suyos), None)
     if rol is None or not email:
         return None
 

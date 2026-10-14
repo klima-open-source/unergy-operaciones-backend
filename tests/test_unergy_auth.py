@@ -9,8 +9,9 @@ local. Lo que se vigila:
 - un JWT propio sigue entrando sin pasar por gRPC;
 - token válido de un email que no está en `usuarios` → 403, no 401: mandar al
   login a alguien que ya inició sesión en Unergy sería un bucle;
-- salvo que su grupo dé alta automática (`operation_staff`): se le crea la
-  cuenta con rol `operaciones`, sin contraseña local, y entra;
+- salvo que su grupo dé alta automática: se le crea la cuenta sin contraseña
+  local y entra, con rol `admin` si es de `is_administrator` (aunque también sea
+  de `operation_staff`) y `operaciones` si es de `operation_staff`;
 - una cuenta inactiva no se reactiva por tener el grupo;
 - servicio caído → 503, no 401: no es culpa de la sesión;
 - el cliente gRPC generado habla de verdad con un servidor (protobuf 7).
@@ -176,6 +177,20 @@ def test_operation_staff_nuevo_se_da_de_alta_y_entra(cliente, grpc_falso, con_un
     r = cliente.get(ME, HTTP_AUTHORIZATION="Bearer token-de-unergy")
     assert r.status_code == 200
     assert Usuario.objects.filter(email__iexact="nuevo@unergy.io").count() == 1
+
+
+def test_is_administrator_nuevo_entra_como_admin(cliente, grpc_falso, con_unergy_auth):
+    from apps.plataforma.models import Usuario
+
+    # Aunque también sea de operation_staff, y llegue después: el admin manda.
+    grpc_falso["respuesta"] = _identidad(
+        "jefa@unergy.io", grupos=("operation_staff", "is_administrator"),
+    )
+    r = cliente.get(ME, HTTP_AUTHORIZATION="Bearer token-de-unergy")
+
+    assert r.status_code == 200
+    assert r.json()["rol"] == "admin"
+    assert Usuario.objects.get(email="jefa@unergy.io").rol == "admin"
 
 
 def test_grupo_sin_alta_automatica_no_crea_cuenta(cliente, grpc_falso, con_unergy_auth):

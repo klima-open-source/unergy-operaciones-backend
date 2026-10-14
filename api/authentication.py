@@ -192,7 +192,8 @@ class UnergyAuthAuthentication(authentication.BaseAuthentication):
         )
         if usuario is None:
             # Primera vez: los grupos de `cuentas.ROL_POR_GRUPO_UNERGY` (hoy
-            # `operation_staff`) se dan de alta solos; el resto sigue en 403.
+            # `is_administrator` como admin y `operation_staff` como operaciones)
+            # se dan de alta solos; el resto sigue en 403.
             usuario = cuentas.alta_desde_unergy(
                 identidad.email, identidad.nombre, identidad.grupos
             )
