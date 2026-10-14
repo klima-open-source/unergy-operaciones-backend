@@ -10,6 +10,7 @@ from django.urls import include, path
 urlpatterns = [
     path("", include("api.v1.alertas.urls")),
     path("", include("api.v1.auth.urls")),
+    path("", include("api.v1.busqueda.urls")),
     path("", include("api.v1.arriendos.urls")),
     path("", include("api.v1.asic.urls")),
     path("", include("api.v1.api_keys.urls")),
