@@ -260,7 +260,6 @@ class Contrato(Timer):
     indexacion_mensual = models.JSONField(null=True, blank=True)
     indexacion_cgm = models.JSONField(null=True, blank=True)
     indexacion_representacion = models.JSONField(null=True, blank=True)
-    cgm_codigo_sic = models.CharField(max_length=20, null=True, blank=True)
     fecha_inicio_om = models.DateField(null=True, blank=True)
     fecha_indexacion = models.DateField(null=True, blank=True)
     responsable_iva = models.BooleanField(default=False)
@@ -479,25 +478,6 @@ class ContratoProyecto(models.Model):
 
     class Meta:
         db_table = "contrato_proyectos"
-
-
-class ContratoServicioCorrespondencia(models.Model):
-    """Id viejo (`contratos_servicio.id`) -> id nuevo (`contratos.id`).
-
-    Los PPA conservan su id en `contratos`; los contratos de servicio reciben uno
-    nuevo (los ids 1-36 chocan). Esta tabla la llena el backfill y la usa la
-    migración del corte para reescribir las FK de los satélites de servicio
-    (decisiones 1-3 del plan 08). Es una TABLA y no un script para poder
-    auditarla después. Se borra en el deploy 3, con las tablas viejas."""
-
-    id_viejo = models.BigIntegerField(primary_key=True)
-    contrato = models.OneToOneField(
-        "contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_id",
-        related_name="correspondencia_servicio",
-    )
-
-    class Meta:
-        db_table = "contratos_servicio_correspondencia"
 
 
 #: Columnas de `contratos` que solo tienen sentido en un PPA (venían de
