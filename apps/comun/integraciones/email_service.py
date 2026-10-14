@@ -10,6 +10,7 @@ from email.mime.base import MIMEBase
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import make_msgid
 from pathlib import Path
 
 from apps.comun.config import settings
@@ -410,6 +411,18 @@ def send_alarm_notification_email(
         print(f"[ALARM_EMAIL] Failed to send to {to_emails}: {exc}")
 
 
+def _dominio_correo() -> str:
+    remitente = settings.SMTP_FROM or ""
+    return remitente.rsplit("@", 1)[-1].strip(" >") or "unergy.io"
+
+
+def _id_hilo_falla(codigo_falla: str) -> str:
+    """Id raíz del hilo de una falla. No corresponde a un correo enviado: es la
+    referencia común que agrupa todos sus avisos (como hace GitHub con issues)."""
+    codigo = "".join(c for c in codigo_falla if c.isalnum() or c in "-_.") or "sin-codigo"
+    return f"<falla.{codigo}@{_dominio_correo()}>"
+
+
 def send_falla_notification_email(
     *,
     to_emails: list[str],
@@ -487,7 +500,10 @@ def send_falla_notification_email(
         '</svg>'
     )
 
-    subject = f"Unergy {emoji} {strip_label} — {proyecto_nombre} | {codigo_falla}"
+    # Asunto FIJO por falla: Gmail y Outlook solo agrupan en un hilo correos con
+    # el mismo asunto. El estado (Programada, Resuelta...) va en el cuerpo.
+    subject = f"Unergy · Falla {codigo_falla} — {proyecto_nombre}"
+    hilo_id = _id_hilo_falla(codigo_falla)
 
     body_html = f"""<!DOCTYPE html>
 <html lang="es">
@@ -616,6 +632,12 @@ def send_falla_notification_email(
             msg["Subject"] = subject
             msg["From"]    = settings.SMTP_FROM
             msg["To"]      = to_email
+            # Todos los avisos de la falla responden al mismo id raíz, así llegan
+            # al mismo hilo aunque el primero se haya enviado antes de este cambio
+            # de estado. Cada correo lleva su propio Message-ID.
+            msg["Message-ID"]  = make_msgid(domain=_dominio_correo())
+            msg["In-Reply-To"] = hilo_id
+            msg["References"]  = hilo_id
             msg.attach(MIMEText(body_html, "html", "utf-8"))
             _smtp_send(msg, [to_email])
             resultados.append({"email": to_email, "tipo": "to", "exitoso": True})
