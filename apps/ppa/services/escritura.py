@@ -42,6 +42,7 @@ from django.db import transaction
 
 from apps.clientes.services import documentos as documentos_service
 from apps.clientes.services import unergy as unergy_service
+from apps.contratos.services import tarifas as tarifas_service
 from apps.ppa import models as ppa_models
 from apps.ppa.services import contratos as contratos_service
 
@@ -206,6 +207,9 @@ def crear_ppa(
             ppa_models.PpaTarifa.objects.bulk_create([
                 ppa_models.PpaTarifa(contrato=contrato, **fila) for fila in tarifas
             ])
+        # Paso 1 de tarifas: `ppa_tarifas` se copia a `tarifas` (lo de `save()` corrió
+        # antes de que existieran estas filas).
+        tarifas_service.sincronizar(contrato)
         if compromisos:
             ppa_models.PpaCompromisoEnergia.objects.bulk_create([
                 ppa_models.PpaCompromisoEnergia(contrato=contrato, **fila)

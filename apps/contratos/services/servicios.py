@@ -18,6 +18,10 @@ Por grupo:
   así que no dice nada de si el contrato cubre representación. Un contrato solo de CGM
   tiene `servicio_aplica='representacion'` y una sola fila, `cgm`.
 
+La administración no pasa por aquí: es un cargo adicional (`grupos.CARGOS`), no un
+servicio que defina el contrato, y la escribe `services/tarifas.py` según tenga o no su
+tarifa. `registrar` no la crea ni la borra.
+
 Ya no se deduce nada de las tarifas cargadas: la tarifa puede llegar después, o nunca,
 sin cambiar qué servicios cubre el contrato. La única deducción que queda es la de la
 copia inicial (`backfill_contratos_unificados`), una sola vez.
@@ -76,6 +80,7 @@ def registrar(contrato, servicios=None) -> list[str]:
     from apps.contratos.models import Servicio
 
     actuales = set(Servicio.objects.filter(contrato_id=contrato.pk)
+                   .exclude(servicio__in=grupos.CARGOS)
                    .values_list("servicio", flat=True))
     objetivo = deseados(contrato, servicios, actuales)
     sobran = actuales - objetivo

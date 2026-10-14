@@ -97,9 +97,10 @@ def servicios_por_proyecto(hoy: date) -> dict[int, set[str]]:
     vivos = _contratos_vivos(hoy)
     salida: dict[int, set[str]] = {}
     por_contrato: dict[int, set[str]] = {}
+    # Los cargos (administración) no dicen qué servicios tiene la planta.
     for contrato_id, sub in Servicio.objects.filter(
         contrato__in=vivos, contrato__proyectos_vinculados__isnull=False,
-    ).values_list("contrato_id", "servicio"):
+    ).exclude(servicio__in=grupos.CARGOS).values_list("contrato_id", "servicio"):
         por_contrato.setdefault(contrato_id, set()).add(sub)
     for contrato_id, proyecto_id in ContratoProyecto.objects.filter(
         contrato_id__in=por_contrato,

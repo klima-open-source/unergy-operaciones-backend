@@ -16,6 +16,7 @@ from apps.contratos.services import fronteras as fronteras_service
 from apps.contratos.services import indexacion as indexacion_service
 from apps.contratos.services import partes as partes_service
 from apps.contratos.services import servicios as servicios_service
+from apps.contratos.services import tarifas as tarifas_service
 from apps.contratos.services import unicidad as unicidad_service
 from apps.facturacion import models as fa_models
 from apps.plataforma.services.fechas import hoy_col
@@ -158,10 +159,7 @@ class ContratoServicioViewSet(
                     contrato_servicio_id=contrato.id, url=enlace,
                     nombre=NOMBRE_ENLACE,
                 )
-        return Response(
-            cs_serializers.ContratoSerializer(self._contrato(contrato.pk)).data,
-            status=201,
-        )
+        return Response(self._con_avisos(contrato), status=201)
 
     def partial_update(self, request, *args, **kwargs):
         contrato = self._contrato(kwargs["pk"])
@@ -192,9 +190,14 @@ class ContratoServicioViewSet(
             if frontera_ids is not None:
                 self._fronteras(contrato, frontera_ids)
 
-        return Response(
-            cs_serializers.ContratoSerializer(self._contrato(contrato.pk)).data
-        )
+        return Response(self._con_avisos(contrato))
+
+    def _con_avisos(self, contrato) -> dict:
+        """El contrato guardado, y `avisos` que no bloquean (administración cobrada
+        dos veces en la misma planta). El front los muestra como advertencia."""
+        datos = cs_serializers.ContratoSerializer(self._contrato(contrato.pk)).data
+        datos["avisos"] = tarifas_service.avisos_de_administracion(contrato)
+        return datos
 
     @staticmethod
     def _servicios(contrato, servicios):
@@ -206,6 +209,9 @@ class ContratoServicioViewSet(
             servicios_service.registrar(contrato, servicios)
         except servicios_service.ServiciosInvalidos as exc:
             raise ValidationError({"servicios": str(exc)})
+        # Un servicio que entra con la lista necesita su tarifa (la deriva de las
+        # columnas, como en `save()`).
+        tarifas_service.sincronizar(contrato)
 
     @staticmethod
     def _fronteras(contrato, frontera_ids):

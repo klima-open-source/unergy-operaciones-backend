@@ -48,6 +48,22 @@ MANTENIMIENTO = "mantenimiento"
 ARRIENDO = "arriendo"
 INTERNET = "internet"
 
+# ── Cargos adicionales ────────────────────────────────────────────────────
+#: Un servicio que se cobra dentro de un contrato pero NO dice qué servicios tiene
+#: la planta (decisión de Sara, 2026-10-13): no cuenta para el monitoreo, ni para
+#: "la representamos", ni para la pestaña de Servicios. La administración se
+#: negocia casi siempre en el contrato de representación/CGM y a veces en el de O&M.
+ADMINISTRACION = "administracion"
+CARGOS: tuple[str, ...] = (ADMINISTRACION,)
+
+
+
+def admite_administracion(contrato) -> bool:
+    """Si el contrato puede llevar el cargo de administración: los de representación/CGM
+    y los de O&M (mantenimiento). No un PPA, ni un arriendo, ni internet."""
+    return (getattr(contrato, "grupo", None) == "representacion_cgm"
+            or getattr(contrato, "servicio_aplica", None) == "mantenimiento")
+
 #: Grupo → sus subservicios, en orden de presentación.
 #:
 #: Los tres de `operacion` cuentan por igual (confirmado por Sara el 2026-09-17):
@@ -122,7 +138,8 @@ def subservicios_de(contrato) -> list[str]:
     pestaña. Un valor fuera del catálogo devuelve lista vacía en vez de inventar.
     """
     if getattr(contrato, "pk", None) is not None:
-        registrados = [s.servicio for s in contrato.servicios.all()]
+        # Los cargos (administración) no son subservicios: no los devuelve.
+        registrados = [s.servicio for s in contrato.servicios.all() if s.servicio not in CARGOS]
         if registrados:
             return en_orden(registrados)
     aplica = getattr(contrato, "servicio_aplica", None)

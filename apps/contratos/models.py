@@ -129,6 +129,16 @@ class ServicioContrato(models.TextChoices):
     MANTENIMIENTO = grupos.MANTENIMIENTO, "Mantenimiento"
     ARRIENDO = grupos.ARRIENDO, "Arriendo"
     INTERNET = grupos.INTERNET, "Internet"
+    # Cargo adicional, no subservicio (`grupos.CARGOS`).
+    ADMINISTRACION = grupos.ADMINISTRACION, "Administración"
+
+
+class TipoIndexacion(models.TextChoices):
+    """Con qué índice se actualiza la tarifa de un servicio. Vacío = no se indexa
+    (la administración, un PPA de precio fijo)."""
+
+    IPC = "ipc", "IPC"
+    IPP = "ipp", "IPP"
 
 
 class RolParte(models.TextChoices):
@@ -427,7 +437,7 @@ class Contrato(Timer):
                 f for f in kwargs["update_fields"]
                 if f not in _ATAJOS_DE_PARTES and f not in ATAJOS_DE_PLANTA
             ]
-        from apps.contratos.services import contrato_partes, contrato_proyectos, servicios
+        from apps.contratos.services import contrato_partes, contrato_proyectos, servicios, tarifas
 
         if self.grupo == GrupoContrato.REPRESENTACION_CGM:
             inversionista = self._pendiente("inversionista_id")
@@ -438,6 +448,7 @@ class Contrato(Timer):
         # camino de escritura (API, CRM, admin) puede dejarlos desalineados con
         # `tipo_contrato` o `servicio_aplica`.
         servicios.registrar(self)
+        tarifas.sincronizar(self)
         pendiente = self.__dict__.pop("_planta_pendiente", {})
         contrato_proyectos.sincronizar(
             self,
@@ -537,6 +548,12 @@ class Servicio(Timer):
         related_name="servicios",
     )
     servicio = models.CharField(max_length=20, choices=ServicioContrato.choices)
+    # Esquema de Sara (2026-10-14): la base y el índice son del servicio, no de cada
+    # periodo. La unidad la da el servicio (`services/tarifas.py::UNIDAD`).
+    tarifa_base = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
+    tipo_indexacion = models.CharField(
+        max_length=3, choices=TipoIndexacion.choices, null=True, blank=True,
+    )
 
     class Meta:
         db_table = "servicios"
@@ -544,6 +561,51 @@ class Servicio(Timer):
             models.UniqueConstraint(
                 fields=["contrato", "servicio"], name="uq_servicios_contrato_servicio"
             ),
+            models.CheckConstraint(
+                name="ck_servicios_tarifa_base",
+                condition=Q(tarifa_base__isnull=True) | Q(tarifa_base__gte=0),
+            ),
+        ]
+
+
+class Tarifa(Timer):
+    """El valor de un servicio en cada periodo: una fila por año, o por año y mes.
+
+    Esquema de Sara (2026-10-14): `servicio`, `anio`, `mes`, `valor`. La base pactada
+    y el índice con que se actualiza están en el servicio (`Servicio.tarifa_base`,
+    `Servicio.tipo_indexacion`); aquí va lo que vale cada periodo.
+
+    `mes` vacío: el servicio se cobra por año (representación, CGM, internet…). Lleno:
+    el precio cambia mes a mes (los PPA, que antes vivían en `ppa_tarifas`). El
+    índice aplicado en un periodo no se guarda: sale de comparar con el anterior."""
+
+    id = models.BigAutoField(primary_key=True)
+    servicio = models.ForeignKey(
+        "contratos.Servicio", on_delete=models.CASCADE, db_column="servicio_id",
+        related_name="tarifas",
+    )
+    anio = models.IntegerField()
+    mes = models.IntegerField(null=True, blank=True)
+    valor = models.DecimalField(max_digits=18, decimal_places=6)
+
+    class Meta:
+        db_table = "tarifas"
+        ordering = ["servicio_id", "anio", models.F("mes").asc(nulls_first=True)]
+        constraints = [
+            # Un valor por periodo. Dos índices parciales: en un UNIQUE con `mes`, dos
+            # filas del mismo año sin mes no chocarían (los NULL son distintos).
+            models.UniqueConstraint(
+                fields=["servicio", "anio"], condition=Q(mes__isnull=True),
+                name="uq_tarifas_servicio_anio",
+            ),
+            models.UniqueConstraint(
+                fields=["servicio", "anio", "mes"], condition=Q(mes__isnull=False),
+                name="uq_tarifas_servicio_anio_mes",
+            ),
+            models.CheckConstraint(
+                name="ck_tarifas_mes", condition=Q(mes__isnull=True) | Q(mes__range=(1, 12)),
+            ),
+            models.CheckConstraint(name="ck_tarifas_valor", condition=Q(valor__gte=0)),
         ]
 
 

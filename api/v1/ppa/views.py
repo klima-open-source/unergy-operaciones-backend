@@ -13,6 +13,7 @@ from api.exceptions import Conflict, NoProcesable
 from api.logging import class_logger_wrapper, log_endpoint
 from api.permissions import RolePermission
 from apps.clientes.services import documentos as documentos_service
+from apps.contratos.services import tarifas as tarifas_service
 from apps.ppa import models as ppa_models
 from apps.ppa.services import contratos as contratos_service
 from apps.ppa.services import escritura as escritura_service
@@ -249,6 +250,7 @@ class PpaViewSet(
                 ppa_models.PpaTarifa(contrato=contrato, **fila)
                 for fila in entrada.validated_data
             ])
+            tarifas_service.sincronizar(contrato)  # paso 1: copia a `tarifas`
         filas = ppa_models.PpaTarifa.objects.filter(
             contrato=contrato
         ).order_by("año", "mes")
