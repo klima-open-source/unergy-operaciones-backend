@@ -43,7 +43,7 @@ from apps.contabilidad.services.reparto import (
     _construir_lineas_base, _inversionistas_de, _inversionistas_de_batch,
 )
 from apps.clientes.models import Cliente
-from apps.contabilidad.services.impuestos import (
+from apps.clientes.services.impuestos import (
     impuestos_de_factura, overrides_tasa_servicio, tasas_efectivas,
 )
 from apps.liquidaciones.services import api_externa
