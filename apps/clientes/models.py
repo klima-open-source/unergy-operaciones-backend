@@ -56,6 +56,10 @@ class ClienteDocumentoComercial(Timer):
 
 
 class ClienteTasaServicio(Timer):
+    """Excepción a las tasas generales del cliente para un servicio (y opcionalmente
+    una planta). No duplica `clientes`: un % vacío aquí hereda el general. La
+    resolución está en `apps/clientes/services/impuestos.py::tasas_efectivas`."""
+
     id = models.BigAutoField(primary_key=True)
     cliente = models.ForeignKey("Cliente", on_delete=models.CASCADE, db_column="cliente_id", related_name="tasas_servicio")
     servicio = models.CharField(max_length=30)
