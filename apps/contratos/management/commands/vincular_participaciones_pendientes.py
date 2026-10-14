@@ -17,15 +17,20 @@ columna ya no es del modelo desde `contratos/0018` y sigue en la base hasta
 la columna ya no existe en vez de fallar.
 
 Solo toca filas de `contrato_proyectos` sin participación, y solo si la planta
-tiene exactamente una participación de ese cliente. Lo que no se resuelve sale
+tiene exactamente una participación de ese cliente. Si el contrato no tiene la
+ficha sino solo el nombre escrito a mano, se compara normalizado (sin puntos ni
+mayúsculas: "Ayura S.A.S." = "AYURA SAS") con los participantes de la planta. Lo que no se resuelve sale
 listado con su motivo. Idempotente.
 """
 from django.core.management.base import BaseCommand
 from django.db import connection, transaction
 
+from apps.contratos.services.representacion_dedup import norm
+
 PENDIENTES = """
 SELECT cp.id, k.id, k.numero_contrato, p.nombre_comercial, cp.proyecto_id,
-       k.inversionista_id, coalesce(cl.razon_social_nombre, trim(k.inversionista_nombre))
+       k.inversionista_id, coalesce(cl.razon_social_nombre, trim(k.inversionista_nombre)),
+       trim(k.inversionista_nombre)
   FROM contrato_proyectos cp
   JOIN contratos k ON k.id = cp.contrato_id
   JOIN proyectos p ON p.id = cp.proyecto_id
@@ -39,6 +44,13 @@ PARTICIPACIONES = """
 SELECT pi.id FROM proyecto_inversionistas pi
   JOIN inversionistas i ON i.id = pi.inversionista_id
  WHERE pi.proyecto_id = %s AND i.cliente_id = %s
+"""
+
+PARTICIPANTES = """
+SELECT pi.id, cl.razon_social_nombre FROM proyecto_inversionistas pi
+  JOIN inversionistas i ON i.id = pi.inversionista_id
+  JOIN clientes cl ON cl.id = i.cliente_id
+ WHERE pi.proyecto_id = %s
 """
 
 
@@ -61,13 +73,18 @@ class Command(BaseCommand):
             cur.execute(PENDIENTES)
             pendientes = cur.fetchall()
             vinculados, sin_resolver = 0, []
-            for cp_id, contrato_id, numero, planta, proyecto_id, cliente_id, nombre in pendientes:
-                motivo = None
-                if cliente_id is None:
+            for (cp_id, contrato_id, numero, planta, proyecto_id, cliente_id, nombre,
+                 escrito) in pendientes:
+                if cliente_id is None and not escrito:
                     motivo = "el contrato no dice inversionista"
                 else:
-                    cur.execute(PARTICIPACIONES, [proyecto_id, cliente_id])
-                    ids = [fila[0] for fila in cur.fetchall()]
+                    if cliente_id is not None:
+                        cur.execute(PARTICIPACIONES, [proyecto_id, cliente_id])
+                        ids = [fila[0] for fila in cur.fetchall()]
+                    else:
+                        cur.execute(PARTICIPANTES, [proyecto_id])
+                        ids = [pi_id for pi_id, razon in cur.fetchall()
+                               if norm(razon) == norm(escrito)]
                     if len(ids) == 1:
                         cur.execute("UPDATE contrato_proyectos SET proyecto_inversionista_id = %s "
                                     "WHERE id = %s", [ids[0], cp_id])
