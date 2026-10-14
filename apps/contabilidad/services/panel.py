@@ -38,6 +38,7 @@ from apps.contabilidad.services.er_loader import (
     IVA, _norm as _norm_concepto, extraer_proyecto_de_archivo, parsear_er,
     recalcular_er,
 )
+from apps.contabilidad.services import ajustes
 from apps.contabilidad.services.desde_api import construir_parsed
 from apps.contabilidad.services.reparto import (
     _construir_lineas_base, _inversionistas_de, _inversionistas_de_batch,
@@ -50,6 +51,39 @@ from apps.liquidaciones.services import api_externa
 from apps.proyectos.models import Proyecto, ProyectoInversionista
 
 logger = logging.getLogger("operaciones.panel_contable")
+
+
+def _con_costos_de_modulo(base: list[dict], parsed: dict,
+                          proyecto_id: int, periodo: str) -> list[dict]:
+    """Costos que el Panel toma de los MÓDULOS (piloto: Mantenimiento y Arrendamiento).
+
+    Si el proyecto tiene contrato de ese servicio, el valor del módulo MANDA sobre
+    el del ER; si no, se conserva el del ER. Ver app/services/costos_panel.py.
+    """
+    try:
+        mods = valores_modulo_costos(proyecto_id, periodo)
+        # Representación/CGM = tarifa app × energía; Administración = tarifa_admin ×
+        # ingreso. Las dos bases son la VENTA de energía, no el neto de compras:
+        # cuando el traductor de la API las entrega (`base_tarifa_*`) mandan ellas.
+        # NEU y Nitro no pasan por aquí: su Excel tiene su propia fórmula, donde la
+        # compra sí resta, y ese camino se deja intacto con kwh/total_ingresos.
+        base_kwh = parsed.get("base_tarifa_kwh")
+        base_cop = parsed.get("base_tarifa_cop")
+        # Los inversionistas se resuelven ANTES del cálculo: en las minigranjas
+        # hay un contrato de representación por inversionista y cada uno paga SU
+        # tarifa. Sin esto se tomaba un contrato y se repartía por participación.
+        mods.update(valores_facturas_modulo(
+            proyecto_id, periodo,
+            parsed.get("kwh") if base_kwh is None else base_kwh,
+            parsed.get("total_ingresos") if base_cop is None else base_cop,
+            inversionistas=_inversionistas_de(proyecto_id, periodo)))
+        if mods:
+            return aplicar_costos_modulo(base, mods, iva=IVA)
+    except Exception:
+        # Un problema calculando el módulo no debe tumbar la carga del ER: se deja
+        # el costo del ER y se sigue.
+        logger.exception("No se pudieron aplicar los costos de módulo (proy=%s, per=%s)", proyecto_id, periodo)
+    return base
 
 
 def guardar_panel(proyecto_id: int, periodo: str, tipo: str, parsed: dict,
@@ -74,32 +108,13 @@ def guardar_panel(proyecto_id: int, periodo: str, tipo: str, parsed: dict,
         PanelContableLinea.objects.filter(panel_id=panel.id).delete()
 
     base = _construir_lineas_base(parsed)
-    # Costos que el Panel toma de los MÓDULOS (piloto: Mantenimiento y Arrendamiento).
-    # Si el proyecto tiene contrato de ese servicio, el valor del módulo MANDA sobre
-    # el del ER; si no, se conserva el del ER. Ver app/services/costos_panel.py.
-    try:
-        mods = valores_modulo_costos(proyecto_id, periodo)
-        # Representación/CGM = tarifa app × energía; Administración = tarifa_admin ×
-        # ingreso. Las dos bases son la VENTA de energía, no el neto de compras:
-        # cuando el traductor de la API las entrega (`base_tarifa_*`) mandan ellas.
-        # NEU y Nitro no pasan por aquí: su Excel tiene su propia fórmula, donde la
-        # compra sí resta, y ese camino se deja intacto con kwh/total_ingresos.
-        base_kwh = parsed.get("base_tarifa_kwh")
-        base_cop = parsed.get("base_tarifa_cop")
-        # Los inversionistas se resuelven ANTES del cálculo: en las minigranjas
-        # hay un contrato de representación por inversionista y cada uno paga SU
-        # tarifa. Sin esto se tomaba un contrato y se repartía por participación.
-        mods.update(valores_facturas_modulo(
-            proyecto_id, periodo,
-            parsed.get("kwh") if base_kwh is None else base_kwh,
-            parsed.get("total_ingresos") if base_cop is None else base_cop,
-            inversionistas=_inversionistas_de(proyecto_id, periodo)))
-        if mods:
-            base = aplicar_costos_modulo(base, mods, iva=IVA)
-    except Exception:
-        # Un problema calculando el módulo no debe tumbar la carga del ER: se deja
-        # el costo del ER y se sigue.
-        logger.exception("No se pudieron aplicar los costos de módulo (proy=%s, per=%s)", proyecto_id, periodo)
+    if ajustes.es_ajuste(tipo):
+        # Un ajuste de reliquidación solo contabiliza ingresos y comercialización.
+        # Se recorta ANTES de los costos de módulo: ese paso solo agrega líneas de
+        # `costos`, que acá no entran, y hace consultas que no haría falta pagar.
+        base = ajustes.solo_lineas_de_ajuste(base)
+    else:
+        base = _con_costos_de_modulo(base, parsed, proyecto_id, periodo)
     tiene_costos = any(l["grupo"] == "costos" for l in base)
 
     panel.ingreso_bruto_cop = parsed["ingreso_bruto"]
@@ -236,16 +251,20 @@ def cargar_er(archivos: list, periodo: str, tipo: str, tipo_carga: str,
               usuario_id: int) -> dict:
     """Sube uno o varios ER. Por cada archivo: recalcula con LibreOffice, parsea,
     matchea el proyecto, divide por % del backend y guarda el panel + líneas.
-    periodo: YYYY-MM. tipo: 'preliquidacion' | 'oficial'.
+    periodo: YYYY-MM. tipo: 'preliquidacion' | 'oficial' | 'ajuste_<version>'.
     tipo_carga: 'normal' | 'neu' | 'nitro' — cómo se lee la sección de ingresos.
+
+    Un `ajuste_<version>` es el panel de una RELIQUIDACIÓN: el ER que se emite
+    para ella ya trae la diferencia contra la versión anterior, y solo se guardan
+    sus líneas de ingresos y comercialización. Ver `services/ajustes.py`.
 
     VALIDACIÓN CRUZADA: cada ER debe cargarse en su sección. Si el proyecto está
     clasificado distinto a `tipo_carga` para el período, se rechaza (no se guarda)
     y se reporta aparte, sin romper la carga de los válidos.
     """
-    tipo = (tipo or "preliquidacion").strip().lower()
-    if tipo not in ("preliquidacion", "oficial"):
-        raise NoProcesable("tipo debe ser 'preliquidacion' u 'oficial'")
+    tipo = (tipo or ajustes.TIPO_PRELIQUIDACION).strip().lower()
+    if not ajustes.tipo_valido(tipo):
+        raise NoProcesable(ajustes.error_de_tipo(tipo))
     tipo_carga = (tipo_carga or "normal").strip().lower()
     if tipo_carga not in ("normal", "neu", "nitro"):
         raise NoProcesable("tipo_carga debe ser 'normal', 'neu' o 'nitro'")
@@ -392,7 +411,19 @@ def cargar_periodo(periodo_pedido: str, tipo: str, version: str,
     NEU y Nitro se omiten a propósito -- su dato en la API está malo y siguen
     cargando el Excel-- y se informan en `omitidos`: saltarlos en silencio haría
     creer que el período quedó completo.
+
+    **No sirve para armar un ajuste de reliquidación.** El ER en JSON solo acepta
+    UNA versión (`estado_resultados_json`), así que devuelve los valores completos
+    de esa versión, no la diferencia contra la anterior. Un ajuste armado por acá
+    contabilizaría el mes entero otra vez. El de la diferencia es el ER en Excel,
+    que se sube por `cargar_er`.
     """
+    if ajustes.es_ajuste((tipo or "").strip().lower()):
+        raise NoProcesable(
+            "Un ajuste de reliquidación no se arma desde la API: su estado de "
+            "resultados en JSON trae los valores completos de la versión, no la "
+            "diferencia. Sube el ER de la reliquidación con «Cargar ER»."
+        )
     periodo, anio, mes = _normalizar_periodo(periodo_pedido)
 
     try:
