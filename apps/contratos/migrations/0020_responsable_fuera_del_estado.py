@@ -9,7 +9,7 @@ todas las vistas trabajan con todos los contratos PPA vigentes, como hacían con
 
 SOLO ESTADO, igual que `0021` y `0018`: la columna se queda en la base, con sus
 datos, y nadie la escribe; revertir este despliegue no pierde nada. El DROP va en
-el paso 2 (`0024_borrar_responsables`). Lo mismo hace `ppa/0005` con el modelo.
+el paso 2 (`0025_borrar_responsables`). Lo mismo hace `ppa/0004` con el modelo.
 """
 from django.db import migrations
 
