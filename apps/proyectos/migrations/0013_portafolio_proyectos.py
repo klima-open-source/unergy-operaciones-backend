@@ -9,7 +9,7 @@ pasa a una fila por pareja planta–portafolio. `activo` estaba en true en los 2
 portafolios y solo filtraba el asistente de informes: se quita.
 
 Solo agrega. Las asignaciones actuales las copia `copiar_portafolios` (comando
-aparte). Las dos columnas viejas siguen en la base, sin leerse, hasta `0015`.
+aparte). Las dos columnas viejas siguen en la base, sin leerse, hasta `0018`.
 """
 import django.db.models.deletion
 from django.db import migrations, models

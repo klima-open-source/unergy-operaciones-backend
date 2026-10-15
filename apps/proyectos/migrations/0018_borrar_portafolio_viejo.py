@@ -27,7 +27,7 @@ def frenar_si_falta_copiar(apps, schema_editor):
     if faltan:
         muestra = ", ".join(f"#{pid} {nombre}" for pid, nombre, _ in faltan[:5])
         raise RuntimeError(
-            f"[proyectos/0015] {len(faltan)} plantas tienen un portafolio que no está en "
+            f"[proyectos/0018] {len(faltan)} plantas tienen un portafolio que no está en "
             f"portafolio_proyectos ({muestra}…): corre copiar_portafolios --aplicar antes "
             "de borrar la columna. No se borra nada."
         )
@@ -36,7 +36,7 @@ def frenar_si_falta_copiar(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('proyectos', '0014_borrar_es_patrimonio_autonomo'),
+        ('proyectos', '0017_borrar_es_patrimonio_autonomo'),
     ]
 
     operations = [

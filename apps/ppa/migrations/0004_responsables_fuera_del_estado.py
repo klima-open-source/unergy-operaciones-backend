@@ -2,9 +2,9 @@
 
     ppa_responsables (nombre, incluir_en_cumplimiento)  -> nadie la lee ni la escribe
 
-SOLO ESTADO, igual que `contratos/0023`: la tabla se queda en la base, con sus
+SOLO ESTADO, igual que `contratos/0020`: la tabla se queda en la base, con sus
 datos, y nadie la escribe; revertir este despliegue no pierde nada. El DROP va en
-el paso 2 (`contratos/0025_borrar_responsables`).
+el paso 2 (`contratos/0027_borrar_responsables`).
 """
 from django.db import migrations
 

@@ -13,7 +13,7 @@ y este comando completa el vínculo.
 
 Lee el inversionista escrito en `contratos.inversionista_id` con SQL directo: la
 columna ya no es del modelo desde `contratos/0018` y sigue en la base hasta
-`contratos/0023` (subida de los borrados). Hay que correrlo antes; después, dice que
+`contratos/0025` (subida de los borrados). Hay que correrlo antes; después, dice que
 la columna ya no existe en vez de fallar.
 
 Solo toca filas de `contrato_proyectos` sin participación, y solo si la planta
@@ -68,7 +68,7 @@ class Command(BaseCommand):
             )
             if not cur.fetchone()[0]:
                 self.stdout.write("La columna contratos.inversionista_id ya no existe "
-                                  "(contratos/0023): no hay de dónde leer. Nada que hacer.")
+                                  "(contratos/0025): no hay de dónde leer. Nada que hacer.")
                 return
             cur.execute(PENDIENTES)
             pendientes = cur.fetchall()

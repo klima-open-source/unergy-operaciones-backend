@@ -18,7 +18,7 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('contratos', '0024_borrar_columnas_de_tarifas'),
+        ('contratos', '0026_borrar_columnas_de_tarifas'),
         ('ppa', '0005_tarifas_fuera_del_estado'),
     ]
 

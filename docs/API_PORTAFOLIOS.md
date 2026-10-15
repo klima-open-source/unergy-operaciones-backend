@@ -54,4 +54,4 @@ Sin `en_portafolio` es el cuerpo del frontend anterior: **mueve** la planta a
 
 `copiar_portafolios` (solo lee sin `--aplicar`) copia la columna vieja
 `proyectos.portafolio_id` a la tabla, e imprime en CSV el texto suelto
-`contratos.portafolio` antes de su borrado (`proyectos/0015`, `contratos/0026`).
+`contratos.portafolio` antes de su borrado (`proyectos/0018`, `contratos/0028`).

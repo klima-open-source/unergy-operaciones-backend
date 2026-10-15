@@ -13,7 +13,7 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('contratos', '0025_borrar_responsables'),
+        ('contratos', '0027_borrar_responsables'),
     ]
 
     operations = [

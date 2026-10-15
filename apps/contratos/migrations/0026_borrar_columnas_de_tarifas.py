@@ -57,7 +57,7 @@ def comprobar(apps, schema_editor):
             )
             distintas = cur.fetchone()[0]
             if distintas:
-                print(f"\n  [contratos/0024] Aviso: {distintas} contratos con {columna} en la "
+                print(f"\n  [contratos/0026] Aviso: {distintas} contratos con {columna} en la "
                       "columna vieja distinta de la base de su servicio (editados después del "
                       "paso 2). No se pierde nada: manda el servicio.")
         cur.execute(
@@ -70,7 +70,7 @@ def comprobar(apps, schema_editor):
         )
         sin_copia = cur.fetchone()[0]
         if sin_copia:
-            print(f"\n  [contratos/0024] Aviso: {sin_copia} precios de ppa_tarifas sin su mes en "
+            print(f"\n  [contratos/0026] Aviso: {sin_copia} precios de ppa_tarifas sin su mes en "
                   "tarifas (borrados o editados después del paso 2).")
 
         cur.execute(
@@ -108,7 +108,7 @@ BORRAR = (
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('contratos', '0023_borrar_planta_e_inversionista_de_contratos'),
+        ('contratos', '0025_borrar_planta_e_inversionista_de_contratos'),
         ('ppa', '0005_tarifas_fuera_del_estado'),
     ]
 

@@ -7,7 +7,7 @@
 Modelo de Sara (2026-10-14): el inversionista es el dueño de la participación; al
 patrimonio se le factura y liquida. La jerarquía (general → subpatrimonio) va en
 `padre_id`. La bandera `es_patrimonio_autonomo` estaba en false en las 116
-participaciones y nadie la leía: sale del modelo aquí y de la base en `0014`.
+participaciones y nadie la leía: sale del modelo aquí y de la base en `0017`.
 
 Solo agrega. Los datos los carga un comando aparte (barrido de patrimonios).
 """
@@ -25,7 +25,7 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        # La bandera sale del modelo pero no de la base (el DROP es `0014`). La
+        # La bandera sale del modelo pero no de la base (el DROP es `0017`). La
         # columna es NOT NULL sin DEFAULT: sin este DEFAULT, crear una participación
         # fallaría porque Django ya no la manda.
         migrations.SeparateDatabaseAndState(

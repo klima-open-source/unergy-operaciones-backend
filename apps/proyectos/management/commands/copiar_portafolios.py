@@ -11,11 +11,11 @@ viven en `proyectos.portafolio_id` (una por planta); este comando las copia, una
 fila por planta con portafolio. Idempotente: lo que ya está no se repite.
 
 Lee las columnas viejas con SQL directo: ya no son del modelo y siguen en la base
-hasta `proyectos/0015` y `contratos/0026`. Después de esas migraciones dice que no
+hasta `proyectos/0018` y `contratos/0028`. Después de esas migraciones dice que no
 hay de dónde leer en vez de fallar.
 
 También imprime, como respaldo en CSV, el texto suelto `contratos.portafolio`
-(56 contratos de representación al 2026-10-15) antes de que `contratos/0026` lo
+(56 contratos de representación al 2026-10-15) antes de que `contratos/0028` lo
 borre. Copiarlo del log del run de `comando.yml`.
 """
 import csv
@@ -72,7 +72,7 @@ class Command(BaseCommand):
                 f"{antes}. Filas nuevas: {copiadas}."
             )
         else:
-            self.stdout.write("proyectos.portafolio_id ya no existe (proyectos/0015): "
+            self.stdout.write("proyectos.portafolio_id ya no existe (proyectos/0018): "
                               "no hay de dónde copiar.")
 
         if _existe("contratos", "portafolio"):

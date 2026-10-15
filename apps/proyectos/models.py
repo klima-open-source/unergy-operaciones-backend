@@ -150,7 +150,7 @@ class Portafolio(Timer):
     Una planta puede estar en varios portafolios: la pertenencia es una fila de
     `portafolio_proyectos` (modelo de Sara, 2026-10-15). Antes era una sola,
     `proyectos.portafolio_id`; esa columna y `portafolios.activo` siguen en la
-    base sin leerse hasta `proyectos/0015`.
+    base sin leerse hasta `proyectos/0018`.
     """
 
     id = models.BigAutoField(primary_key=True)

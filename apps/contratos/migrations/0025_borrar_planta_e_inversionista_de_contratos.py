@@ -54,7 +54,7 @@ def comprobar(apps, schema_editor):
             cur.execute(consulta)
             distintas = cur.fetchone()[0]
             if distintas:
-                print(f"\n  [contratos/0023] Aviso: {distintas} contratos con un(a) {que} en la "
+                print(f"\n  [contratos/0025] Aviso: {distintas} contratos con un(a) {que} en la "
                       "columna vieja que no coincide con contrato_proyectos (editados después "
                       "del paso 4b). No se pierde nada: manda contrato_proyectos.")
         cur.execute("SELECT count(*) FROM contratos WHERE grupo <> 'ppa' AND proyecto_id IS NOT NULL")
@@ -81,7 +81,7 @@ ALTER TABLE contratos
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('contratos', '0022_tarifas_fuera_del_estado'),
+        ('contratos', '0024_contrato_originabot_arriendo_id_and_more'),
     ]
 
     operations = [

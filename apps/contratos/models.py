@@ -265,7 +265,7 @@ class Contrato(Timer):
     # La planta y el inversionista ya no son columnas que Django lea: viven en
     # `contrato_proyectos` (planta y, en representación, la participación). Ver los
     # atajos `proyecto` / `inversionista` más abajo. Las columnas `proyecto_id`,
-    # `inversionista_id` e `inversionista_nombre` se borraron en `contratos/0023`.
+    # `inversionista_id` e `inversionista_nombre` se borraron en `contratos/0025`.
     # Las tarifas viven en el servicio (base e índice) y en `tarifas` (valor por
     # periodo): `tarifa_base`, `tarifa_representacion`, `tarifa_cgm`, `tarifa_admin`,
     # `tarifa_mensual` y los cuatro `indexacion_*` son atajos (ver `ATAJOS_DE_TARIFA`),
