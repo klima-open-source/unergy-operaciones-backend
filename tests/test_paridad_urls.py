@@ -205,6 +205,7 @@ RUTAS_NUEVAS = {
     ("/api/v1/ppa/{}/originabot", "POST"),
     ("/api/v1/facturacion/bolsa-simem", "GET"),
     ("/api/v1/generacion-solar/monitoring/{}/irradiancia", "GET"),
+    ("/api/v1/generacion-solar/monitoring/tarjetas", "GET"),
     ("/api/v1/reconectadores/interruptor", "GET"),
     ("/api/v1/reconectadores/interruptor", "POST"),
     ("/api/v1/reporte-energia/enviar/estado", "GET"),

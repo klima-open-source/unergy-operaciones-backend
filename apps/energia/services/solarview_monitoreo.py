@@ -23,11 +23,11 @@ from __future__ import annotations
 
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from calendar import monthrange
 from datetime import datetime, timedelta
 
-from django.db import close_old_connections
+from django.db import close_old_connections, connection
 from rest_framework.exceptions import NotFound
 
 from api.exceptions import NoProcesable, ServicioNoDisponible
@@ -710,6 +710,56 @@ def monitoreo_detalle(proyecto_id: int, incluir_snapshot: bool = False,
     }
     _cache_set(clave, CACHE_TTL_DETALLE, datos)
     return datos
+
+
+#: Cuántas tarjetas acepta `tarjetas()` por llamada. La vista pide de a 10.
+MAX_TARJETAS = 12
+
+#: Cuánto más se espera la irradiancia una vez llegados los detalles. Va aparte
+#: del detalle por una razón (ver `monitoring_irradiancia`): una estación lenta
+#: no debe demorar la tarjeta. Pasado este margen se responde sin ella.
+GRACIA_IRRADIANCIA_S = 3
+
+
+def _en_hilo(funcion, *args, **kwargs):
+    """Corre `funcion` en un hilo del pool y cierra la conexión que abrió ese
+    hilo: las conexiones de Django son por hilo y nadie más las cerraría."""
+    try:
+        return funcion(*args, **kwargs)
+    except Exception:
+        logger.debug("tarjeta %s: %s falló", args, funcion.__name__, exc_info=True)
+        return None
+    finally:
+        connection.close()
+
+
+def tarjetas(ids: list[int]) -> dict:
+    """El detalle (sin 30 días) y la irradiancia de varias tarjetas, de una vez.
+
+    Generación Solar pedía las dos cosas por cada tarjeta visible —diez tarjetas
+    eran veinte peticiones al Worker de Cloudflare— y lo repetía cada 5 minutos.
+    Acá van todas en una respuesta, calculadas en paralelo y con el mismo caché
+    que los endpoints de a una.
+
+    `detalle` es `{}` si esa tarjeta falló (la vista lo pinta como "sin datos");
+    `irradiancia` es `None` si no llegó a tiempo, y la vista conserva la anterior.
+    """
+    pool = ThreadPoolExecutor(max_workers=len(ids) * 2 or 1)
+    try:
+        detalles = {i: pool.submit(_en_hilo, monitoreo_detalle, i, incluir_30d=False) for i in ids}
+        irradiancias = {i: pool.submit(_en_hilo, irradiancia_poa, i) for i in ids}
+        wait(detalles.values())
+        wait(irradiancias.values(), timeout=GRACIA_IRRADIANCIA_S)
+        return {
+            str(i): {
+                "detalle": detalles[i].result() or {},
+                "irradiancia": irradiancias[i].result() if irradiancias[i].done() else None,
+            }
+            for i in ids
+        }
+    finally:
+        # Sin esperar: una estación colgada termina sola, no retiene la respuesta.
+        pool.shutdown(wait=False)
 
 
 def irradiancia_poa(proyecto_id: int) -> dict:

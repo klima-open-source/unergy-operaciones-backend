@@ -97,6 +97,16 @@ class MonitoreoViewSet(viewsets.GenericViewSet):
             return Response(monitoreo_queryset.build_generation(
                 sub_project, desde or hoy.replace(day=1), hasta or hoy
             ))
+        if accion == "getMonthlyGeneration":
+            # Varias plantas, totales por mes: ver `build_generacion_mensual`.
+            plantas = [s for s in (request.query_params.get("sub_projects") or "").split(",") if s]
+            if not plantas or desde is None or hasta is None:
+                raise ValidationError("sub_projects, date_from y date_to son requeridos")
+            if len(plantas) > monitoreo_queryset.MAX_PLANTAS_MENSUAL:
+                raise ValidationError(
+                    f"Como máximo {monitoreo_queryset.MAX_PLANTAS_MENSUAL} plantas por consulta"
+                )
+            return Response(monitoreo_queryset.build_generacion_mensual(plantas, desde, hasta))
         if accion == "getFMOData":
             if not sub_project:
                 return Response({"ok": False, "error": "sub_project requerido"})

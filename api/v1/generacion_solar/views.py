@@ -86,6 +86,16 @@ class GeneracionSolarViewSet(viewsets.GenericViewSet):
     def monitoring(self, request):
         return Response(sv.monitoreo_flota())
 
+    @action(detail=False, methods=["get"], url_path="monitoring/tarjetas")
+    def monitoring_tarjetas(self, request):
+        """`?ids=1,2,3`: detalle e irradiancia de varias tarjetas en una petición."""
+        crudos = [x for x in (request.query_params.get("ids") or "").split(",") if x.strip()]
+        if not crudos or not all(x.strip().isdigit() for x in crudos):
+            raise ValidationError({"ids": "Lista de ids separada por comas."})
+        if len(crudos) > sv.MAX_TARJETAS:
+            raise ValidationError({"ids": f"Como máximo {sv.MAX_TARJETAS}."})
+        return Response(sv.tarjetas(list(dict.fromkeys(int(x) for x in crudos))))
+
     @action(
         detail=False, methods=["get"],
         url_path=r"monitoring/(?P<proyecto_id>[0-9]+)",
