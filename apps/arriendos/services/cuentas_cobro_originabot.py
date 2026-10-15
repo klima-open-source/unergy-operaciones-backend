@@ -214,9 +214,9 @@ def _consultar(periodo: str, ob: ClienteOriginabot) -> tuple[list[CuentaTsf], li
     return cuentas, errores, sin_minigranja
 
 
-def consultar(periodo: str, token: str) -> dict:
+def consultar(periodo: str) -> dict:
     """Las cuentas de cobro de TSF del período, por planta. Ver el docstring del módulo."""
-    cuentas, errores, sin_minigranja = _consultar(periodo, ClienteOriginabot(token))
+    cuentas, errores, sin_minigranja = _consultar(periodo, ClienteOriginabot())
     return {
         "periodo": periodo,
         "cuentas": [c.como_dict() for c in cuentas],
@@ -238,14 +238,14 @@ def _nombre_archivo(cuenta: CuentaTsf, planta: Proyecto, url: str) -> str:
     return documentos_service.nombre_seguro("_".join(p for p in partes if p) + ext, f"pago_{cuenta.pago_id}{ext}")
 
 
-def importar(periodo: str, token: str, pago_ids: list[str]) -> dict:
+def importar(periodo: str, pago_ids: list[str]) -> dict:
     """Descarga y guarda el documento de los pagos elegidos. Ver el docstring del módulo.
 
     Se vuelve a consultar TSF aquí y no se reciben URLs de la pantalla: las
     firmadas vencen en una hora, y así solo se descarga lo que TSF dice que es
     de ese período y esas plantas.
     """
-    ob = ClienteOriginabot(token)
+    ob = ClienteOriginabot()
     elegidos = set(pago_ids)
     cuentas, errores, _ = _consultar(periodo, ob)
     a_importar = [c for c in cuentas if c.pago_id in elegidos and c.documento_url]

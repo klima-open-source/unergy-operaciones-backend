@@ -315,19 +315,17 @@ class ArriendoViewSet(viewsets.GenericViewSet):
         GET: lo que hay en TSF para cada planta con contrato de arriendo, con su
         valor y si tiene documento; no escribe. POST `{pagos: [uuid…]}`: descarga
         el documento de esos pagos y lo guarda. Ver
-        `apps/arriendos/services/cuentas_cobro_originabot.py`. Con el token de
-        Unergy Auth de quien pide: originabot decide con sus permisos.
+        `apps/arriendos/services/cuentas_cobro_originabot.py`. Con el usuario
+        de Operaciones en originabot, sea quien sea el que pide.
         """
         _periodo(periodo)
-        if not request.auth:
-            raise PermissionDenied("Para traer de TSF entra con Unergy Auth.")
         try:
             if request.method == "GET":
-                return Response(cuentas_cobro_originabot.consultar(periodo, request.auth))
+                return Response(cuentas_cobro_originabot.consultar(periodo))
             pagos = request.data.get("pagos")
             if not isinstance(pagos, list) or not all(isinstance(p, str) for p in pagos) or not pagos:
                 raise ValidationError({"pagos": "Lista de ids de pago de TSF."})
-            return Response(cuentas_cobro_originabot.importar(periodo, request.auth, pagos))
+            return Response(cuentas_cobro_originabot.importar(periodo, pagos))
         except OriginabotError as exc:
             raise NoProcesable(str(exc))
 

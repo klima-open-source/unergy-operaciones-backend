@@ -114,7 +114,7 @@ def ob(monkeypatch):
     from apps.arriendos.services import cuentas_cobro_originabot as svc
 
     falso = ObFalso()
-    monkeypatch.setattr(svc, "ClienteOriginabot", lambda token: falso)
+    monkeypatch.setattr(svc, "ClienteOriginabot", lambda: falso)
     return falso
 
 
@@ -143,7 +143,7 @@ def test_consulta_una_cuenta_por_pago_y_planta_del_periodo(ob):
 
     norte4 = _planta("MGS 0077 Chiriguaná Norte 4", 200)
     norte2 = _planta("MGS 0075 Chiriguaná Norte 2", 223)
-    r = _svc().consultar("2026-09", "token")
+    r = _svc().consultar("2026-09")
 
     assert r["errores"] == []
     cuentas = {c["proyecto_id"]: c for c in r["cuentas"]}
@@ -162,10 +162,10 @@ def test_un_pago_sin_documento_se_muestra_pero_no_se_importa(ob):
     from apps.arriendos import models as ar
 
     _planta("MGS 0077 Chiriguaná Norte 4", 200)
-    r = _svc().consultar("2026-10", "token")
+    r = _svc().consultar("2026-10")
     assert [(c["estado"], c["tiene_documento"]) for c in r["cuentas"]] == [("wait_for_document", False)]
 
-    hecho = _svc().importar("2026-10", "token", [PAGO_OCT_SIN_DOC["id"]])
+    hecho = _svc().importar("2026-10", [PAGO_OCT_SIN_DOC["id"]])
     assert (hecho["importados"], hecho["sin_documento"]) == (0, 1)
     assert not ar.ArrDocumento.objects.exists()
 
@@ -175,7 +175,7 @@ def test_importar_baja_el_archivo_una_vez_y_guarda_un_documento_por_planta(ob, t
 
     norte4 = _planta("MGS 0077 Chiriguaná Norte 4", 200)
     _planta("MGS 0075 Chiriguaná Norte 2", 223)
-    hecho = _svc().importar("2026-09", "token", [PAGO_SEP["id"]])
+    hecho = _svc().importar("2026-09", [PAGO_SEP["id"]])
 
     assert hecho["importados"] == 2
     assert len(ob.descargas) == 1
@@ -187,8 +187,8 @@ def test_importar_baja_el_archivo_una_vez_y_guarda_un_documento_por_planta(ob, t
     assert open(doc.ruta_local, "rb").read() == b"%PDF-1.4 cuenta"
 
     # Ya importado: la consulta lo dice, y repetir no duplica.
-    assert all(c["importado"] for c in _svc().consultar("2026-09", "token")["cuentas"])
-    _svc().importar("2026-09", "token", [PAGO_SEP["id"]])
+    assert all(c["importado"] for c in _svc().consultar("2026-09")["cuentas"])
+    _svc().importar("2026-09", [PAGO_SEP["id"]])
     assert ar.ArrDocumento.objects.count() == 2
 
 
@@ -198,6 +198,6 @@ def test_solo_las_plantas_de_la_tabla_de_arriendos(ob):
     _planta("Sin minigranja", None)
     _planta("Sin arriendo", 200, con_arriendo=False)
     _planta("En desarrollo", 223, estado="en_desarrollo")
-    r = _svc().consultar("2026-09", "token")
+    r = _svc().consultar("2026-09")
     assert r["cuentas"] == []
     assert r["sin_minigranja"] == ["Sin minigranja"]

@@ -532,7 +532,7 @@ class ComercialViewSet(viewsets.GenericViewSet):
         datos = dict(entrada.validated_data)
         resultado = escritura.firmar(oferta, datos, request.user)
         # El PPA nace aquí con sus plantas: se crea también en originabot.
-        originabot_sync.sincronizar(resultado.contrato, request.auth)
+        originabot_sync.sincronizar(resultado.contrato)
         return Response({
             "oferta": consultas.oferta_completa(oferta),
             "ppa_contrato_id": resultado.contrato.id,

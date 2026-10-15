@@ -18,7 +18,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef, Q
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 
 from api.exceptions import Conflict, NoProcesable, ServicioNoDisponible
@@ -609,13 +609,11 @@ class ProyectoViewSet(viewsets.GenericViewSet):
 
         Si la planta no la tiene guardada, la resuelve una vez (nombre exacto o
         código TSF único, ver `apps/proyectos/services/originabot_minigranjas.py`)
-        y la guarda. Con el token de Unergy Auth de quien sincroniza: sin él, 403.
+        y la guarda. Con el usuario de Operaciones en originabot.
         """
         proyecto = self._simple(pk)
-        if not request.auth:
-            raise PermissionDenied("Para sincronizar con TSF entra con Unergy Auth.")
         try:
-            minifarm = minigranjas_svc.minigranja_de(proyecto, ClienteOriginabot(request.auth))
+            minifarm = minigranjas_svc.minigranja_de(proyecto, ClienteOriginabot())
         except OriginabotError as exc:
             raise NoProcesable(str(exc))
         if minifarm is None:
