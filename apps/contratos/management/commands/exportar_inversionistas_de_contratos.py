@@ -6,7 +6,7 @@
 Para qué. Desde el paso 4b la planta y el inversionista de un contrato se leen de
 `contrato_proyectos` y de la participación. Las columnas viejas de `contratos`
 (`proyecto_id`, `inversionista_id`, `inversionista_nombre`) siguen en la base hasta
-`contratos/0019`, que las borra. La planta y el `inversionista_id` los vigila la
+`contratos/0023`, que las borra. La planta y el `inversionista_id` los vigila la
 propia migración; lo que solo vive ahí es el NOMBRE escrito a mano. Este comando
 saca, por contrato, lo escrito al lado de lo que dice hoy la participación:
 

@@ -265,8 +265,7 @@ class Contrato(Timer):
     # La planta y el inversionista ya no son columnas que Django lea: viven en
     # `contrato_proyectos` (planta y, en representación, la participación). Ver los
     # atajos `proyecto` / `inversionista` más abajo. Las columnas `proyecto_id`,
-    # `inversionista_id` e `inversionista_nombre` siguen en la base, sin escribirse,
-    # hasta `contratos/0023` (paso 4c).
+    # `inversionista_id` e `inversionista_nombre` se borraron en `contratos/0023`.
     # Las tarifas viven en el servicio (base e índice) y en `tarifas` (valor por
     # periodo): `tarifa_base`, `tarifa_representacion`, `tarifa_cgm`, `tarifa_admin`,
     # `tarifa_mensual` y los cuatro `indexacion_*` son atajos (ver `ATAJOS_DE_TARIFA`),
@@ -705,8 +704,8 @@ class ContratoProyecto(models.Model):
     proyecto_id)`, diferida al COMMIT para que la fusión de proyectos pueda mover
     las dos tablas en la misma transacción (`contratos/0017`).
 
-    Mientras convivan con `contratos.proyecto_id` e `inversionista_id`, las filas
-    de los contratos de servicio las deriva `Contrato.save()`
+    Las filas de los contratos de servicio las escribe `Contrato.save()` con lo
+    asignado a sus atajos `proyecto` / `inversionista`
     (`services/contrato_proyectos.py`)."""
 
     id = models.BigAutoField(primary_key=True)
