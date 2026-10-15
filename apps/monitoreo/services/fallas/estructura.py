@@ -10,6 +10,8 @@ Las fallas viejas (planas) NO dependen de esto; la estructura es aditiva.
 """
 from __future__ import annotations
 
+from enum import StrEnum
+
 # Categorías de sistema. `tipo` describe qué inputs adicionales pide cada categoría:
 #   - "opcion":   una sola opción de `opciones` (red, eventos_adversos)
 #   - "equipo":   una sola opción de `opciones` + flags de frontera
@@ -89,6 +91,30 @@ ESTRUCTURA_FALLAS: list[dict] = [
                 "etiqueta": "Pérdida de comunicación (internet)",
                 "alarma": "comunicacion_inversores",
             },
+        ],
+    },
+    {
+        "codigo": "equipos",
+        "etiqueta": "Equipos de planta",
+        "icono": "pi pi-cog",
+        "color_hex": "#8B5CF6",
+        "tipo": "opcion",
+        "descripcion": "Equipos de la planta fuera de la medición comercial y de los inversores.",
+        "opciones": [
+            {"codigo": "smartlogger", "etiqueta": "Smartlogger"},
+            {
+                "codigo": "tracker",
+                "etiqueta": "Tracker",
+                "requiere_detalle": True,
+                "detalle_label": "¿Cuál tracker? (fila, número…)",
+            },
+            {
+                "codigo": "string",
+                "etiqueta": "String",
+                "requiere_detalle": True,
+                "detalle_label": "¿Cuál string? (inversor y número…)",
+            },
+            {"codigo": "estacion_meteorologica", "etiqueta": "Estación meteorológica"},
         ],
     },
     {
@@ -265,3 +291,30 @@ def requiere_detalle(categoria_codigo: str | None, subtipo_codigo: str | None) -
         return False
     op = get_opcion(categoria_codigo, subtipo_codigo)
     return bool(op and op.get("requiere_detalle"))
+
+
+class EquipoFalla(StrEnum):
+    """El equipo físico afectado. Se deduce de la clasificación: no se pregunta
+    dos veces lo que ya dice el sistema afectado."""
+
+    INVERSOR = "inversor"
+    SMARTLOGGER = "smartlogger"
+    TRACKER = "tracker"
+    STRING = "string"
+    MEDIDOR = "medidor"
+    ESTACION_METEOROLOGICA = "estacion_meteorologica"
+
+
+_MEDIDORES_FRONTERA = {"medidor_principal", "medidor_respaldo"}
+_CODIGOS_EQUIPO = {e.value for e in EquipoFalla}
+
+
+def equipo_de(categoria_codigo: str | None, subtipo_codigo: str | None) -> EquipoFalla | None:
+    """El equipo afectado según la clasificación, o `None` si no es un equipo."""
+    if categoria_codigo == "inversores":
+        return EquipoFalla.INVERSOR
+    if categoria_codigo == "frontera" and subtipo_codigo in _MEDIDORES_FRONTERA:
+        return EquipoFalla.MEDIDOR
+    if categoria_codigo == "equipos" and subtipo_codigo in _CODIGOS_EQUIPO:
+        return EquipoFalla(subtipo_codigo)
+    return None

@@ -11,13 +11,13 @@ Alembic quedo congelado en la revision 143 -- ver apps/README.md.
 """
 
 from django.db import models
+from django.db.models import F, Q
 from django.utils import timezone
 
 from apps.plataforma.models import Timer
 
 class Proyecto(Timer):
     id = models.BigAutoField(primary_key=True)
-    portafolio = models.ForeignKey("Portafolio", on_delete=models.DO_NOTHING, db_column="portafolio_id", null=True, blank=True, related_name="proyectos")
     nombre_comercial = models.CharField(max_length=255)
     sub_project = models.CharField(max_length=50, null=True, blank=True)
     topico_liquidaciones = models.CharField(max_length=100, null=True, blank=True)
@@ -145,13 +145,45 @@ class Proyecto(Timer):
 
 
 class Portafolio(Timer):
+    """Una agrupación de plantas (para los informes «Por portafolio»).
+
+    Una planta puede estar en varios portafolios: la pertenencia es una fila de
+    `portafolio_proyectos` (modelo de Sara, 2026-10-15). Antes era una sola,
+    `proyectos.portafolio_id`; esa columna y `portafolios.activo` siguen en la
+    base sin leerse hasta `proyectos/0015`.
+    """
+
     id = models.BigAutoField(primary_key=True)
     nombre = models.CharField(max_length=255)
-    activo = models.BooleanField(default=True)
+    proyectos = models.ManyToManyField(
+        "Proyecto", through="PortafolioProyecto", related_name="portafolios"
+    )
 
     class Meta:
         db_table = "portafolios"
         unique_together = [("nombre",)]
+
+
+class PortafolioProyecto(models.Model):
+    """Que una planta está en un portafolio. Una fila por pareja."""
+
+    id = models.BigAutoField(primary_key=True)
+    portafolio = models.ForeignKey(
+        Portafolio, on_delete=models.CASCADE, db_column="portafolio_id",
+        related_name="pertenencias",
+    )
+    proyecto = models.ForeignKey(
+        "Proyecto", on_delete=models.CASCADE, db_column="proyecto_id",
+        related_name="pertenencias_portafolio",
+    )
+
+    class Meta:
+        db_table = "portafolio_proyectos"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["portafolio", "proyecto"], name="uq_portafolio_proyecto"
+            ),
+        ]
 
 
 class ProyectoInfoTecnica(Timer):
@@ -202,17 +234,154 @@ class ProyectoInversor(Timer):
         unique_together = [("nombre", "proyecto")]
 
 
+class Inversionista(Timer):
+    """Un cliente en su papel de inversionista: una fila por cliente.
+
+    `clientes` es la ficha de cualquier tercero (comprador, arrendador, operador
+    de red…); no todo cliente es inversionista. Esta tabla dice cuáles sí, y es a
+    la que apunta su participación en cada planta (`proyecto_inversionistas`).
+    El nombre y el NIT se leen de la ficha del cliente: aquí no se copian.
+
+    Diagrama de Sara (2026-10-13). La escribe `ProyectoInversionista.save()` al
+    registrar una participación con un cliente que todavía no era inversionista.
+    Las participaciones anteriores se vincularon con `poblar_inversionistas`
+    (borrado en el paso 3, `proyectos/0010`; está en el historial de git)."""
+
+    id = models.BigAutoField(primary_key=True)
+    cliente = models.OneToOneField(
+        "clientes.Cliente", on_delete=models.PROTECT, db_column="cliente_id",
+        related_name="inversionista",
+    )
+
+    class Meta:
+        db_table = "inversionistas"
+
+
+class Patrimonio(Timer):
+    """Un patrimonio autónomo (fiducia) por el que un inversionista tiene su parte de
+    una planta. Modelo de Sara (2026-10-14).
+
+    El DUEÑO de la participación es el inversionista (Ayura, Solenium…); al
+    patrimonio es a quien se le factura y se le liquida. Por eso el patrimonio no es
+    un inversionista: la participación apunta a él (`ProyectoInversionista.patrimonio`).
+
+    Jerarquía de dos niveles: un patrimonio GENERAL (la fiduciaria: Fiduciaria
+    Bancolombia, Fideicomisos BBVA) no tiene `padre`; un SUBPATRIMONIO (P.A. Valle
+    de Gandalf, código 17434) apunta a su general. Una planta se puede tener por un
+    subpatrimonio o directo por un general.
+
+    `cliente` es su ficha (razón social, NIT): lo que se factura apunta a
+    `clientes`. Quién lo contrató no se guarda: son los inversionistas de sus
+    participaciones."""
+
+    id = models.BigAutoField(primary_key=True)
+    nombre = models.CharField(max_length=255)
+    codigo = models.CharField(max_length=20, null=True, blank=True)
+    padre = models.ForeignKey(
+        "self", on_delete=models.PROTECT, db_column="padre_id", null=True, blank=True,
+        related_name="subpatrimonios",
+    )
+    cliente = models.ForeignKey(
+        "clientes.Cliente", on_delete=models.PROTECT, db_column="cliente_id",
+        null=True, blank=True, related_name="patrimonios",
+    )
+
+    class Meta:
+        db_table = "patrimonios"
+        ordering = ["nombre"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["codigo"], condition=Q(codigo__isnull=False),
+                name="uq_patrimonios_codigo",
+            ),
+            models.CheckConstraint(
+                name="ck_patrimonios_padre", condition=~Q(padre=F("id")),
+            ),
+        ]
+
+
 class ProyectoInversionista(Timer):
+    """La participación de un inversionista en una planta, con su porcentaje.
+
+    Apunta al inversionista (diagrama de Sara, 2026-10-13); el cliente se alcanza a
+    través de él. Un mismo inversionista no está dos veces en la misma planta.
+
+    `patrimonio` (opcional): el patrimonio autónomo por el que el inversionista
+    tiene su parte. El inversionista sigue siendo el dueño; al patrimonio se le
+    factura y liquida (2026-10-14). Reemplaza a la bandera `es_patrimonio_autonomo`,
+    que nadie llenaba ni leía (`proyectos/0012`).
+
+    `cliente` y `cliente_id` siguen existiendo como atajos de lectura y escritura
+    --la API de inversionistas del proyecto recibe y devuelve `cliente_id`--: al
+    asignar un cliente, `save()` busca o crea su inversionista. En consultas a la
+    base el camino es `inversionista__cliente…`; `cliente_id` NO es una columna."""
+
     id = models.BigAutoField(primary_key=True)
     proyecto = models.ForeignKey("Proyecto", on_delete=models.DO_NOTHING, db_column="proyecto_id", related_name="inversionistas")
-    cliente = models.ForeignKey("clientes.Cliente", on_delete=models.DO_NOTHING, db_column="cliente_id", related_name="proyecto_inversionistas_por_cliente_id")
+    inversionista = models.ForeignKey(
+        "Inversionista", on_delete=models.PROTECT, db_column="inversionista_id",
+        related_name="participaciones",
+    )
     porcentaje_participacion = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
-    es_patrimonio_autonomo = models.BooleanField(default=False)
+    patrimonio = models.ForeignKey(
+        "Patrimonio", on_delete=models.PROTECT, db_column="patrimonio_id",
+        null=True, blank=True, related_name="participaciones",
+    )
     fecha_inicio = models.DateField(null=True, blank=True)
     fecha_fin = models.DateField(null=True, blank=True)
 
     class Meta:
         db_table = "proyecto_inversionistas"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["proyecto", "inversionista"], name="uq_proyecto_inversionistas",
+            ),
+            # Redundante con la PK, a propósito: es el destino de la llave compuesta
+            # de `contrato_proyectos`, que exige que la participación sea de la
+            # misma planta que el contrato (`contratos/0017`).
+            models.UniqueConstraint(
+                fields=["id", "proyecto"], name="uq_proyecto_inversionistas_id_proyecto",
+            ),
+        ]
+
+    @property
+    def cliente_id(self):
+        pendiente = getattr(self, "_cliente_pendiente", None)
+        if pendiente is not None:
+            return pendiente
+        return self.inversionista.cliente_id if self.inversionista_id else None
+
+    @cliente_id.setter
+    def cliente_id(self, valor):
+        self._cliente_pendiente = valor
+
+    @property
+    def cliente(self):
+        if getattr(self, "_cliente_pendiente", None) is not None:
+            from apps.clientes.models import Cliente
+
+            return Cliente.objects.get(pk=self._cliente_pendiente)
+        return self.inversionista.cliente if self.inversionista_id else None
+
+    @cliente.setter
+    def cliente(self, cliente):
+        self._cliente_pendiente = cliente.pk if cliente is not None else None
+
+    def save(self, *args, **kwargs):
+        pendiente = getattr(self, "_cliente_pendiente", None)
+        if pendiente is not None:
+            self.inversionista, _ = Inversionista.objects.get_or_create(cliente_id=pendiente)
+            self._cliente_pendiente = None
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = (
+                    set(kwargs["update_fields"]) - {"cliente", "cliente_id"}
+                ) | {"inversionista"}
+        es_nueva = self._state.adding
+        super().save(*args, **kwargs)
+        if es_nueva:
+            from apps.contratos.services.contrato_proyectos import completar_pendientes_de_planta
+
+            completar_pendientes_de_planta(self)
 
 
 class ProyectoPendienteIgnorado(models.Model):

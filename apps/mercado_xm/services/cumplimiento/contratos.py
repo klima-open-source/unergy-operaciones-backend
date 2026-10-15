@@ -21,21 +21,20 @@ from apps.ppa.models import PpaCompromisoEnergia, PpaContrato
 
 from .anual import _anual_meses_para_contrato, _build_fetch_sets
 from .consultas import _query_contratos_venta, _resolve_gescon
-from .periodos import _responsable_payload
 from .resumen import _matriz_un_contrato
 from .xm_api import _fetch_month, _fetch_range, _fetch_recent_avg, _unergy_token
 
 logger = logging.getLogger("operaciones.cumplimiento")
 
 
-def anual_matriz_contratos(year: int, incluir_todos: bool = False) -> dict:
+def anual_matriz_contratos(year: int) -> dict:
     """Lista ligera de contratos de venta para la matriz anual, SIN generación.
 
     Carga instantánea: el frontend pinta las filas y después pide el detalle de
     cada una a `/anual-matriz/contrato/{id}`. Es lo que evita el timeout del
     endpoint agregado cuando hay muchos contratos.
     """
-    contratos = _query_contratos_venta(year, solo_relevantes=not incluir_todos)
+    contratos = _query_contratos_venta(year)
     return {
         "year": year,
         "contratos": [
@@ -44,7 +43,6 @@ def anual_matriz_contratos(year: int, incluir_todos: bool = False) -> dict:
                 "nombre_interno": c.nombre_interno,
                 "numero_codigo_contrato": c.numero_codigo_contrato,
                 "comprador_nombre": c.comprador_nombre,
-                **_responsable_payload(c),
             }
             for c in contratos
         ],

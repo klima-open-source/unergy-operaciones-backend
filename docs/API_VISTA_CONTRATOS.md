@@ -41,13 +41,9 @@ curl -X POST "https://operaciones.unergy.io/api/v1/auth/token" \
 | Parámetro | Obligatorio | Default | Qué hace |
 |---|---|---|---|
 | `fecha` | **sí** | — | El día de la foto, `YYYY-MM-DD`. Ver §3. |
-| `responsable` | no | `Unergy` | Empresa responsable a mostrar. `todos` o vacío = sin filtro. Ver §4. |
-| `incluir_todos` | no | `false` | Incluir contratos de responsables marcados como no relevantes. |
 
 ```
-?fecha=2026-08-20                      → los de Unergy ese día
-?fecha=2026-08-20&responsable=todos    → todos los responsables
-?fecha=2026-09-01&responsable=Externo  → otro día, otro responsable
+?fecha=2026-08-20                      → todos los contratos de venta ese día
 ```
 
 ---
@@ -68,15 +64,12 @@ son mensuales por naturaleza.
 
 ---
 
-## 4. El filtro de responsable es estricto
+## 4. Trae todos los contratos
 
-`responsable=Unergy` deja **solo** los contratos cuya empresa responsable es
-Unergy. Un contrato **sin responsable asignado tampoco pasa** — es una decisión
-deliberada: pedir "los de Unergy" y recibir además los que nadie asignó daría un
-universo distinto al pedido.
-
-Nada desaparece en silencio: lo que quedó fuera viene en `excluidos`, con nombre
-y motivo. Si un total no cuadra, mirá ahí primero.
+Trae todos los contratos de venta vigentes ese día. Hasta el 2026-10-14 el
+parámetro `responsable` (por defecto `Unergy`) dejaba fuera los que gestiona un
+tercero y los listaba en `excluidos`; se quitó junto con `ppa_responsables`, y con
+él desaparecieron `responsable`, `incluir_todos` y `excluidos` de la respuesta.
 
 ---
 
@@ -85,7 +78,6 @@ y motivo. Si un total no cuadra, mirá ahí primero.
 ```json
 {
   "fecha": "2026-08-20",
-  "responsable": "Unergy",
   "mes_consultado": "2026-08",
   "totales": {
     "n_contratos": 12,
@@ -101,7 +93,6 @@ y motivo. Si un total no cuadra, mirá ahí primero.
       "contrato": "Terpel 1 (Ayurá 1)",
       "codigo": "UNERGY 001-2023",
       "comprador": "TERPEL ENERGÍA S.A.S. E.S.P.",
-      "responsable": "Unergy",
       "portafolio": "Ayurá",
       "min_mes_mwh": 1345.0,
       "max_mes_mwh": 2201.0,
@@ -125,9 +116,6 @@ y motivo. Si un total no cuadra, mirá ahí primero.
       ]
     }
   ],
-  "excluidos": [
-    {"contrato": "BIA Naos 1", "responsable": "Externo", "n_plantas": 1, "motivo": "responsable"}
-  ],
   "avisos": ["Lumina: sin plantas asignadas el 2026-08-20"]
 }
 ```
@@ -141,7 +129,7 @@ y motivo. Si un total no cuadra, mirá ahí primero.
 | `min_mes_mwh` / `max_mes_mwh` | Compromiso mínimo y máximo del contrato **para ese mes**, en MWh. `null` = no hay compromiso cargado — **no es cero** |
 | `gen_prom_total_mwh` | Suma de los promedios de sus plantas, ponderada por el % de despacho. `null` si a alguna planta le falta el promedio (ver abajo) |
 | `estado` | `ok` · `deficit` · `excedente` · `sin_compromisos` · `sin_datos` |
-| `portafolio` | Portafolio dominante de las plantas. `Ayurá (+1)` = hay plantas de más de un portafolio |
+| `portafolio` | Portafolio dominante entre todos los de sus plantas (una planta puede estar en varios). `Ayurá (+1)` = hay más de un portafolio |
 
 **De la planta**
 
@@ -166,7 +154,6 @@ Un hueco callado se lee como "no había nada", que es peor que un error visible.
 | Planta sin promedio calculado | `gen_prom_mwh_mes: null` + marca `falta promedio`, y `totales.plantas_sin_promedio` los cuenta |
 | Contrato al que le falta el promedio de alguna planta | `gen_prom_total_mwh: null` y `estado: "sin_datos"`. Sumar a medias daría un déficit falso |
 | Contrato vigente pero sin plantas ese día | aparece con `n_plantas: 0` + una línea en `avisos` |
-| Contrato de otro responsable | no está en `contratos`, sí en `excluidos` |
 
 **Si ves muchos `plantas_sin_promedio`**, el promedio todavía no se ha calculado
 para esas plantas. Se resuelve corriendo, una vez:
@@ -204,9 +191,6 @@ for c in d["contratos"]:
     for p in c["plantas"]:
         gen = f"{p['gen_prom_mwh_mes']:,.1f}" if p["gen_prom_mwh_mes"] is not None else "—"
         print(f"   {p['planta']:<38} {gen:>9} MWh/mes  {p['pct_asignado']:.0%}")
-
-for e in d["excluidos"]:
-    print(f"fuera por responsable: {e['contrato']} ({e['responsable']})")
 ```
 
 ### Pasarlo a Excel

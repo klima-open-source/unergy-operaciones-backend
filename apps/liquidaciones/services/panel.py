@@ -81,34 +81,40 @@ def liquidaciones_en_rango(proyecto_ids, desde: date, hasta: date) -> dict:
 
 
 def clientes_por_inversionista(pi_ids) -> dict:
-    """`{proyecto_inversionista_id: {cliente_id, nombre, tasas…}}`.
+    """`{proyecto_inversionista_id: {cliente_id, nombre, tasas…}}`: a QUIÉN se le
+    factura cada participación, y con sus tasas.
 
-    Las cuatro tasas alimentan el desglose de impuestos de las facturas de
-    servicio, que se calcula en tiempo de LECTURA.
+    Es el destinatario (`proyectos.services.patrimonios.destinatario`): el
+    patrimonio autónomo por el que se tiene la parte, si hay uno; si no, el
+    inversionista. Las cuatro tasas alimentan el desglose de impuestos de las
+    facturas de servicio, que se calcula en tiempo de LECTURA.
     """
+    from apps.proyectos.services import patrimonios
+
     salida = {}
     if not pi_ids:
         return salida
     filas = (
         py_models.ProyectoInversionista.objects
         .filter(id__in=pi_ids)
-        .select_related("cliente")
-        .values_list(
-            "id", "cliente_id", "cliente__razon_social_nombre",
-            "cliente__iva_pct", "cliente__retencion_pct",
-            "cliente__reteiva_pct", "cliente__reteica_pct",
-        )
+        .select_related("inversionista__cliente", "patrimonio__cliente",
+                        "patrimonio__padre__cliente")
     )
-    for pi_id, cliente_id, razon, iva, retencion, reteiva, reteica in filas:
-        salida[pi_id] = {
-            "cliente_id": cliente_id,
-            "cliente_nombre": razon,
-            "iva_pct": float(iva) if iva is not None else None,
-            "retencion_pct": float(retencion) if retencion is not None else None,
-            "reteiva_pct": float(reteiva) if reteiva is not None else None,
-            "reteica_pct": float(reteica) if reteica is not None else None,
+    for participacion in filas:
+        cliente = patrimonios.destinatario(participacion)
+        salida[participacion.id] = {
+            "cliente_id": cliente.id,
+            "cliente_nombre": cliente.razon_social_nombre,
+            "iva_pct": _tasa(cliente.iva_pct),
+            "retencion_pct": _tasa(cliente.retencion_pct),
+            "reteiva_pct": _tasa(cliente.reteiva_pct),
+            "reteica_pct": _tasa(cliente.reteica_pct),
         }
     return salida
+
+
+def _tasa(valor):
+    return float(valor) if valor is not None else None
 
 
 def proyectos_sin_panel(proyecto_ids_con_panel) -> list[dict]:

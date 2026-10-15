@@ -3,9 +3,8 @@
 Puerto de `get_descubrimientos` (147 líneas). Cruza los deltas de energía del
 cumplimiento contra el precio promedio de bolsa del mes.
 
-**Sin filtro de responsable, a propósito.** No es una vista de /mem/cumplimiento
-y su trabajo es destapar exposición, no esconderla: `_contratos_vigentes` se
-llama con `solo_relevantes=False`.
+Cuenta todos los contratos PPA vigentes: su trabajo es destapar exposición, no
+esconderla.
 """
 
 from __future__ import annotations
@@ -14,7 +13,8 @@ import logging
 
 from django.db.models import Sum
 
-from apps.ppa.models import PpaCompromisoEnergia, PpaTarifa
+from apps.contratos.services import tarifas as tarifas_service
+from apps.ppa.models import PpaCompromisoEnergia
 from apps.proyectos.models import GeneracionDiaria
 
 from .consultas import _contratos_vigentes, _get_bolsa_avg, _resolve_gescon
@@ -29,9 +29,7 @@ def descubrimientos(year: int, month_from: int = 1, month_to: int = 12) -> dict:
     lee la base**: no llama a la API de Unergy, así que se puede pedir el año
     entero sin esperar.
     """
-    # Sin filtro de responsable: /descubrimientos no es una vista de
-    # /mem/cumplimiento y su chamba es destapar exposición, no esconderla.
-    contratos = _contratos_vigentes(year, solo_relevantes=False)
+    contratos = _contratos_vigentes(year)
 
     meses_data = []
     gran_total_compras_cop = 0.0
@@ -49,11 +47,10 @@ def descubrimientos(year: int, month_from: int = 1, month_to: int = 12) -> dict:
         }
 
         tarifas = {
-            t.contrato_id: float(t.tarifa)
-            for t in PpaTarifa.objects.filter(
-                contrato_id__in=[c.id for c in contratos], año=year, mes=m,
-            )
-            if t.tarifa is not None
+            contrato_id: float(valor)
+            for contrato_id, valor in tarifas_service.precios_ppa(
+                year, m, contrato_ids=[c.id for c in contratos],
+            ).items()
         }
 
         # Generación real del mes, sumada desde `generacion_diaria`.

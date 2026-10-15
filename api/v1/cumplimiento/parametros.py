@@ -55,7 +55,7 @@ _FALSOS = frozenset({"0", "false", "no", "off", "f", "n"})
 
 
 def bandera(request, nombre, defecto=False):
-    """`?incluir_todos=true`. El mismo juego de valores que aceptaba FastAPI.
+    """`?refrescar=true`. El mismo juego de valores que aceptaba FastAPI.
 
     **Un valor que no sea booleano da 422, no `False`.** Antes cualquier cosa
     fuera de la lista de verdaderos caía a `False` en silencio, así que un

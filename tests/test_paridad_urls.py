@@ -51,7 +51,6 @@ PREFIJOS_PORTADOS = [
     "/api/v1/informes",
     "/api/v1/liquidaciones",
     "/api/v1/liquidaciones-api",
-    "/api/v1/mandato-inversionistas",
     "/api/v1/mandatos",
     "/api/v1/mapa",
     "/api/v1/monitoreo",
@@ -88,6 +87,9 @@ PREFIJOS_PORTADOS = [
 #       frontend. Ver apps/monitoreo/migrations/0005_eliminar_mantenimiento_impacto.py
 PREFIJOS_RETIRADOS = [
     "/api/v1/mantenimiento-impacto",
+    # 2026-10-13  La lista con la que la vista vieja de Costos › Mandatos adivinaba
+    # el inversionista. La vista se retiró: la reemplazó Liquidaciones › Mandatos.
+    "/api/v1/mandato-inversionistas",
 ]
 
 # Rutas SUELTAS retiradas. No van arriba porque su recurso sigue vivo: quitar
@@ -128,6 +130,20 @@ RUTAS_RETIRADAS = {
     ("/api/v1/reporte-energia/estado-quoia", "GET"),
     ("/api/v1/reporte-energia/estado-quoia", "POST"),
     ("/api/v1/liquidaciones/cargar-excel", "POST"),
+    # 2026-10-13  La vista vieja de Costos › Mandatos (carga del ZIP, tabla
+    # `mandatos`): se usó una sola vez y la reemplazó Liquidaciones › Mandatos
+    # (`/finanzas/mandatos`). De `/mandatos` queda solo la lectura del correo.
+    ("/api/v1/mandatos", "GET"),
+    ("/api/v1/mandatos", "POST"),
+    ("/api/v1/mandatos/resumen", "GET"),
+    ("/api/v1/mandatos/periodos", "GET"),
+    ("/api/v1/mandatos/{}", "PATCH"),
+    ("/api/v1/mandatos/{}", "DELETE"),
+    ("/api/v1/mandatos/upload-firmado", "POST"),
+    ("/api/v1/mandatos/{}/asociar-pdf", "POST"),
+    ("/api/v1/mandatos/upload-zip", "POST"),
+    ("/api/v1/mandatos/{}/pdf", "GET"),
+    ("/api/v1/mandatos/correos/{}/revertir", "POST"),
 }
 
 
@@ -392,6 +408,14 @@ def test_las_rutas_portadas_coinciden_con_las_de_fastapi():
         # Los servicios de una planta ya no se prenden a mano: salen de sus
         # contratos vigentes (rama `retiro-banderas`, 2026-10-07).
         ("/api/v1/proyectos/{}/servicios", "PATCH"),
+        # Cumplimiento ya no esconde los contratos que gestiona un tercero: el
+        # catalogo `ppa_responsables` y su administracion se fueron (2026-10-14,
+        # decision del equipo; rama `retiro-responsables`).
+        ("/api/v1/ppa/responsables", "GET"),
+        ("/api/v1/ppa/responsables", "POST"),
+        ("/api/v1/ppa/responsables/{}", "PATCH"),
+        ("/api/v1/ppa/responsables/{}", "DELETE"),
+        ("/api/v1/ppa/responsables/asignar", "POST"),
     }
 
     faltan = fastapi - django_ - RETIRADAS

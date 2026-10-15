@@ -102,7 +102,7 @@ def garantia_por_contrato(year: int, month: int, total_garantia: float, *,
     if resumen_fn is None:
         from apps.mercado_xm.services.cumplimiento.resumen import resumen as resumen_fn
 
-    contratos = resumen_fn(year, month, incluir_todos=True).get("contratos") or []
+    contratos = resumen_fn(year, month).get("contratos") or []
     pesos, meta = pesos_por_contrato_desde_resumen(contratos, plc_fn())
     filas = repartir(pesos, total_garantia)
     for f in filas:

@@ -7,9 +7,9 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('clientes', '0006_cliente_originabot_offtaker_id'),
-        ('contratos', '0013_partes_fuera_del_estado'),
-        ('ppa', '0003_corte_estado'),
-        ('proyectos', '0008_quitar_comunidad_del_proyecto'),
+        ('contratos', '0022_tarifas_fuera_del_estado'),
+        ('ppa', '0005_tarifas_fuera_del_estado'),
+        ('proyectos', '0013_portafolio_proyectos'),
     ]
 
     operations = [

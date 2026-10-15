@@ -31,6 +31,8 @@ from django.db.models import Q
 
 from apps.contabilidad.services.costos import elegir_contrato_representacion
 from apps.contratos.models import ContratoServicio
+from apps.contratos.services import tarifas as tarifas_service
+from apps.contratos.services.contrato_proyectos import CON_PLANTA
 from apps.contratos.services import grupos, vigencia
 from apps.plataforma.services.fechas import hoy_col
 from apps.proyectos.models import Proyecto, ProyectoInversionista
@@ -48,8 +50,8 @@ class Command(BaseCommand):
         contratos = ContratoServicio.objects.filter(
             vigencia.filtro_vivos(hoy),
             grupos.filtro_subservicio(grupos.REPRESENTACION),
-            proyecto__isnull=False,
-        )
+            proyectos_vinculados__isnull=False,
+        ).prefetch_related(CON_PLANTA, tarifas_service.con_tarifas())
         for c in contratos:
             if c.proyecto_id in plantas:
                 por_planta.setdefault(c.proyecto_id, []).append(c)
@@ -59,7 +61,7 @@ class Command(BaseCommand):
         participacion: dict[int, dict[str, float]] = {}
         for r in ProyectoInversionista.objects.filter(
             Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=hoy)
-        ).select_related("cliente"):
+        ).select_related("inversionista__cliente"):
             if r.porcentaje_participacion is None:
                 continue
             nombre = ((r.cliente.razon_social_nombre if r.cliente else "") or "").strip().upper()

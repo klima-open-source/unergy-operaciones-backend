@@ -15,6 +15,7 @@ la sugerencia se confirma contra la ubicación real de la planta.
 from django.core.management.base import BaseCommand
 
 from apps.contratos.models import Contrato
+from apps.contratos.services.contrato_proyectos import CON_PLANTA
 from apps.plataforma.services.coordenadas import diagnosticar
 from apps.proyectos.models import Proyecto
 
@@ -33,13 +34,12 @@ class Command(BaseCommand):
                 filas.append(("Proyecto", p.id, p.nombre_comercial or "", p.latitud, p.longitud, *d))
 
         contratos = (Contrato.objects.exclude(ubicacion_lat=None, ubicacion_lng=None)
-                     .select_related("proyecto").only("id", "servicio_aplica", "ubicacion_lat", "ubicacion_lng",
-                                                      "proyecto__nombre_comercial"))
+                     .prefetch_related(CON_PLANTA))
         for c in contratos:
             con_coordenadas += 1
             d = diagnosticar(c.ubicacion_lat, c.ubicacion_lng)
             if d:
-                planta = c.proyecto.nombre_comercial if c.proyecto_id else "sin proyecto"
+                planta = c.proyecto.nombre_comercial if c.proyecto else "sin proyecto"
                 filas.append(("Contrato", c.id, f"{c.servicio_aplica} · {planta}", c.ubicacion_lat, c.ubicacion_lng, *d))
 
         self.stdout.write(f"Filas con coordenadas: {con_coordenadas}. Fuera de Colombia: {len(filas)}.\n")

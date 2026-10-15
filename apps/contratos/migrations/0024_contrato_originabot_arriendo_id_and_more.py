@@ -7,9 +7,9 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('clientes', '0008_cliente_originabot_landlord_id_and_more'),
-        ('contratos', '0014_contrato_originabot_pendiente_and_more'),
-        ('ppa', '0003_corte_estado'),
-        ('proyectos', '0010_proyecto_ecs'),
+        ('contratos', '0023_contrato_originabot_pendiente_and_more'),
+        ('ppa', '0005_tarifas_fuera_del_estado'),
+        ('proyectos', '0015_proyecto_ecs'),
     ]
 
     operations = [

@@ -40,7 +40,8 @@ def _por_vencer(hoy: date) -> dict:
             (Q(grupo=es_ppa) & vigencia.filtro_ppa_vivos(hoy))
             | (~Q(grupo=es_ppa) & vigencia.filtro_vivos(hoy))
         )
-        .select_related("proyecto")
+        # La planta vive en `contrato_proyectos` (`contrato.proyecto` es un atajo).
+        .prefetch_related("proyectos_vinculados__proyecto")
         .order_by("fecha_fin", "id")
     )
     return {
@@ -74,7 +75,9 @@ def _sin_operacion(hoy: date) -> dict:
 def _arrendadores_sin_cliente() -> dict:
     consulta = (
         ArrArrendador.objects.filter(activo=True, cliente__isnull=True, contrato__deleted_at__isnull=True)
-        .select_related("contrato__proyecto")
+        # `contrato.proyecto` es un atajo sobre `contrato_proyectos`, no una llave.
+        .select_related("contrato")
+        .prefetch_related("contrato__proyectos_vinculados__proyecto")
         .order_by("nombre")
     )
     return {

@@ -1,4 +1,4 @@
-"""ViewSets de contratos PPA, sus responsables y el IPP mensual."""
+"""ViewSets de contratos PPA y el IPP mensual."""
 
 import logging
 from datetime import datetime, timezone
@@ -13,11 +13,11 @@ from api.exceptions import Conflict, NoProcesable
 from api.logging import class_logger_wrapper, log_endpoint
 from api.permissions import RolePermission
 from apps.clientes.services import documentos as documentos_service
+from apps.contratos.services import tarifas as tarifas_service
 from apps.ppa import models as ppa_models
 from apps.ppa.services import contratos as contratos_service
 from apps.ppa.services import escritura as escritura_service
 from apps.ppa.services import originabot_sync
-from apps.ppa.services import responsables as responsables_service
 from apps.ppa.services import unicidad as unicidad_service
 from apps.plataforma.services.fechas import hoy_col
 
@@ -44,8 +44,6 @@ class PpaViewSet(
     PUT    /api/v1/ppa/{id}/tarifas             reemplaza TODAS
     PUT    /api/v1/ppa/{id}/compromisos         reemplaza TODOS
     GET|PUT /api/v1/ppa/ipp/mensual
-    GET|POST /api/v1/ppa/responsables · PATCH|DELETE /responsables/{rid}
-    POST   /api/v1/ppa/responsables/asignar
     GET    /api/v1/ppa/originabot/opciones      PPAs y off takers de originabot
     POST   /api/v1/ppa/{id}/originabot          sincroniza; o vincula/crea allá
 
@@ -316,14 +314,11 @@ class PpaViewSet(
         entrada.is_valid(raise_exception=True)
 
         with transaction.atomic():
-            ppa_models.PpaTarifa.objects.filter(contrato=contrato).delete()
-            ppa_models.PpaTarifa.objects.bulk_create([
-                ppa_models.PpaTarifa(contrato=contrato, **fila)
-                for fila in entrada.validated_data
-            ])
-        filas = ppa_models.PpaTarifa.objects.filter(
-            contrato=contrato
-        ).order_by("año", "mes")
+            try:
+                tarifas_service.poner_filas_ppa(contrato, entrada.validated_data)
+            except ValueError as exc:
+                raise NoProcesable(str(exc))
+        filas = tarifas_service.filas_ppa(contrato)
         return Response(ppa_serializers.TarifaSerializer(filas, many=True).data)
 
     @action(detail=True, methods=["put"], url_path="compromisos")
@@ -379,94 +374,3 @@ class PpaViewSet(
             {"año": f.año, "mes": f.mes, "valor": float(f.valor)}
             for f in filas
         ])
-
-    # ── Responsables ──────────────────────────────────────────────────────
-
-    @action(detail=False, methods=["get", "post"], url_path="responsables")
-    @log_endpoint(name="Operaciones | PPA | Responsables")
-    def responsables(self, request):
-        if request.method == "GET":
-            return Response(ppa_serializers.ResponsableSerializer(
-                responsables_service.con_conteo(), many=True
-            ).data)
-
-        entrada = ppa_serializers.ResponsableEntradaSerializer(data=request.data)
-        entrada.is_valid(raise_exception=True)
-        try:
-            nombre = responsables_service.validar_nombre_libre(
-                entrada.validated_data["nombre"]
-            )
-        except responsables_service.NombreDuplicado as exc:
-            raise Conflict(str(exc))
-        except ValueError as exc:
-            raise NoProcesable(str(exc))
-
-        responsable = ppa_models.PpaResponsable.objects.create(
-            nombre=nombre,
-            incluir_en_cumplimiento=entrada.validated_data[
-                "incluir_en_cumplimiento"
-            ],
-        )
-        datos = ppa_serializers.ResponsableSerializer(responsable).data
-        datos["n_contratos"] = 0
-        return Response(datos, status=201)
-
-    @action(
-        detail=False, methods=["patch", "delete"],
-        url_path=r"responsables/(?P<rid>[0-9]+)",
-    )
-    @log_endpoint(name="Operaciones | PPA | Responsable")
-    def responsable(self, request, rid=None):
-        responsable = ppa_models.PpaResponsable.objects.filter(pk=rid).first()
-        if responsable is None:
-            raise NotFound("Responsable no encontrado")
-
-        if request.method == "DELETE":
-            try:
-                responsables_service.borrar(responsable)
-            except responsables_service.TieneContratos as exc:
-                raise Conflict(str(exc))
-            return Response(status=204)
-
-        entrada = ppa_serializers.ResponsableUpdateSerializer(data=request.data)
-        entrada.is_valid(raise_exception=True)
-        cambios = entrada.validated_data
-        if cambios.get("nombre") is not None:
-            try:
-                responsable.nombre = responsables_service.validar_nombre_libre(
-                    cambios["nombre"], excepto_id=responsable.pk
-                )
-            except responsables_service.NombreDuplicado as exc:
-                raise Conflict(str(exc))
-            except ValueError as exc:
-                raise NoProcesable(str(exc))
-        if "incluir_en_cumplimiento" in cambios:
-            responsable.incluir_en_cumplimiento = cambios[
-                "incluir_en_cumplimiento"
-            ]
-        responsable.save()
-
-        datos = ppa_serializers.ResponsableSerializer(responsable).data
-        datos["n_contratos"] = responsables_service.contratos_vivos(
-            responsable.pk
-        )
-        return Response(datos)
-
-    @action(detail=False, methods=["post"], url_path="responsables/asignar")
-    @log_endpoint(name="Operaciones | PPA | Asignar responsable")
-    def asignar_responsable(self, request):
-        entrada = ppa_serializers.AsignarResponsableSerializer(data=request.data)
-        entrada.is_valid(raise_exception=True)
-        datos = entrada.validated_data
-
-        responsable_id = datos.get("responsable_id")
-        if responsable_id is not None and not ppa_models.PpaResponsable.objects.filter(
-            pk=responsable_id
-        ).exists():
-            raise NotFound("Responsable no encontrado")
-
-        return Response({
-            "actualizados": responsables_service.asignar(
-                datos["contrato_ids"], responsable_id
-            )
-        })

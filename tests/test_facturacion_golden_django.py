@@ -8,7 +8,7 @@ apuntan al árbol FastAPI apagado (`app.models`), no al código Django que corre
 Este test FIJA los números que el cálculo Django produce HOY para un escenario
 conocido (SIC 89902 / GD San Pelayo → Terpel 8, con un contrato terminado a
 mitad de mes). Cuando `calculo.py` se reescriba para leer de `Contrato` en vez de
-`PpaContrato`/`PpaTarifa`, la SETUP de este test cambiará a los modelos nuevos,
+`PpaContrato`/`tarifas`, la SETUP de este test cambiará a los modelos nuevos,
 pero los VALORES ESPERADOS de abajo tienen que quedar idénticos: si un monto se
 mueve, el corte cambió la facturación y el test lo caza.
 """
@@ -98,7 +98,10 @@ def _setup_terpel8():
         fecha_solicitud=date(2026, 7, 23),
         fecha_inicio=None, fecha_fin=date(2026, 7, 23),
     )
-    ppa.PpaTarifa.objects.create(id=1, contrato_id=5, año=2026, mes=7, tarifa=298.8)
+    from apps.contratos.services import tarifas as tarifas_service
+
+    tarifas_service.poner_filas_ppa(
+        ppa.PpaContrato.objects.get(pk=5), [{"año": 2026, "mes": 7, "tarifa": 298.8}])
     ppa.IppMensual.objects.create(id=1, año=2026, mes=7, valor=186.35)
     mx.PrecioBolsaMensual.objects.create(id=1, año=2026, mes=7, valor=710.2606)
     mx.DespachoContratoMensual.objects.create(

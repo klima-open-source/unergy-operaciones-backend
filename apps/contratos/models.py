@@ -100,6 +100,22 @@ class AlertaAniversario(Timer):
 # =====================================================================================
 
 
+#: Marca de "este atajo no se tocó" (None es un valor válido: quitar la planta).
+_SIN_CAMBIO = object()
+
+#: Los atajos de tarifa de `Contrato` (no son columnas: salen de `tarifas`).
+ATAJOS_DE_TARIFA = frozenset({
+    "tarifa_base", "tarifa_representacion", "tarifa_cgm", "tarifa_admin", "tarifa_anual",
+    "tarifa_mensual",
+    "indexacion_representacion", "indexacion_cgm", "indexacion_anual", "indexacion_mensual",
+})
+
+#: Los atajos de planta e inversionista de `Contrato` (no son columnas).
+ATAJOS_DE_PLANTA = frozenset({
+    "proyecto", "proyecto_id", "inversionista", "inversionista_id", "inversionista_nombre",
+})
+
+
 class GrupoContrato(models.TextChoices):
     """A qué grupo de Servicios pertenece un contrato. Los valores son los de
     `apps.contratos.services.grupos` (la fuente única del catálogo); las fachadas
@@ -120,6 +136,16 @@ class ServicioContrato(models.TextChoices):
     MANTENIMIENTO = grupos.MANTENIMIENTO, "Mantenimiento"
     ARRIENDO = grupos.ARRIENDO, "Arriendo"
     INTERNET = grupos.INTERNET, "Internet"
+    # Cargo adicional, no subservicio (`grupos.CARGOS`).
+    ADMINISTRACION = grupos.ADMINISTRACION, "Administración"
+
+
+class TipoIndexacion(models.TextChoices):
+    """Con qué índice se actualiza la tarifa de un servicio. Vacío = no se indexa
+    (la administración, un PPA de precio fijo)."""
+
+    IPC = "ipc", "IPC"
+    IPP = "ipp", "IPP"
 
 
 class RolParte(models.TextChoices):
@@ -190,7 +216,6 @@ class Contrato(Timer):
     fecha_firma_contrato = models.DateField(null=True, blank=True)
     fecha_inicio = models.DateField(null=True, blank=True)
     fecha_fin = models.DateField(null=True, blank=True)
-    tarifa_base = models.DecimalField(max_digits=18, decimal_places=4, null=True, blank=True)
     periodicidad_pago = models.CharField(
         max_length=10, choices=PeriodicidadPago.choices, null=True, blank=True
     )
@@ -199,15 +224,10 @@ class Contrato(Timer):
 
     # Las partes (comprador, vendedor, contratante, prestador) viven en
     # `contrato_partes`; su nombre y NIT, en la ficha del cliente. Los atajos de
-    # lectura con los nombres de siempre están al final de la clase.
-    # El inversionista sigue aquí hasta la rama de inversionistas.
-    inversionista_nombre = models.CharField(max_length=255, null=True, blank=True)
+    # lectura con los nombres de siempre están al final de la clase. El inversionista
+    # (y la planta) salen de `contrato_proyectos`: ver sus atajos más abajo.
 
     # --- Específicas de compraventa de energía (PPA), antes en ppa_contratos ---
-    responsable = models.ForeignKey(
-        "ppa.PpaResponsable", on_delete=models.SET_NULL, db_column="responsable_id",
-        null=True, blank=True, related_name="contratos",
-    )
     # venta | compra (antes ppa_contratos.tipo_contrato).
     tipo_contrato = models.CharField(
         max_length=20, choices=Compraventa.choices, null=True, blank=True,
@@ -242,30 +262,20 @@ class Contrato(Timer):
                  ("internet", "internet")],
         null=True, blank=True,
     )
-    inversionista = models.ForeignKey(
-        "clientes.Cliente", on_delete=models.SET_NULL, db_column="inversionista_id",
-        null=True, blank=True, related_name="contratos_servicio_por_inversionista_id",
-    )
-    proyecto = models.ForeignKey(
-        "proyectos.Proyecto", on_delete=models.DO_NOTHING, db_column="proyecto_id",
-        null=True, blank=True, related_name="contratos_servicio_por_proyecto_id",
-    )
-    # Tarifas escalares e indexación JSON: siguen siendo LA tarifa hasta la rama de
-    # tarifas, que las pasa a `tarifas` colgando de `servicios` (plan 08, §2).
-    tarifa_admin = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)
-    tarifa_cgm = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
-    tarifa_representacion = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
-    tarifa_mensual = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
-    indexacion_anual = models.JSONField(null=True, blank=True)
-    indexacion_mensual = models.JSONField(null=True, blank=True)
-    indexacion_cgm = models.JSONField(null=True, blank=True)
-    indexacion_representacion = models.JSONField(null=True, blank=True)
-    cgm_codigo_sic = models.CharField(max_length=20, null=True, blank=True)
+    # La planta y el inversionista ya no son columnas que Django lea: viven en
+    # `contrato_proyectos` (planta y, en representación, la participación). Ver los
+    # atajos `proyecto` / `inversionista` más abajo. Las columnas `proyecto_id`,
+    # `inversionista_id` e `inversionista_nombre` siguen en la base, sin escribirse,
+    # hasta `contratos/0023` (paso 4c).
+    # Las tarifas viven en el servicio (base e índice) y en `tarifas` (valor por
+    # periodo): `tarifa_base`, `tarifa_representacion`, `tarifa_cgm`, `tarifa_admin`,
+    # `tarifa_mensual` y los cuatro `indexacion_*` son atajos (ver `ATAJOS_DE_TARIFA`),
+    # igual que `tarifa_anual` (la base de mantenimiento y arriendo). Las columnas
+    # siguen en la base, sin escribirse, hasta que el paso 3 de tarifas las borre.
     fecha_inicio_om = models.DateField(null=True, blank=True)
     fecha_indexacion = models.DateField(null=True, blank=True)
     responsable_iva = models.BooleanField(default=False)
     estado_pago = models.CharField(max_length=20, null=True, blank=True)
-    portafolio = models.CharField(max_length=255, null=True, blank=True)
     codigo_sun_factory = models.CharField(max_length=50, null=True, blank=True)
     nombre_proyecto_ref = models.CharField(max_length=255, null=True, blank=True)
     ubicacion_lat = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
@@ -330,23 +340,143 @@ class Contrato(Timer):
     def _poner_parte(self, rol, cliente) -> None:
         self.__dict__.setdefault("_partes_pendientes", {})[rol] = cliente
 
+    # --- La planta y el inversionista: atajos sobre `contrato_proyectos` -----------
+    #
+    # `contrato.proyecto_id`, `contrato.inversionista`… se leen igual que cuando eran
+    # columnas, pero salen de la fila de `contrato_proyectos` de un contrato de
+    # servicio (una sola) y de su participación. Para un listado:
+    # `.prefetch_related(contrato_proyectos.CON_PLANTA)`. En un PPA valen None: sus
+    # plantas son `proyectos_vinculados`, varias.
+    #
+    # Escribirlos deja el valor pendiente y `save()` lo lleva a `contrato_proyectos`.
+    # El inversionista tiene que participar en la planta (`InversionistaFueraDeLaPlanta`).
+    # `inversionista_nombre` es el de la ficha del cliente: asignarlo no hace nada.
+
+    def _vinculo(self):
+        """La fila de `contrato_proyectos` de este contrato de servicio, o None."""
+        if "_vinculo_cache" not in self.__dict__:
+            filas = getattr(self, "_prefetched_objects_cache", {}).get("proyectos_vinculados")
+            if filas is None:
+                filas = (self.proyectos_vinculados.select_related(
+                    "proyecto", "proyecto_inversionista__inversionista__cliente",
+                ) if self.pk and self.grupo != GrupoContrato.PPA else [])
+            filas = list(filas)
+            self.__dict__["_vinculo_cache"] = (
+                filas[0] if len(filas) == 1 and self.grupo != GrupoContrato.PPA else None
+            )
+        return self.__dict__["_vinculo_cache"]
+
+    def _pendiente(self, clave):
+        return self.__dict__.get("_planta_pendiente", {}).get(clave, _SIN_CAMBIO)
+
+    def _poner_pendiente(self, clave, valor) -> None:
+        self.__dict__.setdefault("_planta_pendiente", {})[clave] = valor
+
+    @property
+    def proyecto_id(self):
+        valor = self._pendiente("proyecto_id")
+        if valor is not _SIN_CAMBIO:
+            return valor
+        vinculo = self._vinculo()
+        return vinculo.proyecto_id if vinculo else None
+
+    @proyecto_id.setter
+    def proyecto_id(self, valor):
+        self._poner_pendiente("proyecto_id", int(valor) if valor not in (None, "") else None)
+
+    @property
+    def proyecto(self):
+        pid = self.proyecto_id
+        if pid is None:
+            return None
+        vinculo = self._vinculo()
+        if vinculo is not None and vinculo.proyecto_id == pid:
+            return vinculo.proyecto
+        from apps.proyectos.models import Proyecto
+
+        return Proyecto.objects.filter(pk=pid).first()
+
+    @proyecto.setter
+    def proyecto(self, proyecto):
+        self.proyecto_id = proyecto.pk if proyecto is not None else None
+
+    @property
+    def inversionista_id(self):
+        valor = self._pendiente("inversionista_id")
+        if valor is not _SIN_CAMBIO:
+            return valor
+        vinculo = self._vinculo()
+        participacion = vinculo.proyecto_inversionista if vinculo else None
+        return participacion.inversionista.cliente_id if participacion else None
+
+    @inversionista_id.setter
+    def inversionista_id(self, valor):
+        self._poner_pendiente("inversionista_id", int(valor) if valor not in (None, "") else None)
+
+    @property
+    def inversionista(self):
+        cid = self.inversionista_id
+        if cid is None:
+            return None
+        vinculo = self._vinculo()
+        participacion = vinculo.proyecto_inversionista if vinculo else None
+        if participacion is not None and participacion.inversionista.cliente_id == cid:
+            return participacion.inversionista.cliente
+        from apps.clientes.models import Cliente
+
+        return Cliente.objects.filter(pk=cid).first()
+
+    @inversionista.setter
+    def inversionista(self, cliente):
+        self.inversionista_id = cliente.pk if cliente is not None else None
+
+    @property
+    def inversionista_nombre(self):
+        cliente = self.inversionista
+        return cliente.razon_social_nombre if cliente else None
+
+    @inversionista_nombre.setter
+    def inversionista_nombre(self, valor):
+        pass  # sale de la ficha del cliente; los llamadores viejos lo siguen asignando
+
     def save(self, *args, **kwargs):
-        # Los atajos de las partes no son columnas: fuera de `update_fields`.
-        # Si solo se tocaron partes, la lista queda vacía y Django no escribe la fila.
+        # Los atajos de las partes, la planta y el inversionista no son columnas:
+        # fuera de `update_fields`. Si solo se tocaron atajos, la lista queda vacía y
+        # Django no escribe la fila.
         if kwargs.get("update_fields") is not None:
             kwargs["update_fields"] = [
-                f for f in kwargs["update_fields"] if f not in _ATAJOS_DE_PARTES
+                f for f in kwargs["update_fields"]
+                if f not in _ATAJOS_DE_PARTES and f not in ATAJOS_DE_PLANTA
+                and f not in ATAJOS_DE_TARIFA
             ]
+        from apps.contratos.services import contrato_partes, contrato_proyectos, servicios, tarifas
+
+        if self.grupo == GrupoContrato.REPRESENTACION_CGM:
+            inversionista = self._pendiente("inversionista_id")
+            if inversionista not in (_SIN_CAMBIO, None):
+                contrato_proyectos.validar_inversionista(self.proyecto_id, inversionista)
         super().save(*args, **kwargs)
         # Qué servicios cubre, desde el ÚNICO lugar que los escribe: así ningún
         # camino de escritura (API, CRM, admin) puede dejarlos desalineados con
         # `tipo_contrato` o `servicio_aplica`.
-        from apps.contratos.services import contrato_partes, servicios
-
         servicios.registrar(self)
+        tarifas.aplicar(self)
+        pendiente = self.__dict__.pop("_planta_pendiente", {})
+        contrato_proyectos.sincronizar(
+            self,
+            proyecto_id=pendiente.get("proyecto_id", _SIN_CAMBIO),
+            inversionista_id=pendiente.get("inversionista_id", _SIN_CAMBIO),
+        )
+        self.__dict__.pop("_vinculo_cache", None)
         pendientes = self.__dict__.pop("_partes_pendientes", None)
         if pendientes:
             contrato_partes.asignar(self, pendientes)
+
+    def refresh_from_db(self, *args, **kwargs):
+        for cache in ("_vinculo_cache", "_planta_pendiente", "_partes_cache", "_partes_pendientes",
+                      "_tarifas_pendientes"):
+            self.__dict__.pop(cache, None)
+        super().refresh_from_db(*args, **kwargs)
 
     class Meta:
         db_table = "contratos"
@@ -370,10 +500,6 @@ class Contrato(Timer):
                     | Q(fecha_inicio__isnull=True)
                     | Q(fecha_fin__gte=F("fecha_inicio"))
                 ),
-            ),
-            models.CheckConstraint(
-                name="ck_contratos_tarifa",
-                condition=Q(tarifa_base__isnull=True) | Q(tarifa_base__gte=0),
             ),
             # El grupo y `servicio_aplica` dicen lo mismo, o la fila no entra.
             models.CheckConstraint(
@@ -425,6 +551,31 @@ for _rol in RolParte.values:
         _ATAJOS_DE_PARTES.add(f"{_rol}{_sufijo}")
 
 
+def _atajo_de_tarifa(nombre: str):
+    """`contrato.tarifa_cgm`, `contrato.indexacion_representacion`…, sobre el servicio
+    y sus `tarifas`.
+
+    Escribirlo deja el valor pendiente y `save()` lo lleva a su servicio
+    (`services/tarifas.py::aplicar`)."""
+
+    def leer(self):
+        pendientes = self.__dict__.get("_tarifas_pendientes") or {}
+        if nombre in pendientes:
+            return pendientes[nombre]
+        from apps.contratos.services import tarifas
+
+        return tarifas.leer(self, nombre)
+
+    def escribir(self, valor):
+        self.__dict__.setdefault("_tarifas_pendientes", {})[nombre] = valor
+
+    return property(leer, escribir)
+
+
+for _nombre in ATAJOS_DE_TARIFA:
+    setattr(Contrato, _nombre, _atajo_de_tarifa(_nombre))
+
+
 class Servicio(Timer):
     """Un servicio que cubre un contrato: una fila por contrato y por servicio.
 
@@ -443,6 +594,12 @@ class Servicio(Timer):
         related_name="servicios",
     )
     servicio = models.CharField(max_length=20, choices=ServicioContrato.choices)
+    # Esquema de Sara (2026-10-14): la base y el índice son del servicio, no de cada
+    # periodo. La unidad la da el servicio (`services/tarifas.py::UNIDAD`).
+    tarifa_base = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
+    tipo_indexacion = models.CharField(
+        max_length=3, choices=TipoIndexacion.choices, null=True, blank=True,
+    )
 
     class Meta:
         db_table = "servicios"
@@ -450,6 +607,51 @@ class Servicio(Timer):
             models.UniqueConstraint(
                 fields=["contrato", "servicio"], name="uq_servicios_contrato_servicio"
             ),
+            models.CheckConstraint(
+                name="ck_servicios_tarifa_base",
+                condition=Q(tarifa_base__isnull=True) | Q(tarifa_base__gte=0),
+            ),
+        ]
+
+
+class Tarifa(Timer):
+    """El valor de un servicio en cada periodo: una fila por año, o por año y mes.
+
+    Esquema de Sara (2026-10-14): `servicio`, `anio`, `mes`, `valor`. La base pactada
+    y el índice con que se actualiza están en el servicio (`Servicio.tarifa_base`,
+    `Servicio.tipo_indexacion`); aquí va lo que vale cada periodo.
+
+    `mes` vacío: el servicio se cobra por año (representación, CGM, internet…). Lleno:
+    el precio cambia mes a mes (los PPA, que antes vivían en `ppa_tarifas`). El
+    índice aplicado en un periodo no se guarda: sale de comparar con el anterior."""
+
+    id = models.BigAutoField(primary_key=True)
+    servicio = models.ForeignKey(
+        "contratos.Servicio", on_delete=models.CASCADE, db_column="servicio_id",
+        related_name="tarifas",
+    )
+    anio = models.IntegerField()
+    mes = models.IntegerField(null=True, blank=True)
+    valor = models.DecimalField(max_digits=18, decimal_places=6)
+
+    class Meta:
+        db_table = "tarifas"
+        ordering = ["servicio_id", "anio", models.F("mes").asc(nulls_first=True)]
+        constraints = [
+            # Un valor por periodo. Dos índices parciales: en un UNIQUE con `mes`, dos
+            # filas del mismo año sin mes no chocarían (los NULL son distintos).
+            models.UniqueConstraint(
+                fields=["servicio", "anio"], condition=Q(mes__isnull=True),
+                name="uq_tarifas_servicio_anio",
+            ),
+            models.UniqueConstraint(
+                fields=["servicio", "anio", "mes"], condition=Q(mes__isnull=False),
+                name="uq_tarifas_servicio_anio_mes",
+            ),
+            models.CheckConstraint(
+                name="ck_tarifas_mes", condition=Q(mes__isnull=True) | Q(mes__range=(1, 12)),
+            ),
+            models.CheckConstraint(name="ck_tarifas_valor", condition=Q(valor__gte=0)),
         ]
 
 
@@ -490,10 +692,24 @@ class ContratoParte(Timer):
 
 
 class ContratoProyecto(models.Model):
-    """Qué plantas cubre un PPA (N:M). Reemplaza a `ppa_contrato_proyectos` con el
-    mismo significado. El proyecto de un contrato de servicio sigue en su FK directa;
-    unificarlo acá va con la rama de inversionistas (plan 08, §2)."""
+    """Qué planta cubre un contrato, y en representación, qué participación.
 
+    Una fila por contrato y planta, para TODOS los contratos: los PPA (que pueden
+    cubrir varias) y los de servicio (una). En un contrato de representación,
+    `proyecto_inversionista` dice a qué inversionista de esa planta representamos;
+    en los demás va vacío: quién está en el contrato son sus partes
+    (`contrato_partes`), no los inversionistas (Sara, 2026-10-13).
+
+    La base exige que la participación sea de la misma planta: llave compuesta
+    `(proyecto_inversionista_id, proyecto_id)` → `proyecto_inversionistas (id,
+    proyecto_id)`, diferida al COMMIT para que la fusión de proyectos pueda mover
+    las dos tablas en la misma transacción (`contratos/0017`).
+
+    Mientras convivan con `contratos.proyecto_id` e `inversionista_id`, las filas
+    de los contratos de servicio las deriva `Contrato.save()`
+    (`services/contrato_proyectos.py`)."""
+
+    id = models.BigAutoField(primary_key=True)
     contrato = models.ForeignKey(
         "contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_id",
         related_name="proyectos_vinculados",
@@ -502,29 +718,18 @@ class ContratoProyecto(models.Model):
         "proyectos.Proyecto", on_delete=models.CASCADE, db_column="proyecto_id",
         related_name="contratos_ppa",
     )
-    pk = models.CompositePrimaryKey("contrato_id", "proyecto_id")
-
-    class Meta:
-        db_table = "contrato_proyectos"
-
-
-class ContratoServicioCorrespondencia(models.Model):
-    """Id viejo (`contratos_servicio.id`) -> id nuevo (`contratos.id`).
-
-    Los PPA conservan su id en `contratos`; los contratos de servicio reciben uno
-    nuevo (los ids 1-36 chocan). Esta tabla la llena el backfill y la usa la
-    migración del corte para reescribir las FK de los satélites de servicio
-    (decisiones 1-3 del plan 08). Es una TABLA y no un script para poder
-    auditarla después. Se borra en el deploy 3, con las tablas viejas."""
-
-    id_viejo = models.BigIntegerField(primary_key=True)
-    contrato = models.OneToOneField(
-        "contratos.Contrato", on_delete=models.CASCADE, db_column="contrato_id",
-        related_name="correspondencia_servicio",
+    proyecto_inversionista = models.ForeignKey(
+        # Borrar la participación deja el contrato pendiente de asignar, no lo bloquea.
+        "proyectos.ProyectoInversionista", on_delete=models.SET_NULL,
+        db_column="proyecto_inversionista_id", null=True, blank=True,
+        related_name="contratos_vinculados",
     )
 
     class Meta:
-        db_table = "contratos_servicio_correspondencia"
+        db_table = "contrato_proyectos"
+        constraints = [
+            models.UniqueConstraint(fields=["contrato", "proyecto"], name="uq_contrato_proyectos"),
+        ]
 
 
 #: Columnas de `contratos` que solo tienen sentido en un PPA (venían de
@@ -532,7 +737,7 @@ class ContratoServicioCorrespondencia(models.Model):
 #: API siga teniendo exactamente los campos de antes de la tabla única: con
 #: `exclude` y la tabla ancha se colaban en la lectura y, peor, en la escritura.
 COLUMNAS_SOLO_PPA = (
-    "numero_codigo_contrato", "nombre_interno", "responsable", "tipo_contrato",
+    "numero_codigo_contrato", "nombre_interno", "tipo_contrato",
     "periodicidad_indexacion", "periodo_indexacion_base",
     "valor_indexacion_base", "cantidad_minima_kwh_mes", "cantidad_maxima_kwh_mes",
     "periodicidad_facturacion", "tiempo_pago", "condiciones_pago", "gescon_codigo",

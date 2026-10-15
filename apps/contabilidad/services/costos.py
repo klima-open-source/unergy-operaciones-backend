@@ -34,7 +34,7 @@ def _valor_internet(proyecto, periodo: str) -> float | None:
 
     c = (
         ContratoServicio.objects
-        .filter(servicio_aplica="internet", proyecto_id=proyecto.id)
+        .filter(servicio_aplica="internet", proyectos_vinculados__proyecto_id=proyecto.id)
         .order_by("id")
         .first()
     )
@@ -215,13 +215,14 @@ def valores_facturas_modulo(proyecto_id: int, periodo: str,
     Sin `inversionistas`, o si los nombres no emparejan, se conserva el cálculo
     anterior. En GD no cambia nada: ahí hay un único contrato."""
     from apps.contratos.models import ContratoServicio
+    from apps.contratos.services.contrato_proyectos import CON_PLANTA
     from apps.proyectos.models import Proyecto
 
     if not Proyecto.objects.filter(pk=proyecto_id).exists():
         return {}
     contratos = list(ContratoServicio.objects.filter(
-        servicio_aplica="representacion", proyecto_id=proyecto_id,
-    ))
+        servicio_aplica="representacion", proyectos_vinculados__proyecto_id=proyecto_id,
+    ).prefetch_related(CON_PLANTA))
     c = elegir_contrato_representacion(contratos)
     if c is None:
         return {}
@@ -257,9 +258,9 @@ def _clave_inversionista(nombre) -> str:
 def contratos_por_inversionista(contratos, inversionistas) -> dict:
     """`{id_inversionista: contrato}`, emparejando por CLIENTE y luego por nombre.
 
-    `contratos_servicio.inversionista_id` y `proyecto_inversionista.cliente_id`
-    apuntan los dos a `clientes`, así que cuando el contrato tiene ese FK poblado
-    el cruce es exacto. Esa es la vía principal.
+    El inversionista del contrato sale de su participación (`contrato_proyectos`),
+    y la del reparto también, así que cuando el contrato la tiene el cruce por
+    cliente es exacto. Esa es la vía principal.
 
     El nombre es el respaldo, y hace falta: los contratos que creó el wizard no
     guardan `inversionista_id` --el campo de la pantalla es texto libre-- y los

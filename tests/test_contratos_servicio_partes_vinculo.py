@@ -99,6 +99,17 @@ def _contrato(**kw):
     return ContratoServicio.objects.create(**kw)
 
 
+def _planta_de(*inversionistas):
+    """Una planta con esos clientes como inversionistas: el inversionista de un
+    contrato de representación es una participación de su planta."""
+    from apps.proyectos.models import Proyecto, ProyectoInversionista
+
+    planta = Proyecto.objects.create(nombre_comercial="Planta QA")
+    for cliente in inversionistas:
+        ProyectoInversionista.objects.create(proyecto=planta, cliente=cliente)
+    return planta
+
+
 def test_crear_guarda_las_tres_partes_vinculadas(datos):
     from apps.contratos.models import ContratoServicio
 
@@ -110,6 +121,7 @@ def test_crear_guarda_las_tres_partes_vinculadas(datos):
         "post", "/api/v1/contratos-servicio", datos,
         cuerpo={
             "servicio_aplica": "representacion",
+            "proyecto_id": _planta_de(inversionista).id,
             "contratante_id": contratante.id,
             "prestador_id": prestador.id,
             "inversionista_id": inversionista.id,
@@ -130,7 +142,9 @@ def test_patch_vincula_el_inversionista(datos):
     from apps.contratos.models import ContratoServicio
 
     inversionista = _cliente("Fondo Solar Dos", "903777888-9")
-    contrato = _contrato(inversionista_nombre="Fondo Solar Dos")
+    otro = _cliente("Otro fondo", "903777888-0")
+    # Dos inversionistas: el contrato no puede deducir cuál representa.
+    contrato = _contrato(proyecto=_planta_de(inversionista, otro))
     assert contrato.inversionista_id is None
 
     respuesta = _pedir(
@@ -150,7 +164,8 @@ def test_sincronizar_copia_el_nombre_del_inversionista_vinculado(datos):
     from apps.contratos.models import ContratoServicio
 
     inversionista = _cliente("Fondo Solar Tres S.A.S.", "904999000-1")
-    contrato = _contrato(inversionista_nombre="fondo solar tres")
+    otro = _cliente("Otro fondo", "904999000-2")
+    contrato = _contrato(proyecto=_planta_de(inversionista, otro))
 
     _pedir(
         "patch", f"/api/v1/contratos-servicio/{contrato.id}", datos,
@@ -240,3 +255,35 @@ def test_desvincular_una_parte_sigue_siendo_posible(datos):
 
     assert respuesta.status_code == 200, respuesta.data
     assert ContratoServicio.objects.get(pk=contrato.id).contratante_id is None
+
+
+def test_un_inversionista_sin_planta_lo_rechaza(datos):
+    """El inversionista es una participación de la planta: sin planta, 400 claro."""
+    respuesta = _pedir(
+        "post", "/api/v1/contratos-servicio", datos,
+        cuerpo={
+            "servicio_aplica": "representacion",
+            "contratante_id": _cliente("Contratante").id,
+            "prestador_id": _cliente("Unergy").id,
+            "inversionista_id": _cliente("Fondo").id,
+        },
+        acciones={"post": "create"},
+    )
+    assert respuesta.status_code == 400
+    assert "proyecto_id" in respuesta.data
+
+
+def test_un_inversionista_que_no_esta_en_la_planta_lo_rechaza(datos):
+    respuesta = _pedir(
+        "post", "/api/v1/contratos-servicio", datos,
+        cuerpo={
+            "servicio_aplica": "representacion",
+            "proyecto_id": _planta_de(_cliente("Fondo de la planta")).id,
+            "contratante_id": _cliente("Contratante").id,
+            "prestador_id": _cliente("Unergy").id,
+            "inversionista_id": _cliente("Fondo de otra planta").id,
+        },
+        acciones={"post": "create"},
+    )
+    assert respuesta.status_code == 400
+    assert "inversionista_id" in respuesta.data

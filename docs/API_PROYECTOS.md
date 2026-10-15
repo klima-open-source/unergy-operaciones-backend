@@ -292,7 +292,7 @@ curl -G https://operaciones.unergy.io/api/v1/proyectos \
 | `q` | Búsqueda parcial en `nombre_comercial` (tipo "contiene", sin normalizar tildes) |
 | `estado` | `en_desarrollo`, `en_operacion`, `suspendido`, `cancelado` |
 | `tipo_proyecto` | `minigranja`, `autoconsumo`, `gd`, `movilidad_electrica`, `otro` |
-| `portafolio_id` | Entero |
+| `portafolio_id` | Entero. Plantas que están en ese portafolio (una planta puede estar en varios: `portafolio_proyectos`). El detalle trae `portafolios: [{id, nombre}]` |
 | `servicio` | `operacion`, `representacion`, `cgm`, `ppa` — la planta tiene hoy un contrato vigente de ese servicio (la misma regla que `servicios`). No es lo mismo que `ppa_id`, que mira el vínculo a un contrato concreto |
 | `ppa_id` | Entero, repetible (`?ppa_id=12&ppa_id=45`). Proyectos vinculados a alguno de esos contratos (tabla `ppa_contratos`, join por `ppa_contrato_proyectos`). Un contrato borrado (borrado lógico) no cuenta: `ppa_id` de un contrato borrado no encuentra nada |
 | `sin_ppa` | `true` — proyectos sin ningún contrato PPA **vivo** vinculado. Se combina con `ppa_id` como OR: `ppa_id=12&sin_ppa=true` trae los del contrato 12 más los que no tienen ninguno. Un proyecto cuyo único contrato está borrado cuenta como "sin PPA" |

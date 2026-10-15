@@ -48,6 +48,22 @@ MANTENIMIENTO = "mantenimiento"
 ARRIENDO = "arriendo"
 INTERNET = "internet"
 
+# ── Cargos adicionales ────────────────────────────────────────────────────
+#: Un servicio que se cobra dentro de un contrato pero NO dice qué servicios tiene
+#: la planta (decisión de Sara, 2026-10-13): no cuenta para el monitoreo, ni para
+#: "la representamos", ni para la pestaña de Servicios. La administración se
+#: negocia casi siempre en el contrato de representación/CGM y a veces en el de O&M.
+ADMINISTRACION = "administracion"
+CARGOS: tuple[str, ...] = (ADMINISTRACION,)
+
+
+
+def admite_administracion(contrato) -> bool:
+    """Si el contrato puede llevar el cargo de administración: los de representación/CGM
+    y los de O&M (mantenimiento). No un PPA, ni un arriendo, ni internet."""
+    return (getattr(contrato, "grupo", None) == "representacion_cgm"
+            or getattr(contrato, "servicio_aplica", None) == "mantenimiento")
+
 #: Grupo → sus subservicios, en orden de presentación.
 #:
 #: Los tres de `operacion` cuentan por igual (confirmado por Sara el 2026-09-17):
@@ -74,17 +90,18 @@ SUBSERVICIOS_DE_CONTRATO_SERVICIO = frozenset(
 )
 
 # ── Tarifas ───────────────────────────────────────────────────────────────
-#: Subservicio → columna de `ContratoServicio` con su tarifa.
+#: Subservicio → atajo de `ContratoServicio` con su tarifa.
 #:
-#: Reemplaza la cadena de `if` de `apps/clientes/services/vistas.py`. Los tres
-#: subservicios de Operación comparten `tarifa_base`: la tabla no tiene una
-#: columna por cada uno.
+#: Reemplaza la cadena de `if` de `apps/clientes/services/vistas.py`. Los atajos
+#: salen de la tabla `tarifas` (rama de servicios y tarifas): mantenimiento y
+#: arriendo dan su valor anual; internet, el mensual.
 COLUMNA_TARIFA: dict[str, str] = {
     REPRESENTACION: "tarifa_representacion",
     CGM: "tarifa_cgm",
-    MANTENIMIENTO: "tarifa_base",
-    ARRIENDO: "tarifa_base",
-    INTERNET: "tarifa_base",
+    MANTENIMIENTO: "tarifa_anual",
+    ARRIENDO: "tarifa_anual",
+    INTERNET: "tarifa_mensual",
+    ADMINISTRACION: "tarifa_admin",
 }
 
 #: Subservicio → columna con su calendario de indexación, donde exista.
@@ -122,7 +139,8 @@ def subservicios_de(contrato) -> list[str]:
     pestaña. Un valor fuera del catálogo devuelve lista vacía en vez de inventar.
     """
     if getattr(contrato, "pk", None) is not None:
-        registrados = [s.servicio for s in contrato.servicios.all()]
+        # Los cargos (administración) no son subservicios: no los devuelve.
+        registrados = [s.servicio for s in contrato.servicios.all() if s.servicio not in CARGOS]
         if registrados:
             return en_orden(registrados)
     aplica = getattr(contrato, "servicio_aplica", None)

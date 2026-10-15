@@ -5,7 +5,8 @@ COP/kWh). El valor del mes (PNBA) se calcula así:
 
   1. por cada (día, hora) se toma la **versión de liquidación más nueva disponible**:
      TXR sale primero y se usa mientras tanto; cuando XM publica **TXF** (~el día 10
-     del mes siguiente) esta gana y el valor se actualiza solo,
+     del mes siguiente) esta gana y el valor se actualiza solo. La versión manda
+     sobre la variable: ver :func:`_resolver`,
   2. cada valor horario se **redondea a 2 decimales**,
   3. se promedian TODAS las horas del mes y se redondea a 2 → PNBA del mes.
 
@@ -69,29 +70,33 @@ def fetch_records(start: str, end: str, *, client: httpx.Client | None = None) -
     return []
 
 
-def bolsa_horaria(
+def _resolver(
     records: list[dict], variable: str = VARIABLE_NACIONAL,
-) -> dict[tuple[str, str], float]:
-    """{records SIMEM} -> {('YYYY-MM-DD', 'HH'): precio_hora (COP/kWh, 2 dec)}.
+) -> dict[tuple[str, str], tuple[float, str]]:
+    """{records SIMEM} -> {(día, hora): (precio 2 dec, variable de la que salió)}.
 
-    Por cada (día, hora) usa la versión más nueva disponible (TXF gana; si no está,
-    TXR) y redondea a 2 decimales, igual que el Excel.
+    **Manda la VERSIÓN, y la variable solo desempata dentro de ella.** Por cada
+    (día, hora) se toma la versión más definitiva publicada; si esa versión trae
+    las dos variables, gana `PB_Nal`.
 
-    **Las horas sin `PB_Nal` se toman del `PTB`.** En esas horas el precio de bolsa
-    superó el de escasez de activación y XM publica el precio de las transacciones
-    en bolsa en vez del nacional: son dos nombres del mismo dato según el régimen,
-    no dos datos distintos. En 2026-09 fueron 18 horas —todas en el pico de la
-    noche— y dejarlas fuera sesgaba el promedio del mes hacia abajo, justo por lo
-    caro. Ver :func:`bolsa_mensual`.
+    El orden importa y costó un caso real: el 2026-09-10 a las 18:00 el dataset
+    trae `PB_Nal` en TXR (1.140,44) y `PTB` en TXF (891,44) — al liquidar en
+    firme, XM reclasificó esa hora como de escasez. Preferir `PB_Nal` por ser la
+    variable "buena" dejaba el mes mezclando TXF con TXR, contra la regla que
+    este módulo dice seguir.
 
-    Si una hora trae las dos, manda `PB_Nal`.
+    Las dos variables son el mismo dato bajo regímenes distintos: `PTB` es lo que
+    XM publica cuando el precio supera el de escasez de activación, y en esas
+    horas no publica `PB_Nal`. Dejarlas fuera sesgaba el promedio del mes hacia
+    abajo, justo por las horas caras.
     """
     mejor: dict[tuple[str, str], tuple[int, int]] = {}
-    valor: dict[tuple[str, str], float] = {}
-    # (prioridad de variable, …): PB_Nal pisa a PTB venga en el orden que venga.
+    salida: dict[tuple[str, str], tuple[float, str]] = {}
+    # (rango de versión, prioridad de variable): la versión primero.
     prioridad = {variable: 1, VARIABLE_TRANSACCIONES: 0}
     for r in records:
-        pri = prioridad.get(r.get("CodigoVariable"))
+        nombre = r.get("CodigoVariable")
+        pri = prioridad.get(nombre)
         if pri is None:
             continue
         fh = str(r.get("FechaHora", ""))
@@ -102,29 +107,34 @@ def bolsa_horaria(
         if rk < 0:
             continue
         clave = (dia, hora)
-        if clave not in mejor or (pri, rk) > mejor[clave]:
+        if clave not in mejor or (rk, pri) > mejor[clave]:
             try:
-                valor[clave] = round(float(r["Valor"]), 2)
-                mejor[clave] = (pri, rk)
+                salida[clave] = (round(float(r["Valor"]), 2), str(nombre))
+                mejor[clave] = (rk, pri)
             except (TypeError, ValueError, KeyError):
                 continue
-    return valor
+    return salida
+
+
+def bolsa_horaria(
+    records: list[dict], variable: str = VARIABLE_NACIONAL,
+) -> dict[tuple[str, str], float]:
+    """{records SIMEM} -> {('YYYY-MM-DD', 'HH'): precio_hora (COP/kWh, 2 dec)}."""
+    return {k: v for k, (v, _) in _resolver(records, variable).items()}
 
 
 def horas_de_transacciones(
     records: list[dict], variable: str = VARIABLE_NACIONAL,
 ) -> set[tuple[str, str]]:
-    """Las (día, hora) que solo existen como `PTB`: precio sobre el de escasez."""
-    con_nal = {
-        (str(r.get("FechaHora", ""))[:10], str(r.get("FechaHora", ""))[11:13])
-        for r in records if r.get("CodigoVariable") == variable
-    }
+    """Las (día, hora) cuyo precio SALIÓ del `PTB`: precio sobre el de escasez.
+
+    Son las que de verdad se usaron, no las que carecen de `PB_Nal` en toda
+    versión: una hora resuelta con el `PTB` de TXF cuenta aunque exista un
+    `PB_Nal` más viejo que se descartó.
+    """
     return {
-        clave for r in records
-        if r.get("CodigoVariable") == VARIABLE_TRANSACCIONES
-        and (clave := (str(r.get("FechaHora", ""))[:10],
-                       str(r.get("FechaHora", ""))[11:13])) not in con_nal
-        and all(clave)
+        clave for clave, (_, nombre) in _resolver(records, variable).items()
+        if nombre == VARIABLE_TRANSACCIONES
     }
 
 

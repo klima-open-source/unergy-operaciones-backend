@@ -48,6 +48,14 @@ from . import serializers as py_serializers
 SERVICIOS = plantas.SERVICIOS_DE_PLANTA
 
 
+def _filtro_servicio(servicio: str) -> Q:
+    """Las plantas con ese servicio vigente. `operacion` es "genera y la
+    operamos", lo mismo que el sondeo."""
+    if servicio == "operacion":
+        return plantas.filtro_operadas(hoy_col())
+    return plantas.filtro_proyectos_con(servicio, hoy_col())
+
+
 def _con_relaciones():
     """El detalle completo con todo lo que el serializer recorre.
 
@@ -57,9 +65,11 @@ def _con_relaciones():
     """
     return (
         py_models.Proyecto.objects
-        .select_related("operador_red", "portafolio")
+        .select_related("operador_red")
         .prefetch_related(
-            "inversionistas__cliente",
+            "portafolios",
+            "inversionistas__inversionista__cliente",
+            "inversionistas__patrimonio",
             "info_tecnica",
             "inversores",
             "area_contactos__cliente",
@@ -183,14 +193,10 @@ class ProyectoViewSet(viewsets.GenericViewSet):
             if request.query_params.get(campo):
                 qs = qs.filter(**{campo: request.query_params[campo]})
         if par.entero(request, "portafolio_id"):
-            qs = qs.filter(portafolio_id=par.entero(request, "portafolio_id"))
+            qs = qs.filter(portafolios__id=par.entero(request, "portafolio_id")).distinct()
         servicio = request.query_params.get("servicio")
         if servicio in SERVICIOS:
-            # `operacion` es "genera y la operamos", lo mismo que el sondeo.
-            qs = qs.filter(
-                plantas.filtro_operadas(hoy_col()) if servicio == "operacion"
-                else plantas.filtro_proyectos_con(servicio, hoy_col())
-            )
+            qs = qs.filter(_filtro_servicio(servicio))
         filtro_ppa = _filtro_ppa(request)
         if filtro_ppa is not None:
             qs = qs.filter(filtro_ppa)
@@ -452,15 +458,16 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         """Todos los proyectos vigentes en una llamada, con los campos justos
         para identificarlos y quedarse con el `id`.
 
-        Sin paginar y sin filtros a propósito: es el listado de ENTRADA. Para
-        filtrar o paginar está `GET /proyectos`, que además trae el objeto
-        completo y es el que consume el frontend.
+        Sin paginar a propósito: es el listado de ENTRADA. Solo acepta
+        `servicio` (los desplegables de Fallas piden las plantas que operamos sin
+        cargar el objeto completo); para el resto de filtros está `GET /proyectos`.
         """
+        qs = py_models.Proyecto.objects.filter(deleted_at__isnull=True)
+        servicio = request.query_params.get("servicio")
+        if servicio in SERVICIOS:
+            qs = qs.filter(_filtro_servicio(servicio))
         items = py_serializers.ProyectoListaSerializer(
-            py_models.Proyecto.objects
-            .filter(deleted_at__isnull=True)
-            .order_by("nombre_comercial"),
-            many=True,
+            qs.order_by("nombre_comercial"), many=True,
         ).data
         return Response({"total": len(items), "items": items})
 
@@ -865,7 +872,7 @@ class ProyectoViewSet(viewsets.GenericViewSet):
             filas = (
                 py_models.ProyectoInversionista.objects
                 .filter(proyecto_id=pk)
-                .select_related("cliente")
+                .select_related("inversionista__cliente", "patrimonio")
             )
             return Response(
                 py_serializers.ProyectoInversionistaSerializer(filas, many=True).data
@@ -874,13 +881,13 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         entrada = py_serializers.ProyectoInversionistaSerializer(data=request.data)
         entrada.is_valid(raise_exception=True)
         if py_models.ProyectoInversionista.objects.filter(
-            proyecto_id=pk, cliente_id=entrada.validated_data["cliente_id"],
+            proyecto_id=pk, inversionista__cliente_id=entrada.validated_data["cliente_id"],
         ).exists():
             raise Conflict("Este cliente ya es inversionista de este proyecto")
         inv = entrada.save(proyecto_id=int(pk))
         datos = py_serializers.ProyectoInversionistaSerializer(
             py_models.ProyectoInversionista.objects
-            .select_related("cliente").get(pk=inv.id)
+            .select_related("inversionista__cliente", "patrimonio").get(pk=inv.id)
         ).data
         return Response(
             {**datos, "paneles_redivididos": _redividir_paneles(pk)},
@@ -906,9 +913,14 @@ class ProyectoViewSet(viewsets.GenericViewSet):
             inv, data=request.data, partial=True,
         )
         entrada.is_valid(raise_exception=True)
+        nuevo_cliente = entrada.validated_data.get("cliente_id")
+        if nuevo_cliente is not None and py_models.ProyectoInversionista.objects.filter(
+            proyecto_id=pk, inversionista__cliente_id=nuevo_cliente,
+        ).exclude(pk=inv.pk).exists():
+            raise Conflict("Este cliente ya es inversionista de este proyecto")
         entrada.save()
         datos = py_serializers.ProyectoInversionistaSerializer(
             py_models.ProyectoInversionista.objects
-            .select_related("cliente").get(pk=inv_id)
+            .select_related("inversionista__cliente", "patrimonio").get(pk=inv_id)
         ).data
         return Response({**datos, "paneles_redivididos": _redividir_paneles(pk)})

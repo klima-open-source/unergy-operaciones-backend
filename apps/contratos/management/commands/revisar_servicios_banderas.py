@@ -39,6 +39,7 @@ from django.core.management.base import BaseCommand
 from apps.contratos.models import ContratoServicio
 from apps.contratos.services import grupos
 from apps.contratos.services import vigencia as vigencia_service
+from apps.contratos.services.contrato_proyectos import CON_PLANTA
 from apps.plataforma.services.fechas import hoy_col
 from apps.ppa.models import PpaContrato, PpaContratoProyecto
 from apps.proyectos.models import Proyecto
@@ -99,8 +100,8 @@ class Command(BaseCommand):
         """
         salida: dict[int, set[str]] = {}
         vivos = ContratoServicio.objects.filter(
-            vigencia_service.filtro_vivos(hoy_col()), proyecto__isnull=False,
-        ).prefetch_related("servicios")
+            vigencia_service.filtro_vivos(hoy_col()), proyectos_vinculados__isnull=False,
+        ).prefetch_related("servicios", CON_PLANTA)
         for contrato in vivos:
             if contrato.proyecto_id in plantas:
                 salida.setdefault(contrato.proyecto_id, set()).update(

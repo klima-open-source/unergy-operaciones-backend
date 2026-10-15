@@ -32,10 +32,10 @@ REVISAR = (
      "updated_at", "Clientes: IVA y retenciones generales"),
     ("clientes.ClienteTasaServicio", ("iva_pct", "retencion_pct", "reteiva_pct", "reteica_pct"),
      "updated_at", "Clientes: IVA y retenciones por servicio"),
-    ("contratos.Contrato", ("tarifa_base",), "updated_at",
-     "PPA firmados desde el CRM: tarifa base (solo filas grupo=ppa)"),
-    ("ppa.PpaTarifa", ("tarifa",), "contrato__updated_at",
-     "PPA: tabla de tarifas (fecha del contrato)"),
+    ("contratos.Servicio", ("tarifa_base",), "updated_at",
+     "PPA firmados desde el CRM: tarifa base (solo servicios de compra o venta)"),
+    ("contratos.Tarifa", ("valor",), "servicio__contrato__updated_at",
+     "PPA: tarifas mes a mes (fecha del contrato)"),
     ("comercial.OportunidadOfertaVersionPrecio", ("precio",), "version__updated_at",
      "Ofertas: precio por año de cada versión (fecha de la versión)"),
     ("monitoreo.Falla", ("kwh_perdidos_estimado",), "updated_at", "Fallas: kWh perdidos estimados"),
@@ -89,8 +89,10 @@ class Command(BaseCommand):
         for etiqueta, columnas, fecha, descripcion in REVISAR:
             modelo = apps.get_model(etiqueta)
             consulta = modelo.objects.filter(**{f"{fecha}__date__gte": desde})
-            if etiqueta == "contratos.Contrato":
-                consulta = consulta.filter(grupo="ppa")
+            if etiqueta == "contratos.Servicio":
+                consulta = consulta.filter(servicio__in=("compra", "venta"))
+            if etiqueta == "contratos.Tarifa":
+                consulta = consulta.filter(mes__isnull=False)
             columnas_con_dato = Q()
             for c in columnas:
                 columnas_con_dato |= Q(**{f"{c}__isnull": False})

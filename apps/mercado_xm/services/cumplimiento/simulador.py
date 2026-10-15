@@ -21,10 +21,10 @@ from apps.plataforma.services.fechas import hoy_col
 from apps.ppa.models import PpaCompromisoEnergia
 
 from .consultas import (
-    _clasificar_remanente_bolsa, _contratos_venta_ocultos, _contratos_vigentes,
+    _clasificar_remanente_bolsa, _contratos_vigentes,
     _query_contratos_venta, _resolve_gescon,
 )
-from .periodos import _gen_vigencia_mwh, _responsable_payload, _vigencia_window
+from .periodos import _gen_vigencia_mwh, _vigencia_window
 from .piscinas import _plantas_del_mes, _proyectos_por_contrato_ppa
 from .xm_api import (
     _fetch_month,
@@ -41,7 +41,7 @@ from apps.energia.services.comercializacion import (
 logger = logging.getLogger("operaciones.cumplimiento")
 
 
-def simulador(year: int, month: int, incluir_todos: bool = False) -> dict:
+def simulador(year: int, month: int) -> dict:
     """Plantas con su generación promedio + las asignaciones GESCON del mes.
 
     Alimenta el simulador: el usuario mueve plantas entre contratos y ve el efecto
@@ -53,9 +53,9 @@ def simulador(year: int, month: int, incluir_todos: bool = False) -> dict:
     # Mismo universo de plantas que `/plantas-contratos`: ver `_plantas_del_mes`.
     plantas_db = _plantas_del_mes(first_day)
 
-    contratos_db = _contratos_vigentes(year, month, solo_relevantes=not incluir_todos)
+    contratos_db = _contratos_vigentes(year, month)
 
-    contratos_venta = _query_contratos_venta(year, month, solo_relevantes=not incluir_todos)
+    contratos_venta = _query_contratos_venta(year, month)
     contratos_compra = [c for c in contratos_db if (c.tipo_contrato or "venta") == "compra"]
 
     last_day = date(year, month, total_dias)
@@ -101,18 +101,6 @@ def simulador(year: int, month: int, incluir_todos: bool = False) -> dict:
             else:
                 proyecto_primary[asic.proyecto_id] = entry
             assigned_ids.add(c.id)
-
-    # Plantas asignadas a un contrato escondido por responsable: el contrato no
-    # se muestra y su planta tampoco. Sin esto caían en "Sin contrato" con 100%
-    # de despacho y el mes completo (ver `_contratos_venta_ocultos`).
-    en_contrato_oculto: set[int] = set()
-    if not incluir_todos:
-        for c in _contratos_venta_ocultos(year, month):
-            if not c.numero_codigo_contrato:
-                continue
-            for asic in _resolve_gescon(c.numero_codigo_contrato, year, month):
-                if asic.proyecto_id:
-                    en_contrato_oculto.add(asic.proyecto_id)
 
     comp_map = {
         r.contrato_id: r
@@ -232,8 +220,6 @@ def simulador(year: int, month: int, incluir_todos: bool = False) -> dict:
     plantas_out = []
     for p in plantas_db:
         asn = proyecto_primary.get(p.id)
-        if not asn and p.id in en_contrato_oculto:
-            continue
         if asn:
             # Energía escalada a la vigencia de ESTA asignación (clave del fix:
             # una planta que solo estuvo parte del mes en el contrato refleja la
@@ -308,7 +294,6 @@ def simulador(year: int, month: int, incluir_todos: bool = False) -> dict:
             "id": c.id,
             "nombre": c.nombre_interno or c.numero_codigo_contrato or f"Contrato {c.id}",
             "comprador_nombre": c.comprador_nombre,
-            **_responsable_payload(c),
             "min_mwh": float(comp.energia_minima) if comp and comp.energia_minima is not None else None,
             "max_mwh": float(comp.energia_maxima) if comp and comp.energia_maxima is not None else None,
             # Plantas esperadas para el mes (denominador del indicador de cumplimiento de plantas).

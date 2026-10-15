@@ -8,13 +8,14 @@ Redondear al final da centavos distintos y las cifras dejan de cuadrar con el
 suyo, que es el que se contrasta.
 
 Fuentes: `despacho_contrato_mensual` (del archivo XM), `AsicSolicitud` para
-saber a qué PPA pertenece cada contrato SIC vigente, `PpaTarifa` + `IppMensual`
+saber a qué PPA pertenece cada contrato SIC vigente, `tarifas` + `IppMensual`
 para la tarifa, y `PrecioBolsaMensual` para valorizar lo que no tiene PPA.
 """
 
 from calendar import monthrange
 from datetime import date
 
+from apps.contratos.services import tarifas as tarifas_service
 from apps.facturacion import models as fa_models
 from apps.facturacion.services.factura_mensaje import (
     construir_mensaje, contribuciones,
@@ -80,9 +81,10 @@ def _dueños_por_contrato(ultimo_dia: date) -> dict:
 
 def _lineas(periodo: str, anio: int, mes: int, ipp, dueños, agrupaciones):
     ppas = {p.id: p for p in ppa_models.PpaContrato.objects.all()}
+    # El precio del mes de cada PPA (servicio de compra o venta, `tarifas`).
     tarifas = {
-        t.contrato_id: (float(t.tarifa) if t.tarifa is not None else None)
-        for t in ppa_models.PpaTarifa.objects.filter(**{"año": anio, "mes": mes})
+        contrato_id: float(valor)
+        for contrato_id, valor in tarifas_service.precios_ppa(anio, mes).items()
     }
     nombres = dict(
         py_models.Proyecto.objects.values_list("id", "nombre_comercial")

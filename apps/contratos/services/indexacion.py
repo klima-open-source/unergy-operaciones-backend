@@ -36,7 +36,7 @@ def importar(tipo: str, entradas: list[dict]) -> dict:
             continue
 
         contrato = ct_models.ContratoServicio.objects.filter(
-            proyecto=proyecto, servicio_aplica=SERVICIO_OM
+            proyectos_vinculados__proyecto=proyecto, servicio_aplica=SERVICIO_OM
         ).first()
         if contrato is None:
             no_encontrados.append(nombre)

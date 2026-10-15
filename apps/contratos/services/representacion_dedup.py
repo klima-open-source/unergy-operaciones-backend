@@ -46,14 +46,13 @@ CAMPOS = (
     "proyecto_id", "numero_contrato",
     # Las partes, por su cliente: el nombre y el NIT son los de la ficha.
     "contratante_id", "prestador_id",
-    "inversionista_nombre", "portafolio", "codigo_sun_factory", "nombre_proyecto_ref",
+    "inversionista_nombre", "codigo_sun_factory", "nombre_proyecto_ref",
     "fecha_inicio", "fecha_fin", "fecha_firma_contrato", "fecha_indexacion",
     "fecha_inicio_om", "renovacion_automatica", "periodicidad_pago",
     "indice_indexacion", "tarifa_base", "tarifa_mensual",
     "tarifa_admin", "tarifa_cgm", "tarifa_representacion",
     "indexacion_cgm", "indexacion_representacion",
     "enlace_drive", "estado_pago", "estado",
-    "cgm_codigo_sic",
     "responsable_iva",
 )
 

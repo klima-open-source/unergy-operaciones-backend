@@ -29,8 +29,11 @@ from apps.plataforma.services.auditoria import registrar_borrado
 # de correos sin relación de negocio) se corrigió aparte a SET NULL en la
 # revisión 120 — no debía bloquear nunca.
 TABLAS_BLOQUEAN_BORRADO = [
-    ("proyecto_inversionistas", "cliente_id", "es inversionista de uno o más proyectos"),
+    # La participación apunta al inversionista, no al cliente: se cruza por ahí.
+    ("proyecto_inversionistas pi JOIN inversionistas i ON i.id = pi.inversionista_id",
+     "i.cliente_id", "es inversionista de uno o más proyectos"),
     ("oportunidades", "cliente_id", "tiene una o más oportunidades comerciales registradas"),
+    ("patrimonios", "cliente_id", "es la ficha de un patrimonio autónomo"),
 ]
 
 # Fusión: mismo patrón que /proyectos/{ganador}/merge/{perdedor}. `dry_run` por
@@ -47,10 +50,10 @@ MERGE_SIMPLE = [  # (tabla, columna)
     ("proyecto_area_contacto", "cliente_id"),
     ("arr_arrendador", "cliente_id"),            # el dueño del terreno; de él sale su IVA
     ("contrato_factura", "inversionista_id"),    # a quién se le emitió la factura
+    ("patrimonios", "cliente_id"),               # la ficha de un patrimonio autónomo
 ]
 MERGE_COMPUESTO = [
     ("contactos", ["email", "tipo"]),               # UNIQUE (cliente_id, email, tipo)
-    ("proyecto_inversionistas", ["proyecto_id"]),   # no duplicar al cliente en el mismo proyecto
     # Las partes de los contratos. La fusión mueve las columnas de `contratos` con SQL
     # directo, que no pasa por `Contrato.save()`, así que esta tabla se mueve aquí: si
     # el ganador ya era esa parte de ese contrato, la fila del perdedor sobra.
@@ -59,6 +62,12 @@ MERGE_COMPUESTO = [
     # nulo): si las dos fichas tienen tasa para lo mismo, gana la del ganador.
     ("cliente_tasa_servicio", ["proyecto_id", "servicio"]),
 ]
+# `inversionistas` tiene UNA fila por cliente y las participaciones apuntan a ella,
+# así que no cabe en `MERGE_COMPUESTO`: si las dos fichas son inversionistas, las
+# participaciones del perdedor pasan a la fila del ganador --salvo en las plantas
+# donde el ganador ya participa, que se descartan como antes-- y la del perdedor se
+# borra; si solo lo es el perdedor, su fila pasa al ganador. Ver `_fusionar_inversionista`.
+MERGE_ROL_UNICO = [("inversionistas", "cliente_id")]
 # `nit_cedula` es UNIQUE en la base: hay que liberarlo en el perdedor antes de
 # copiarlo al ganador (mismo tratamiento que `sunfactory_project_id` en proyectos).
 MERGE_ESCALAR_UNICO = ["nit_cedula"]
@@ -123,16 +132,57 @@ def borrar(cliente: Cliente) -> None:
     cliente.save(update_fields=["deleted_at"])
 
 
-#: Las columnas de `contratos` que apuntan a un cliente como parte del contrato.
-#: Comprador, vendedor, contratante y prestador están en `contrato_partes`, que la
-#: fusión mueve en `MERGE_COMPUESTO`. Queda el inversionista, hasta su rama.
-CAMPOS_PARTE_CONTRATO = ("inversionista_id",)
-
 
 def _escalar(cur, sql: str, params: dict) -> int:
     cur.execute(sql, params)
     fila = cur.fetchone()
     return fila[0] if fila else 0
+
+
+#: Las participaciones del perdedor en plantas donde el ganador ya participa
+#: (`uq_proyecto_inversionistas` no deja tener dos).
+_PARTICIPACIONES_QUE_CHOCAN = (
+    "SELECT count(*) FROM proyecto_inversionistas WHERE inversionista_id = %(perdedor)s "
+    "AND proyecto_id IN (SELECT proyecto_id FROM proyecto_inversionistas "
+    "WHERE inversionista_id = %(ganador)s)"
+)
+
+
+def _ids_de_inversionista(cur, p: dict):
+    cur.execute("SELECT id FROM inversionistas WHERE cliente_id = %(loser)s", p)
+    perdedor = cur.fetchone()
+    cur.execute("SELECT id FROM inversionistas WHERE cliente_id = %(keeper)s", p)
+    ganador = cur.fetchone()
+    return (perdedor[0] if perdedor else None), (ganador[0] if ganador else None)
+
+
+def _fusionar_inversionista(cur, p: dict) -> None:
+    perdedor, ganador = _ids_de_inversionista(cur, p)
+    if not perdedor:
+        return
+    if not ganador:
+        cur.execute("UPDATE inversionistas SET cliente_id = %(keeper)s WHERE id = %(perdedor)s",
+                    {**p, "perdedor": perdedor})
+        return
+    q = {"perdedor": perdedor, "ganador": ganador}
+    # Antes de descartar las que chocan: el contrato de representación que apuntaba a
+    # la del perdedor pasa a la del ganador en la misma planta.
+    cur.execute(
+        "UPDATE contrato_proyectos SET proyecto_inversionista_id = ("
+        "  SELECT g.id FROM proyecto_inversionistas l JOIN proyecto_inversionistas g"
+        "    ON g.proyecto_id = l.proyecto_id AND g.inversionista_id = %(ganador)s"
+        "  WHERE l.id = contrato_proyectos.proyecto_inversionista_id) "
+        "WHERE proyecto_inversionista_id IN ("
+        "  SELECT l.id FROM proyecto_inversionistas l JOIN proyecto_inversionistas g"
+        "    ON g.proyecto_id = l.proyecto_id AND g.inversionista_id = %(ganador)s"
+        "  WHERE l.inversionista_id = %(perdedor)s)", q,
+    )
+    cur.execute(_PARTICIPACIONES_QUE_CHOCAN.replace("SELECT count(*)", "DELETE"), q)
+    cur.execute(
+        "UPDATE proyecto_inversionistas SET inversionista_id = %(ganador)s "
+        "WHERE inversionista_id = %(perdedor)s", q,
+    )
+    cur.execute("DELETE FROM inversionistas WHERE id = %(perdedor)s", q)
 
 
 def reporte_merge(ganador: Cliente, perdedor: Cliente) -> tuple[list[dict], list[dict]]:
@@ -161,19 +211,17 @@ def reporte_merge(ganador: Cliente, perdedor: Cliente) -> tuple[list[dict], list
                 "tabla": t, "a_mover": n - coli, "descartadas_por_colision": coli,
             })
 
-        # contratos: las partes de PPA (comprador/vendedor) y de servicio
-        # (contratante/prestador/inversionista), todas en la tabla única desde el
-        # corte (plan 08). Sin unicidad por cliente. Las de servicio faltaban acá
-        # hasta la auditoría de Clientes 2026-08-27: fusionar un cliente que fuera
-        # parte de un contrato de servicio lo dejaba apuntando al perdedor.
-        n = sum(
-            _escalar(cur, f"SELECT count(*) FROM contratos WHERE {campo} = %(loser)s", p)
-            for campo in CAMPOS_PARTE_CONTRATO
-        )
-        if n:
-            movimientos.append({
-                "tabla": "contratos", "a_mover": n, "descartadas_por_colision": 0,
-            })
+        perdedor, ganador = _ids_de_inversionista(cur, p)
+        if perdedor:
+            movimientos.append({"tabla": "inversionistas", "a_mover": 1, "descartadas_por_colision": 0})
+            q = {"perdedor": perdedor, "ganador": ganador}
+            n = _escalar(cur, "SELECT count(*) FROM proyecto_inversionistas "
+                              "WHERE inversionista_id = %(perdedor)s", q)
+            coli = _escalar(cur, _PARTICIPACIONES_QUE_CHOCAN, q) if ganador else 0
+            if n:
+                movimientos.append({"tabla": "proyecto_inversionistas", "a_mover": n - coli,
+                                    "descartadas_por_colision": coli})
+
 
     campos_copiados = [
         {"campo": f, "valor": getattr(perdedor, f)}
@@ -202,11 +250,9 @@ def ejecutar_merge(ganador: Cliente, perdedor: Cliente, movimientos: list[dict],
         })
 
         with connection.cursor() as cur:
-            # 1) Las cinco columnas de parte de `contratos`.
-            for campo in CAMPOS_PARTE_CONTRATO:
-                cur.execute(
-                    f"UPDATE contratos SET {campo} = %(keeper)s WHERE {campo} = %(loser)s", p
-                )
+            # 1 bis) El inversionista, antes que sus participaciones (paso 2): las
+            #        del perdedor se repuntan al del ganador si ya lo era.
+            _fusionar_inversionista(cur, p)
 
             # 2) Colisión por clave compuesta: se descarta la del perdedor.
             for t, claves in MERGE_COMPUESTO:

@@ -62,15 +62,15 @@ def proyectos_por_cliente(cliente_ids: set[int]) -> dict[int, set[int]]:
         return res
 
     for cid, pid in ProyectoInversionista.objects.filter(
-        cliente_id__in=cliente_ids
-    ).values_list("cliente_id", "proyecto_id"):
+        inversionista__cliente_id__in=cliente_ids
+    ).values_list("inversionista__cliente_id", "proyecto_id"):
         res[cid].add(pid)
 
     # Contratante y prestador: un cliente que PRESTA el servicio también tiene
     # esa planta "con nosotros" (mismo criterio que `servicios_por_cliente`).
     for cid, pid in _partes_de_servicio(cliente_ids).filter(
-        contrato__proyecto_id__isnull=False
-    ).values_list("cliente_id", "contrato__proyecto_id"):
+        contrato__proyectos_vinculados__proyecto_id__isnull=False
+    ).values_list("cliente_id", "contrato__proyectos_vinculados__proyecto_id"):
         res[cid].add(pid)
 
     # Comprador o vendedor de un PPA: las plantas que el PPA cubre.
@@ -122,8 +122,8 @@ def servicios_por_cliente(cliente_ids: set[int],
     por_proyecto = _proyecto_a_clientes(plantas)
     if por_proyecto:
         for pid, tipo in ContratoServicio.objects.filter(
-            proyecto_id__in=por_proyecto.keys()
-        ).values_list("proyecto_id", "servicio_aplica"):
+            proyectos_vinculados__proyecto_id__in=por_proyecto.keys()
+        ).values_list("proyectos_vinculados__proyecto_id", "servicio_aplica"):
             for cid in por_proyecto[pid]:
                 res[cid].add(tipo)
 
@@ -181,8 +181,8 @@ def alerta_contratos_por_cliente(cliente_ids: set[int], hoy: date,
     por_proyecto = _proyecto_a_clientes(plantas)
     if por_proyecto:
         for pid, fecha_fin, estado in ContratoServicio.objects.filter(
-            proyecto_id__in=por_proyecto.keys()
-        ).values_list("proyecto_id", "fecha_fin", "estado"):
+            proyectos_vinculados__proyecto_id__in=por_proyecto.keys()
+        ).values_list("proyectos_vinculados__proyecto_id", "fecha_fin", "estado"):
             if estado == "terminado":
                 continue
             for cid in por_proyecto[pid]:

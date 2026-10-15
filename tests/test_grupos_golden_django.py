@@ -15,7 +15,7 @@ from apps.contratos.services import grupos
 def _srv(**kw):
     """Stub de ContratoServicio: solo los atributos que grupos.py lee."""
     base = dict(servicio_aplica=None, tarifa_representacion=None, tarifa_cgm=None,
-                tarifa_base=None)
+                tarifa_anual=None, tarifa_mensual=None, tarifa_admin=None)
     base.update(kw)
     return SimpleNamespace(**base)
 
@@ -44,10 +44,11 @@ def test_golden_subservicios_representacion_cgm():
 
 def test_golden_subservicios_operacion():
     for sa in ("mantenimiento", "arriendo", "internet"):
-        c = _srv(servicio_aplica=sa, tarifa_base=100.0)
+        c = _srv(servicio_aplica=sa, tarifa_anual=100.0, tarifa_mensual=100.0)
         assert grupos.subservicios_de(c) == [sa]
         assert grupos.grupo_de_contrato(c) == "operacion"
-        # Los tres de operación comparten tarifa_base.
+        # Mantenimiento y arriendo leen su valor anual; internet, el mensual
+        # (atajos sobre `tarifas`, rama de servicios y tarifas).
         assert grupos.tarifa_de(c, sa) == 100.0
 
     # servicio_aplica desconocido -> lista vacía (no inventa grupo).
@@ -55,12 +56,14 @@ def test_golden_subservicios_operacion():
 
 
 def test_golden_tarifa_de_por_columna():
-    c = _srv(tarifa_representacion=6.0, tarifa_cgm=5.0, tarifa_base=100.0)
+    c = _srv(tarifa_representacion=6.0, tarifa_cgm=5.0, tarifa_anual=100.0,
+             tarifa_mensual=8.0, tarifa_admin=0.038)
     assert grupos.tarifa_de(c, "representacion") == 6.0
     assert grupos.tarifa_de(c, "cgm") == 5.0
     assert grupos.tarifa_de(c, "mantenimiento") == 100.0
     assert grupos.tarifa_de(c, "arriendo") == 100.0
-    assert grupos.tarifa_de(c, "internet") == 100.0
+    assert grupos.tarifa_de(c, "internet") == 8.0
+    assert grupos.tarifa_de(c, "administracion") == 0.038
     assert grupos.tarifa_de(c, "desconocido") is None
 
 

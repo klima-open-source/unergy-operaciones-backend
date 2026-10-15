@@ -5,6 +5,7 @@ from rest_framework import serializers
 from apps.clientes import models as cl_models
 from apps.contratos import models as ct_models
 from apps.contratos.services import comunidades as comunidades_service
+from apps.contratos.services import contrato_proyectos
 from apps.contratos.services import grupos as grupos_service
 from apps.contratos.services import vigencia as vigencia_service
 from apps.plataforma.services.fechas import hoy_col
@@ -22,7 +23,8 @@ class ContratoSerializer(serializers.ModelSerializer):
     prestador_nombre = serializers.CharField(read_only=True, allow_null=True)
     prestador_nit = serializers.CharField(read_only=True, allow_null=True)
     inversionista_id = serializers.IntegerField(allow_null=True)
-    portafolio_id = serializers.IntegerField(allow_null=True)
+    # De la ficha del cliente, por la participación (`contrato_proyectos`).
+    inversionista_nombre = serializers.CharField(read_only=True, allow_null=True)
     nombre_proyecto = serializers.SerializerMethodField()
     # El frontend (ServiciosUnificadoView.vue) decide si mostrar la planta o el
     # boton "Sin proyecto" mirando este objeto anidado -- `proyecto_id` solo
@@ -38,10 +40,25 @@ class ContratoSerializer(serializers.ModelSerializer):
     # Ver `docs/SERVICIOS_AGRUPACION.md`.
     grupo = serializers.SerializerMethodField()
     subservicios = serializers.SerializerMethodField()
+    # Las tarifas salen de `tarifas` (rama de servicios y tarifas) con los mismos
+    # nombres y formas de cuando eran columnas: el front no cambia. `tarifa_base`
+    # de un contrato de servicio es el valor anual de mantenimiento o arriendo.
+    tarifa_representacion = serializers.DecimalField(max_digits=10, decimal_places=6, read_only=True, allow_null=True)
+    tarifa_cgm = serializers.DecimalField(max_digits=10, decimal_places=6, read_only=True, allow_null=True)
+    tarifa_admin = serializers.DecimalField(max_digits=8, decimal_places=4, read_only=True, allow_null=True)
+    tarifa_mensual = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True, allow_null=True)
+    tarifa_base = serializers.DecimalField(source="tarifa_anual", max_digits=18, decimal_places=4,
+                                           read_only=True, allow_null=True)
+    indexacion_representacion = serializers.JSONField(read_only=True, allow_null=True)
+    indexacion_cgm = serializers.JSONField(read_only=True, allow_null=True)
+    indexacion_anual = serializers.JSONField(read_only=True, allow_null=True)
+    indexacion_mensual = serializers.JSONField(read_only=True, allow_null=True)
+    # El cargo de administración, aparte de los subservicios (no cuenta para la planta).
+    cargos = serializers.SerializerMethodField()
 
     class Meta:
         model = ct_models.ContratoServicio
-        exclude = ["inversionista", "portafolio", *ct_models.COLUMNAS_SOLO_PPA]
+        exclude = [*ct_models.COLUMNAS_SOLO_PPA]
 
     def get_nombre_proyecto(self, obj) -> str | None:
         return obj.proyecto.nombre_comercial if obj.proyecto else None
@@ -57,6 +74,9 @@ class ContratoSerializer(serializers.ModelSerializer):
 
     def get_grupo(self, obj) -> str | None:
         return grupos_service.grupo_de_contrato(obj)
+
+    def get_cargos(self, obj) -> list[str]:
+        return [s.servicio for s in obj.servicios.all() if s.servicio in grupos_service.CARGOS]
 
     def get_subservicios(self, obj) -> list[str]:
         return grupos_service.subservicios_de(obj)
@@ -118,18 +138,34 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
         source="prestador", queryset=cl_models.Cliente.objects.all(),
         allow_null=True, required=False,
     )
+    # El inversionista de un contrato de representación es una participación de
+    # la planta (`contrato_proyectos`): se valida en `validate`.
     inversionista_id = serializers.PrimaryKeyRelatedField(
         source="inversionista", queryset=cl_models.Cliente.objects.all(),
         allow_null=True, required=False,
+    )
+    # Las tarifas se escriben en los atajos del contrato y `save()` las lleva a
+    # `tarifas`. `tarifa_base` de un contrato de servicio va a `tarifa_anual`.
+    tarifa_representacion = serializers.DecimalField(max_digits=10, decimal_places=6, required=False, allow_null=True)
+    tarifa_cgm = serializers.DecimalField(max_digits=10, decimal_places=6, required=False, allow_null=True)
+    tarifa_admin = serializers.DecimalField(max_digits=8, decimal_places=4, required=False, allow_null=True)
+    tarifa_mensual = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
+    tarifa_base = serializers.DecimalField(source="tarifa_anual", max_digits=18, decimal_places=4,
+                                           required=False, allow_null=True)
+    indexacion_representacion = serializers.JSONField(required=False, allow_null=True)
+    indexacion_cgm = serializers.JSONField(required=False, allow_null=True)
+    indexacion_anual = serializers.JSONField(required=False, allow_null=True)
+    indexacion_mensual = serializers.JSONField(required=False, allow_null=True)
+    # Se acepta por compatibilidad y no se guarda: el nombre es el de la ficha.
+    inversionista_nombre = serializers.CharField(
+        allow_null=True, allow_blank=True, required=False, write_only=True,
     )
 
     class Meta:
         model = ct_models.ContratoServicio
         # `grupo` lo fija el `save()` desde `servicio_aplica`: no se escribe. Las
         # partes viajan como `*_id` (arriba), no como la relación.
-        exclude = [
-            "proyecto", "inversionista", "grupo", *ct_models.COLUMNAS_SOLO_PPA,
-        ]
+        exclude = ["grupo", *ct_models.COLUMNAS_SOLO_PPA]
         extra_kwargs = {"servicio_aplica": {"required": False}}
 
     def _exigir_partes_vinculadas(self, datos):
@@ -188,8 +224,25 @@ class ContratoEscrituraSerializer(serializers.ModelSerializer):
         servicio = datos.get(
             "servicio_aplica", getattr(self.instance, "servicio_aplica", None)
         )
+        inversionista = datos.get("inversionista", getattr(self.instance, "inversionista", None))
+        es_representacion = (
+            grupos_service.grupo_de(servicio) == grupos_service.REPRESENTACION_CGM
+        )
+        # El inversionista es una participación de la planta: sin planta no hay
+        # dónde guardarlo (rama de inversionistas, 2026-10-13).
+        if es_representacion and inversionista is not None and proyecto is None:
+            raise serializers.ValidationError({"proyecto_id": (
+                "Escoge la planta: el inversionista de un contrato de representación "
+                "es uno de los inversionistas de esa planta."
+            )})
         if proyecto is None or servicio is None:
             return datos
+
+        if es_representacion and inversionista is not None:
+            try:
+                contrato_proyectos.validar_inversionista(proyecto.id, inversionista.id)
+            except contrato_proyectos.InversionistaFueraDeLaPlanta as exc:
+                raise serializers.ValidationError({"inversionista_id": str(exc)})
 
         motivo = comunidades_service.motivo_bloqueo(
             proyecto.id, servicio,

@@ -74,9 +74,12 @@ def _contratos(q: str) -> list[dict]:
         Contrato.objects.filter(deleted_at__isnull=True)
         .filter(
             Q(numero_contrato__icontains=q) | Q(nombre_interno__icontains=q)
-            | Q(numero_codigo_contrato__icontains=q) | Q(proyecto__nombre_comercial__icontains=q)
+            | Q(numero_codigo_contrato__icontains=q)
+            | Q(proyectos_vinculados__proyecto__nombre_comercial__icontains=q)
         )
-        .select_related("proyecto")
+        .distinct()
+        # La planta vive en `contrato_proyectos` (`contrato.proyecto` es un atajo).
+        .prefetch_related("proyectos_vinculados__proyecto")
         .order_by("-fecha_inicio", "-id")[:POR_TIPO]
     )
     return [{

@@ -80,8 +80,9 @@ def _decimal(v) -> Decimal | None:
 def _del_panel():
     """Las plantas de la tabla de Arriendos (`panel.calculo`): las que operamos y
     tienen contrato de arriendo. Traer cuentas de otras las dejaría sin dónde verse."""
-    con_arriendo = ct_models.ContratoServicio.objects.filter(
-        servicio_aplica="arriendo", proyecto__isnull=False, deleted_at__isnull=True,
+    # La planta del contrato vive en `contrato_proyectos` desde `contratos/0018`.
+    con_arriendo = ct_models.ContratoProyecto.objects.filter(
+        contrato__servicio_aplica="arriendo", contrato__deleted_at__isnull=True,
     ).values_list("proyecto_id", flat=True)
     return Proyecto.objects.filter(
         plantas_service.filtro_operadas(hoy_col()), id__in=con_arriendo, deleted_at__isnull=True,
@@ -126,9 +127,11 @@ def _completar_ids_tsf(plantas: list[Proyecto], ob: ClienteOriginabot) -> list[s
 
 def _arrendador(planta: Proyecto, landlord: dict) -> ar_models.ArrArrendador | None:
     """El arrendador del contrato de arriendo de la planta que es este propietario."""
+    # La planta del contrato vive en `contrato_proyectos` desde `contratos/0018`.
     del_contrato = ar_models.ArrArrendador.objects.filter(
-        contrato__proyecto_id=planta.id, contrato__servicio_aplica="arriendo",
-    )
+        contrato__proyectos_vinculados__proyecto_id=planta.id,
+        contrato__servicio_aplica="arriendo",
+    ).distinct()
     por_llave = del_contrato.filter(originabot_landlord_id=landlord.get("id")).first()
     if por_llave:
         return por_llave

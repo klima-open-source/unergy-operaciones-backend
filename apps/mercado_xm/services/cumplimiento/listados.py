@@ -12,22 +12,17 @@ from collections import defaultdict
 from apps.ppa.models import PpaCompromisoEnergia, PpaContrato
 from apps.contratos.services import contrato_partes
 
-from .consultas import _asc_nulls_last, _contratos_vigentes, _filtro_responsable_relevante
-from .periodos import _contrato_vigente_en_mes, _responsable_payload
+from .consultas import _asc_nulls_last, _contratos_vigentes
+from .periodos import _contrato_vigente_en_mes
 
 
-def listar_contratos(incluir_todos: bool = False) -> list[dict]:
+def listar_contratos() -> list[dict]:
     """Todos los contratos PPA, para el selector."""
     qs = (
         PpaContrato.objects
-        .select_related("responsable")
         .prefetch_related(contrato_partes.CON_PARTES)
         .filter(deleted_at__isnull=True)
     )
-    if not incluir_todos:
-        clausula = _filtro_responsable_relevante()
-        if clausula is not None:
-            qs = qs.filter(clausula)
     rows = qs.order_by(_asc_nulls_last("nombre_interno"), "id")
     return [
         {
@@ -37,13 +32,12 @@ def listar_contratos(incluir_todos: bool = False) -> list[dict]:
             "comprador_nombre": r.comprador_nombre,
             "fecha_inicio": r.fecha_inicio.isoformat() if r.fecha_inicio else None,
             "fecha_fin": r.fecha_fin.isoformat() if r.fecha_fin else None,
-            **_responsable_payload(r),
         }
         for r in rows
     ]
 
 
-def resumen_anual(year: int, incluir_todos: bool = False) -> list[dict]:
+def resumen_anual(year: int) -> list[dict]:
     """Totales de compromiso por contrato en el año. **Solo base**, sin llamar a
     la API de Unergy: es instantáneo y sirve de cabecera de la vista anual.
 
@@ -51,7 +45,7 @@ def resumen_anual(year: int, incluir_todos: bool = False) -> list[dict]:
     antes sumaba los 12 sin filtrar y contratos terminados en abril mostraban
     compromiso de mayo a diciembre.
     """
-    contratos = _contratos_vigentes(year, solo_relevantes=not incluir_todos)
+    contratos = _contratos_vigentes(year)
     compromisos = PpaCompromisoEnergia.objects.filter(año=year)
     comp_by_c: dict = defaultdict(list)
     for c in compromisos:
@@ -72,7 +66,6 @@ def resumen_anual(year: int, incluir_todos: bool = False) -> list[dict]:
             "nombre_interno": c.nombre_interno,
             "numero_codigo_contrato": c.numero_codigo_contrato,
             "comprador_nombre": c.comprador_nombre,
-            **_responsable_payload(c),
             "fecha_inicio": c.fecha_inicio.isoformat() if c.fecha_inicio else None,
             "fecha_fin": c.fecha_fin.isoformat() if c.fecha_fin else None,
             "total_min_mwh": round(total_min, 1) if rows else None,

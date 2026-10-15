@@ -37,14 +37,14 @@ from . import serializers as cu_serializers
 class CumplimientoViewSet(viewsets.GenericViewSet):
     """Cumplimiento contractual de energía (PPA × GESCON × generación real).
 
-    GET  /api/v1/cumplimiento/ppa[?incluir_todos=]
+    GET  /api/v1/cumplimiento/ppa
     GET  /api/v1/cumplimiento/ppa/resumen?year=&month=
     GET  /api/v1/cumplimiento/ppa/resumen-anual?year=
     GET  /api/v1/cumplimiento/ppa/{contrato_id}?year=&month=
     GET  /api/v1/cumplimiento/ppa/{contrato_id}/anual?year=
     GET  /api/v1/cumplimiento/ppa/{contrato_id}/plantas-inscritas-por-mes
     GET  /api/v1/cumplimiento/simulador?year=&month=
-    GET  /api/v1/cumplimiento/vista-contratos?fecha=&responsable=
+    GET  /api/v1/cumplimiento/vista-contratos?fecha=
     GET  /api/v1/cumplimiento/plantas-contratos?year=&month=
     GET  /api/v1/cumplimiento/balance-energia?year=&month=
     POST /api/v1/cumplimiento/backfill-comercializacion[?dry_run=&force=]
@@ -77,18 +77,18 @@ class CumplimientoViewSet(viewsets.GenericViewSet):
 
     @action(detail=False, methods=["get"], url_path="ppa")
     def ppa(self, request):
-        return Response(listados.listar_contratos(par.bandera(request, "incluir_todos")))
+        return Response(listados.listar_contratos())
 
     @action(detail=False, methods=["get"], url_path="ppa/resumen")
     def ppa_resumen(self, request):
         return Response(resumen_svc.resumen(
-            par.anio(request), par.mes(request), par.bandera(request, "incluir_todos"),
+            par.anio(request), par.mes(request),
         ))
 
     @action(detail=False, methods=["get"], url_path="ppa/resumen-anual")
     def ppa_resumen_anual(self, request):
         return Response(listados.resumen_anual(
-            par.anio(request), par.bandera(request, "incluir_todos"),
+            par.anio(request),
         ))
 
     @action(detail=False, methods=["get"], url_path=r"ppa/(?P<contrato_id>\d+)")
@@ -113,30 +113,24 @@ class CumplimientoViewSet(viewsets.GenericViewSet):
     @action(detail=False, methods=["get"], url_path="simulador")
     def simulador(self, request):
         return Response(simulador_svc.simulador(
-            par.anio(request), par.mes(request), par.bandera(request, "incluir_todos"),
+            par.anio(request), par.mes(request),
         ))
 
     @action(detail=False, methods=["get"], url_path="vista-contratos")
     def vista_contratos(self, request):
-        """La foto de UN día. `responsable` filtra ESTRICTO: un contrato sin
-        responsable asignado tampoco pasa."""
+        """La foto de UN día, con todos los contratos de venta vigentes."""
         crudo = request.query_params.get("fecha")
         try:
             dia = date.fromisoformat(crudo or "")
         except ValueError:
             raise NoProcesable(f"'{crudo}' no es una fecha válida. Usá el formato YYYY-MM-DD.")
 
-        responsable = request.query_params.get("responsable", "Unergy")
-        filtro = None if (responsable or "").strip().lower() in ("", "todos") else responsable
-        return Response(vista_contratos.construir(
-            fecha=dia, responsable=filtro,
-            incluir_todos=par.bandera(request, "incluir_todos"),
-        ))
+        return Response(vista_contratos.construir(fecha=dia))
 
     @action(detail=False, methods=["get"], url_path="plantas-contratos")
     def plantas_contratos(self, request):
         return Response(piscinas.plantas_contratos(
-            par.anio(request), par.mes(request), par.bandera(request, "incluir_todos"),
+            par.anio(request), par.mes(request),
         ))
 
     @action(detail=False, methods=["get"], url_path="balance-energia")
@@ -144,13 +138,12 @@ class CumplimientoViewSet(viewsets.GenericViewSet):
         return Response(calcular_balance(
             par.anio(request), par.mes(request),
             excluir_compra_externa=par.bandera(request, "excluir_compra_externa"),
-            incluir_todos=par.bandera(request, "incluir_todos"),
         ))
 
     @action(detail=False, methods=["get"], url_path="energia-transada")
     def energia_transada(self, request):
         return Response(transada.energia_transada(
-            par.anio(request), par.mes(request), par.bandera(request, "incluir_todos"),
+            par.anio(request), par.mes(request),
         ))
 
     # ── Comercialización ──────────────────────────────────────────────────
@@ -173,13 +166,13 @@ class CumplimientoViewSet(viewsets.GenericViewSet):
     @action(detail=False, methods=["get"], url_path="anual-matriz")
     def anual_matriz(self, request):
         return Response(resumen_svc.anual_matriz(
-            par.anio(request), par.bandera(request, "incluir_todos"),
+            par.anio(request),
         ))
 
     @action(detail=False, methods=["get"], url_path="anual-matriz/contratos")
     def anual_matriz_contratos(self, request):
         return Response(contratos_svc.anual_matriz_contratos(
-            par.anio(request), par.bandera(request, "incluir_todos"),
+            par.anio(request),
         ))
 
     @action(
@@ -195,7 +188,6 @@ class CumplimientoViewSet(viewsets.GenericViewSet):
             par.anio(request),
             incluir_plantas=par.bandera(request, "incluir_plantas", defecto=True),
             refrescar=par.bandera(request, "refrescar"),
-            incluir_todos=par.bandera(request, "incluir_todos"),
         ))
 
     # ── Exposición y cierre ───────────────────────────────────────────────

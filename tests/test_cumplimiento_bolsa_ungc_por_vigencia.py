@@ -118,7 +118,7 @@ def test_sic_ungc_que_empieza_a_mitad_de_mes_no_cubre_los_dias_previos():
             contrato_interno="UNG-2026-Hormiga",
             fecha_inicio=date(2026, 4, 23), fecha_fin=date(2026, 12, 31))
 
-    out = plantas_contratos(2026, 4, incluir_todos=True)
+    out = plantas_contratos(2026, 4)
 
     assert _tramos(out, hormiga) == {
         "libre": [("2026-04-01", "2026-04-22")],
@@ -137,7 +137,7 @@ def test_sic_ungc_terminado_a_mitad_de_mes_deja_libre_el_resto():
     _gescon(tipo_solicitud="terminacion", codigo_sic_contrato="88787", proyecto=None,
             fecha_inicio=None, fecha_fin=date(2026, 2, 12))
 
-    out = plantas_contratos(2026, 2, incluir_todos=True)
+    out = plantas_contratos(2026, 2)
 
     assert _tramos(out, yurbaqua) == {
         "comercializador": [("2026-02-01", "2026-02-12")],
@@ -156,7 +156,7 @@ def test_sic_ungc_todo_el_mes_sigue_siendo_un_solo_tramo_ungc():
             contrato_interno="UNG-2026",
             fecha_inicio=date(2026, 1, 15), fecha_fin=date(2026, 12, 31))
 
-    out = plantas_contratos(2026, 3, incluir_todos=True)
+    out = plantas_contratos(2026, 3)
 
     assert _tramos(out, sirius) == {"comercializador": [("2026-03-01", "2026-03-31")]}
 
@@ -166,6 +166,6 @@ def test_sin_sic_ungc_todo_el_tramo_es_libre():
 
     libre = _planta("Planta sin contrato")
 
-    out = plantas_contratos(2026, 3, incluir_todos=True)
+    out = plantas_contratos(2026, 3)
 
     assert _tramos(out, libre) == {"libre": [("2026-03-01", "2026-03-31")]}

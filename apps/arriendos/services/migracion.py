@@ -19,8 +19,8 @@ def diagnostico() -> dict:
     claves = [(a, om_keys(a.nombre)) for a in activos]
     con_contrato_arr = set(
         ct_models.ContratoServicio.objects
-        .filter(servicio_aplica="arriendo", proyecto__isnull=False)
-        .values_list("proyecto_id", flat=True)
+        .filter(servicio_aplica="arriendo", proyectos_vinculados__isnull=False)
+        .values_list("proyectos_vinculados__proyecto_id", flat=True)
     )
 
     emparejados: set[int] = set()

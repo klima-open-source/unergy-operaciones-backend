@@ -6,6 +6,7 @@ from django.db.models import Q
 
 from apps.contratos.models import ContratoParte, RolParte
 from apps.contratos.services import contrato_partes
+from apps.contratos.services import tarifas as tarifas_service
 from apps.ppa import models as ppa_models
 from apps.ppa.services import contratos as contratos_service
 
@@ -24,11 +25,10 @@ def con_relaciones():
     return (
         ppa_models.PpaContrato.objects
         .filter(deleted_at__isnull=True)
-        .select_related("responsable")
         .prefetch_related(
             contrato_partes.CON_PARTES,
             "proyectos_vinculados__proyecto",
-            "tarifas",
+            tarifas_service.con_tarifas(),  # precios del mes y base
             "compromisos",
             "documentos_comerciales",
         )

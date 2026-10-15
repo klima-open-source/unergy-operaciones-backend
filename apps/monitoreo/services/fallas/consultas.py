@@ -41,7 +41,10 @@ def base_lista():
         .select_related(*RELACIONES_LISTA)
         # `tiempo_afectacion_horas` del serializer de LISTA lee
         # `falla.intervalos`: sin esto era una query por fila (hasta 5000).
-        .prefetch_related("intervalos")
+        # Los inversores afectados los lee `impacto.pct_afectado`, por fila.
+        .prefetch_related(
+            "intervalos", "inversores_afectados__proyecto_inversor", "proyecto__inversores",
+        )
     )
 
 
@@ -138,7 +141,7 @@ def filtrar(params) -> QuerySet:
         hoy = hoy_col()
         proyectos = (
             ProyectoInversionista.objects
-            .filter(cliente_id=params["cliente_id"])
+            .filter(inversionista__cliente_id=params["cliente_id"])
             .filter(Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=hoy))
             .values("proyecto_id")
         )

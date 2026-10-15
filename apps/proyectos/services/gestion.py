@@ -30,7 +30,6 @@ RELACIONES_BLOQUEANTES = [
     ("liquidaciones", "liquidaciones_por_proyecto_id"),
     ("asic_solicitudes", "asic_solicitudes_por_proyecto_id"),
     ("rec_procesos", "rec_procesos_por_proyecto_id"),
-    ("contratos_servicio", "contratos_servicio_por_proyecto_id"),
     ("fronteras", "fronteras"),
     ("generacion_diaria", "generacion_diaria_por_proyecto_id"),
 ]
@@ -62,8 +61,8 @@ TABLAS_CASCADE_SIN_RELACION = [
 #   MERGE_UNO_A_UNO  : `proyecto_id` UNIQUE → si el ganador ya tiene fila, se
 #                      descarta la del perdedor.
 MERGE_SIMPLE = [
-    "proyecto_inversores", "proyecto_inversionistas", "fronteras", "fallas",
-    "contratos", "asic_solicitudes", "rec_procesos",  # contratos: su FK `proyecto_id` (servicio)
+    "proyecto_inversores", "fronteras", "fallas",
+    "asic_solicitudes", "rec_procesos",
     "costos_variables", "gestion_registros", "cumplimiento_mensual",
 ]
 MERGE_COMPUESTO = [
@@ -74,9 +73,16 @@ MERGE_COMPUESTO = [
     ("mapeo_celda_concepto", ["concepto"]),
     ("alias_fuente_ingreso", ["columna_origen"]),
     ("contrato_proyectos", ["contrato_id"]),
+    # UNIQUE (proyecto_id, inversionista_id): si el mismo inversionista está en las
+    # dos plantas, queda la participación del ganador. Antes de descartar la del
+    # perdedor, los contratos que la representaban pasan a la del ganador (paso 1 bis).
+    ("proyecto_inversionistas", ["inversionista_id"]),
     # UNIQUE (proyecto_id, tipo): si el ganador ya tiene puntero para ese tipo,
     # se descarta el del perdedor.
     ("proyecto_area_contacto", ["tipo"]),
+    # UNIQUE (portafolio_id, proyecto_id): el ganador queda en los portafolios de
+    # los dos, sin repetir.
+    ("portafolio_proyectos", ["portafolio_id"]),
 ]
 MERGE_UNO_A_UNO = ["proyecto_info_tecnica", "proyecto_informe_om"]
 MERGE_ESCALAR_UNICO = ["sub_project", "project_id_solenium", "sunfactory_project_id"]
@@ -92,6 +98,10 @@ def motivo_bloqueo_borrado(proyecto: Proyecto) -> str | None:
     for _nombre, relacion in RELACIONES_BLOQUEANTES:
         if getattr(proyecto, relacion).exists():
             return "registros operativos"
+    # Un contrato de servicio bloquea, como siempre. El vínculo con un PPA no:
+    # `contrato_proyectos` lo borra en cascada, igual que antes de la tabla única.
+    if proyecto.contratos_ppa.exclude(contrato__grupo="ppa").exists():
+        return "registros operativos"
     with connection.cursor() as cur:
         for tabla, columna in TABLAS_CASCADE_SIN_RELACION:
             cur.execute(f"SELECT 1 FROM {tabla} WHERE {columna} = %s LIMIT 1", [proyecto.id])
@@ -202,6 +212,21 @@ def ejecutar_merge(ganador: Proyecto, perdedor: Proyecto, movimientos: list[dict
                     f"UPDATE asic_cambios_contratos SET {campo} = %(keeper)s "
                     f"WHERE {campo} = %(loser)s", p
                 )
+
+            # 1 bis) Representación: el contrato que apuntaba a una participación del
+            #        perdedor que se va a descartar pasa a la del mismo inversionista
+            #        en el ganador. La llave compuesta de `contrato_proyectos` se
+            #        comprueba al COMMIT, con las dos tablas ya movidas.
+            cur.execute(
+                "UPDATE contrato_proyectos SET proyecto_inversionista_id = ("
+                "  SELECT g.id FROM proyecto_inversionistas l JOIN proyecto_inversionistas g"
+                "    ON g.inversionista_id = l.inversionista_id AND g.proyecto_id = %(keeper)s"
+                "  WHERE l.id = contrato_proyectos.proyecto_inversionista_id) "
+                "WHERE proyecto_inversionista_id IN ("
+                "  SELECT l.id FROM proyecto_inversionistas l JOIN proyecto_inversionistas g"
+                "    ON g.inversionista_id = l.inversionista_id AND g.proyecto_id = %(keeper)s"
+                "  WHERE l.proyecto_id = %(loser)s)", p
+            )
 
             # 2) UNIQUE compuesto: se descarta la colisión, se repunta el resto.
             for t, claves in MERGE_COMPUESTO:

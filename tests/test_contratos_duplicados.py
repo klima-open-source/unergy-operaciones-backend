@@ -89,7 +89,20 @@ def _con_partes(cuerpo):
     completo.setdefault("prestador_id", _cliente("Unergy QA").id)
     if grupos.grupo_de(completo.get("servicio_aplica")) == grupos.REPRESENTACION_CGM:
         completo.setdefault("inversionista_id", _cliente("Inversionista QA").id)
+        _participa(completo["inversionista_id"], completo.get("proyecto_id"))
     return completo
+
+
+def _participa(cliente_id, proyecto_id):
+    """El inversionista de un contrato de representación tiene que participar en la
+    planta (rama de inversionistas): estas pruebas no son sobre eso, así que lo
+    registran si falta."""
+    from apps.proyectos.models import ProyectoInversionista
+
+    if cliente_id and proyecto_id and not ProyectoInversionista.objects.filter(
+        proyecto_id=proyecto_id, inversionista__cliente_id=cliente_id,
+    ).exists():
+        ProyectoInversionista.objects.create(proyecto_id=proyecto_id, cliente_id=cliente_id)
 
 
 def _crear(datos_usuario, cuerpo, forzar=False):
@@ -117,6 +130,8 @@ def _contrato(**kw):
 
     kw.setdefault("servicio_aplica", "representacion")
     kw.setdefault("estado", "firmado")
+    if kw.get("inversionista") and kw.get("proyecto"):
+        _participa(kw["inversionista"].id, kw["proyecto"].id)
     return ContratoServicio.objects.create(**kw)
 
 
@@ -254,10 +269,12 @@ def test_otra_planta_no_avisa(datos):
 
 def test_sin_planta_no_se_compara_nada(datos):
     """Un contrato sin `proyecto_id` no se puede situar, y hay 10 así en
-    producción."""
-    _contrato(proyecto=None)
+    producción. Desde la rama de inversionistas uno de representación ya no se
+    crea sin planta (su inversionista es uno de los de la planta): se prueba con
+    mantenimiento."""
+    _contrato(proyecto=None, servicio_aplica="mantenimiento")
 
-    respuesta = _crear(datos, {"servicio_aplica": "representacion"})
+    respuesta = _crear(datos, {"servicio_aplica": "mantenimiento"})
 
     assert respuesta.status_code == 201, respuesta.data
 

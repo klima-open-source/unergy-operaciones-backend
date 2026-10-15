@@ -305,6 +305,45 @@ que desapareció es el cálculo automático que nadie disparaba.
 El otro GET que escribe sigue ahí: `GET /monitoring` auto-asigna
 `project_id_solenium` (`generacion_solar.py:1154`).
 
+### 5.9b Impacto calculado: % afectado, prioridad y energía P90 (2026-10-13)
+
+`fallas/impacto.py` volvió a calcular el impacto, con otra regla y **sin escribir**:
+se calcula al serializar (`pct_afectado`, `prioridad_calculada`, `kwh_perdidos_p90`),
+así que una falla abierta crece hasta que se cierra y nunca queda congelado un número
+provisional (el error de §5.9). `kwh_perdidos_estimado` sigue siendo el valor manual.
+
+- **% afectado**: red = 100; frontera = 0 (la planta genera); "generando sin datos"
+  = 100 solo si se verificó apagada; inversores = kW afectados ÷ `potencia_ac_kw`. La
+  potencia de cada inversor sale de `potencia_kw`, del inversor vinculado, o del nombre
+  ("300KTL-…", "Inversor 3" contra el catálogo del proyecto). Un inversor que solo perdió
+  internet no cuenta. Si algo no se puede resolver: `None`, no un número inventado.
+- **Prioridad**: ≥ 90 % crítica, 66–90 % grave (también frontera que afecta la
+  medición), < 66 % media, 0 % leve. Se asigna al crear/editar; con `None` queda la
+  elegida a mano.
+- **Anexo 4** (`sla_contractual.plazo`) usa la misma escala, más el nivel **Leve (sin
+  pérdida)** a 7 días que pidió Operaciones, para fallas identificadas desde
+  `REGLA_PCT_DESDE` (2026-10-13). Las anteriores conservan la regla por categoría: un
+  informe ya enviado no cambia si se regenera.
+- La prioridad calculada se aplica al crear y cuando un PATCH cambia la
+  clasificación; nunca al cerrar ni a un ajuste manual de prioridad.
+- **Energía**: por día afectado, P90 del mes ÷ días del mes × fracción de la campana
+  solar (seno 6:00–18:00, hora Colombia) × % afectado.
+
+### 5.9c Equipos, garantía, Pendientes y aviso de programadas (2026-10-13)
+
+- Categoría nueva **`equipos`** (smartlogger, tracker, string, estación
+  meteorológica). `estructura.equipo_de` deduce el equipo afectado de la
+  clasificación (inversores → inversor, frontera medidor_* → medidor).
+- `fallas.en_garantia` / `garantia_detalle` (migración `monitoreo/0009`).
+- **Después de desplegar:** `python manage.py sembrar_tipos_fallas` crea los
+  `fallas_cat_tipos` de la categoría nueva (el sembrado de FastAPI ya no corre).
+  Idempotente. Se corre desde Actions → "comando en produccion".
+- `dominio.en_pendientes`: sin cerrar y en garantía, o de tracker, string, medidor
+  o estación meteorológica. Es la pestaña Pendientes del frontend.
+- `monitoreo.avisar_fallas_programadas` (6:00, `config/horarios.py`) deja en la
+  campana un aviso por cada falla `programado` con `fecha_programada` = hoy, a los
+  coordinadores y a quien la registró. Idempotente por día.
+
 ### 5.10 El SLA se ancla a medianoche
 
 El vencimiento se construye desde `fecha_identificacion` a las 00:00 sin sumar

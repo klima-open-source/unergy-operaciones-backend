@@ -36,7 +36,10 @@ class ContratoFalso:
         self.servicio_aplica = servicio_aplica
         self.tarifa_representacion = tarifa_representacion
         self.tarifa_cgm = tarifa_cgm
-        self.tarifa_base = tarifa_base
+        # Los atajos de operación (rama de servicios y tarifas): el anual para
+        # mantenimiento y arriendo, el mensual para internet.
+        self.tarifa_anual = tarifa_base
+        self.tarifa_mensual = tarifa_base
         self.pk = 1 if servicios is not None else None
         self.servicios = _Servicios(servicios or [])
 
@@ -100,7 +103,7 @@ def test_operacion_ignora_las_tarifas_de_representacion_y_cgm():
     assert grupos.subservicios_de(contrato) == ["arriendo"]
 
 
-def test_los_tres_de_operacion_comparten_tarifa_base():
+def test_internet_lee_su_tarifa_mensual():
     contrato = ContratoFalso("internet", tarifa_base=Decimal("55.5"))
     assert grupos.tarifa_de(contrato, "internet") == Decimal("55.5")
 

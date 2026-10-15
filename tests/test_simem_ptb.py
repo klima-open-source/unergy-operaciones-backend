@@ -161,3 +161,48 @@ def test_una_variable_desconocida_se_sigue_ignorando():
     """El dataset trae dos variables; cualquier otra no es precio de bolsa."""
     horas = simem.bolsa_horaria([_rec("2026-09-15 18:00", 1.0, variable="OTRA")])
     assert horas == {}
+
+
+# ── La VERSIÓN manda sobre la variable ──────────────────────────────────────
+#
+# Caso real: 2026-09-10 18:00. El 709b84 trae `PB_Nal` en TXR (1.140,44) y `PTB`
+# en TXF (891,44) -- es decir, al liquidar definitivamente XM reclasificó esa
+# hora como de escasez. Preferir `PB_Nal` por ser la variable "buena" significaba
+# quedarse con la versión VIEJA, y el mes terminaba mezclando TXF y TXR.
+#
+# La regla es la que el módulo siempre dijo tener: por cada (día, hora), la
+# versión más definitiva disponible; `PB_Nal` solo desempata DENTRO de una misma
+# versión, cuando XM publica las dos.
+
+def test_la_version_manda_sobre_la_variable():
+    horas = simem.bolsa_horaria([
+        _rec("2026-09-10 18:00", 1140.4388, version="TXR"),
+        _rec("2026-09-10 18:00", 891.4371, version="TXF", variable="PTB"),
+    ])
+    assert horas[("2026-09-10", "18")] == 891.44
+
+
+def test_el_pb_nal_sigue_ganando_dentro_de_la_misma_version():
+    # No es que el PTB gane siempre: con las dos en TXF, manda la de bolsa.
+    horas = simem.bolsa_horaria([
+        _rec("2026-09-10 18:00", 891.4371, version="TXF", variable="PTB"),
+        _rec("2026-09-10 18:00", 700.0, version="TXF"),
+    ])
+    assert horas[("2026-09-10", "18")] == 700.0
+
+
+def test_horas_ptb_cuenta_las_que_de_verdad_se_usaron():
+    """El aviso de la hoja dice cuántas horas salieron del PTB.
+
+    Tiene que contar las que se USARON, no las que no tienen `PB_Nal` en
+    ninguna versión: si no, una hora resuelta con el PTB de TXF no se reportaría
+    solo porque existe un `PB_Nal` viejo que se descartó.
+    """
+    cliente = _cliente([
+        _rec("2026-09-10 17:00", 500.0, version="TXF"),
+        _rec("2026-09-10 18:00", 1140.4388, version="TXR"),
+        _rec("2026-09-10 18:00", 891.4371, version="TXF", variable="PTB"),
+    ])
+    r = simem.bolsa_mensual(2026, 9, client=cliente)
+    assert r["horas_ptb"] == 1
+    assert r["detalle"]["2026-09-10"]["18"] == 891.44

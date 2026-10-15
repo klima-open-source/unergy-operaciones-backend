@@ -7,7 +7,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('fronteras', '0004_operador_red_codigo_originabot'),
-        ('proyectos', '0008_quitar_comunidad_del_proyecto'),
+        ('proyectos', '0013_portafolio_proyectos'),
     ]
 
     operations = [
