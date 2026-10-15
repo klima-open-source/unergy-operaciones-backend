@@ -17,8 +17,7 @@ la planta.
 
 **Manual contra API.** Una planta recién energizada no tiene histórico y su
 promedio se carga a mano; `gen_promedio_origen` distingue los dos casos y el
-recálculo respeta lo manual salvo que se pida `force`. Mismo patrón que
-`fecha_comercializacion_editada_manual`.
+recálculo respeta lo manual salvo que se pida `force`.
 
 El módulo se divide a propósito en dos capas: `promedio_mensual` y `decidir` son
 PURAS —sin red ni base— y ahí vive la regla; `recalcular` orquesta.

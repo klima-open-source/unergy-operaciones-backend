@@ -200,7 +200,7 @@ def construir_tramos(data: dict, first_day: date, last_day: date) -> dict:
             es_comercializador = bool(seg_bolsa) and seg_bolsa["piscina"] == "comercializador"
             # Un tramo sin asignación NI segmento de bolsa cae FUERA de la ventana
             # operativa de la planta: `plantas-contratos` solo emite residuo de
-            # bolsa entre fecha_inicio_comercializacion y fecha_fin_representacion.
+            # bolsa desde fecha_inicio_comercializacion (y mientras haya representación vigente).
             # Sin este corte, una planta que arranca el 10 vendería "el 100% en
             # bolsa" del 1 al 9, cuando todavía no existía.
             operativo = bool(activos) or bool(seg_bolsa)

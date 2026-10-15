@@ -61,11 +61,6 @@ def _plantas_del_mes(first_day: date) -> list[Proyecto]:
         .filter(
             Q(fecha_inicio_comercializacion__isnull=False) | Q(sub_project__isnull=False)
         )
-        # Fuera las plantas cuya representación terminó antes del mes.
-        .filter(
-            Q(fecha_fin_representacion__isnull=True)
-            | Q(fecha_fin_representacion__gte=first_day)
-        )
         .order_by("nombre_comercial")
     )
 
@@ -259,11 +254,10 @@ def plantas_contratos(year: int, month: int) -> dict:
     bolsa_plantas, bolsa_comercializador, bolsa_libre = [], [], []
     for p in plantas_db:
         # Ventana operativa dentro del mes: no se inventan días en bolsa antes de
-        # que la planta empiece a comercializar ni después de que termine su
-        # representación. Ambos campos suelen ser NULL → mes completo.
-        operativa = _recortar(
-            p.fecha_inicio_comercializacion, p.fecha_fin_representacion, first_day, last_day
-        )
+        # que la planta empiece a comercializar. El fin lo pone el contrato de
+        # representación vigente, que ya filtra `_plantas_del_mes`
+        # (`proyectos.fecha_fin_representacion` se retiró el 15-oct).
+        operativa = _recortar(p.fecha_inicio_comercializacion, None, first_day, last_day)
         for seg_ini, seg_fin in _restar_intervalos(operativa, assigned_windows.get(p.id) or []):
             # La modalidad se evalúa POR DÍA, no por tramo: los días que cubre un
             # SIC con UNGC (según su vigencia real) son comercializador y el

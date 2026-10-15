@@ -81,7 +81,6 @@ def _proyecto(nombre, **kw):
         "estado": "en_operacion",
         "sub_project": nombre.lower().replace(" ", "-"),
         "tipo_proyecto": "minigranja",
-        "srv_operacion": True,
     }
     campos.update(kw)
     return Proyecto.objects.create(**campos)

@@ -1049,7 +1049,6 @@ def _identificacion(proyecto) -> dict:
         "nombre_comercial": proyecto.nombre_comercial,
         # Unergy (generación). Es el mismo valor que `api_id_unergy` del nodo.
         "sub_project": proyecto.sub_project,
-        "codigo_cnd": proyecto.codigo_cnd,
         "codigo_tsf": proyecto.codigo_tsf,
         "origina_code": proyecto.origina_code,
         "project_id_solenium": proyecto.project_id_solenium,
@@ -1118,7 +1117,6 @@ def _servicios_planta(proyecto) -> dict:
         # Hasta cuándo la representa Unergy ante el mercado. Va con los
         # servicios y no con las fechas del contrato de energía: son cosas
         # distintas y una planta puede tener representación sin PPA.
-        "fecha_fin_representacion": proyecto.fecha_fin_representacion,
     }
 
 
@@ -1398,7 +1396,6 @@ def _nodo_proyecto(proyecto, ofertas, operadores=None) -> dict:
             "potencia_ac_kw": _num(proyecto.potencia_ac_kw),
             # Potencia con CEN, en MW. Va aparte de la instalada y no se convierte
             # a una sola unidad: no son el mismo número ni salen del mismo papel.
-            "potencia_con_cen_mw": _num(proyecto.potencia_con_cen_mw),
             "ubicacion": {
                 "municipio": municipio,
                 "departamento": departamento,

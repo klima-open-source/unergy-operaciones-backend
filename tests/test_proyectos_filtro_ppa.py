@@ -280,13 +280,13 @@ def test_el_listado_trae_los_servicios_calculados_y_ninguna_bandera(datos):
     _con_servicio(planta, "mantenimiento")
     _con_servicio(planta, "representacion", ["cgm"])
     _vincular(planta, _contrato(nombre_interno="PPA", tipo_contrato="venta"))
-    _proyecto("Solo banderas", estado="en_operacion", srv_operacion=True, srv_ppa=True)
+    _proyecto("Sin contratos", estado="en_operacion")
 
     filas = {p["nombre_comercial"]: p for p in _listar(datos).data["items"]}
 
     assert filas["Completa"]["servicios"] == {
         "operacion": True, "representacion": False, "cgm": True, "ppa": True}
-    assert filas["Solo banderas"]["servicios"] == {
+    assert filas["Sin contratos"]["servicios"] == {
         "operacion": False, "representacion": False, "cgm": False, "ppa": False}
     assert not [k for k in filas["Completa"] if k.startswith("srv_")]
 
@@ -308,15 +308,16 @@ def test_operacion_es_genera_y_la_operamos(datos):
 def test_filtro_por_servicio_usa_los_contratos(datos):
     _con_servicio(_proyecto("Con CGM"), "representacion", ["representacion", "cgm"])
     _con_servicio(_proyecto("Sin CGM"), "representacion")
-    _proyecto("Bandera CGM", srv_cgm=True)
+    _proyecto("Sin contrato")
 
     respuesta = _listar(datos, "?servicio=cgm")
 
     assert {p["nombre_comercial"] for p in respuesta.data["items"]} == {"Con CGM"}
 
 
-def test_las_banderas_ya_no_se_escriben(datos):
-    """Ni el PATCH del proyecto las acepta ni existe el endpoint que las editaba."""
+def test_las_banderas_ya_no_existen(datos):
+    """Ni el modelo las tiene, ni el PATCH las acepta, ni existe el endpoint que
+    las editaba. Un cliente viejo que las mande no rompe nada: se ignoran."""
     from rest_framework.test import APIRequestFactory, force_authenticate
 
     from api.authentication import UsuarioAutenticado
@@ -330,9 +331,11 @@ def test_las_banderas_ya_no_se_escriben(datos):
     peticion = APIRequestFactory().patch(
         f"/api/v1/proyectos/{planta.id}", {"srv_operacion": True}, format="json")
     force_authenticate(peticion, user=UsuarioAutenticado(datos["usuario"]))
-    ProyectoViewSet.as_view({"patch": "partial_update"})(peticion, pk=planta.id).render()
+    respuesta = ProyectoViewSet.as_view({"patch": "partial_update"})(peticion, pk=planta.id)
+    respuesta.render()
+    assert respuesta.status_code == 200
     planta.refresh_from_db()
-    assert planta.srv_operacion is False
+    assert not [f.name for f in planta._meta.get_fields() if f.name.startswith("srv_")]
 
 
 # ── `GET /proyectos/lista?servicio=` (2026-10-13) ────────────────────────────

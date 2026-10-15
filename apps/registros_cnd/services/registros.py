@@ -188,7 +188,6 @@ def construir_resumen(registro: RegistroConexion) -> dict:
         "id": registro.id,
         "proyecto_id": registro.proyecto_id,
         "nombre_comercial": proyecto.nombre_comercial,
-        "codigo_cnd": proyecto.codigo_cnd,
         "clasificacion_regulatoria": _enum_val(proyecto.clasificacion_regulatoria),
         "tecnologia": _enum_val(proyecto.tipo_tecnologia),
         "operador_red": or_nombre,
@@ -232,7 +231,6 @@ def resumen_ligero(registro: RegistroConexion) -> dict:
         "id": r["id"],
         "proyecto_id": r["proyecto_id"],
         "nombre_comercial": r["nombre_comercial"],
-        "codigo_cnd": r["codigo_cnd"],
         "clasificacion_regulatoria": r["clasificacion_regulatoria"],
         "tecnologia": r["tecnologia"],
         "operador_red": r["operador_red"],
@@ -254,7 +252,6 @@ def _fila_bare(proyecto: Proyecto) -> dict:
         "id": None,  # aun no hay registro
         "proyecto_id": proyecto.id,
         "nombre_comercial": proyecto.nombre_comercial,
-        "codigo_cnd": proyecto.codigo_cnd,
         "clasificacion_regulatoria": _enum_val(proyecto.clasificacion_regulatoria),
         "tecnologia": _enum_val(proyecto.tipo_tecnologia),
         "operador_red": or_nombre,

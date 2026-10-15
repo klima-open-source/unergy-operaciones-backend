@@ -122,7 +122,7 @@ def test_no_mira_el_estado_del_proyecto_ni_la_bandera():
     """Una planta en construcción con O&M firmado tiene operación; una con la
     bandera encendida y sin contrato, no."""
     _servicio(_proyecto("En construcción", estado="en_construccion"), "mantenimiento")
-    _proyecto("Solo bandera", estado="en_operacion", srv_operacion=True)
+    _proyecto("Sin contrato", estado="en_operacion")
 
     assert _con("operacion") == {"En construcción"}
 
@@ -228,7 +228,7 @@ def test_se_monitorean_las_que_generan_y_operamos():
 
     _servicio(_proyecto("Opera", estado="en_operacion"), "mantenimiento")
     _servicio(_proyecto("En desarrollo", estado="en_desarrollo"), "arriendo")
-    _proyecto("Solo bandera", estado="en_operacion", srv_operacion=True)
+    _proyecto("Sin contrato", estado="en_operacion")
 
     assert set(Proyecto.objects.filter(plantas.filtro_operadas(HOY))
                .values_list("nombre_comercial", flat=True)) == {"Opera"}
@@ -243,8 +243,8 @@ def test_reconectadores_e_informe_de_puesta_en_marcha_usan_el_contrato():
     _servicio(con_sv, "internet")
     _servicio(_proyecto("Sin SolarView", estado="en_operacion",
                         tipo_proyecto="minigranja"), "mantenimiento")
-    _proyecto("Solo bandera", estado="en_operacion", tipo_proyecto="minigranja",
-              project_id_solarview="sv-2", srv_operacion=True)
+    _proyecto("Sin contrato", estado="en_operacion", tipo_proyecto="minigranja",
+              project_id_solarview="sv-2")
 
     assert {p.nombre_comercial for p in proyectos_con_relay()} == {"Con SolarView"}
     assert {p.nombre_comercial for p in proyectos_con_informe()} == {
@@ -256,7 +256,7 @@ def test_portafolios_cuenta_en_operacion_o_con_contrato():
 
     _proyecto("En operación sin contrato", estado="en_operacion")
     _servicio(_proyecto("En desarrollo con O&M", estado="en_desarrollo"), "mantenimiento")
-    _proyecto("Ninguna", estado="en_desarrollo", srv_operacion=True)
+    _proyecto("Ninguna", estado="en_desarrollo")
 
     from apps.proyectos.models import Proyecto
 
@@ -281,7 +281,7 @@ def test_representamos_es_tener_contrato_de_representacion():
     _servicio(minigranja("Representada"), "representacion")
     _servicio(minigranja("Las dos"), "representacion", ["representacion", "cgm"])
     _servicio(minigranja("Solo CGM"), "representacion", ["cgm"])
-    minigranja("Solo bandera", srv_representacion=True)
+    minigranja("Sin contrato")
     comunidad = minigranja("En comunidad")
     _servicio(comunidad, "representacion")
     _ppa(comunidad, es_comunidad_energetica=True, fecha_entrada_comunidad=date(2025, 1, 1))
@@ -294,19 +294,15 @@ def test_representamos_es_tener_contrato_de_representacion():
 
 @pytest.mark.parametrize("bandera", ["srv_operacion", "srv_representacion", "srv_cgm", "srv_ppa"])
 def test_nadie_lee_la_bandera(bandera):
-    """Fuera del modelo (sus columnas se borran en el último paso) y del informe
-    que mide el barrido, nadie lee ni escribe una bandera `srv_*`."""
+    """Las columnas `srv_*` salieron del modelo (`proyectos/0020`): nadie las nombra
+    fuera de las migraciones y del comando que las respalda antes de borrarlas."""
     from pathlib import Path
 
     raiz = Path(__file__).resolve().parents[1]
-    permitidos = {
-        "apps/proyectos/models.py",
-        "apps/contratos/management/commands/revisar_servicios_banderas.py",
-    }
     leen = {
         str(p.relative_to(raiz)).replace("\\", "/")
         for carpeta in ("apps", "api", "config")
         for p in (raiz / carpeta).rglob("*.py")
         if "migrations" not in p.parts and bandera in p.read_text(encoding="utf-8")
-    }
-    assert leen <= permitidos, sorted(leen - permitidos)
+    } - {"apps/proyectos/management/commands/respaldar_columnas_proyectos.py"}
+    assert not leen, sorted(leen)

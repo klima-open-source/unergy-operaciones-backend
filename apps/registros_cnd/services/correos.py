@@ -36,16 +36,8 @@ def _correos_or(proyecto) -> list[str]:
 
 
 def _capacidad_mw(proyecto) -> str:
-    # 'capacidad_efectiva_neta_mw' era un fallback intermedio a un campo que
-    # nunca existió en Proyecto (getattr(..., None) siempre caía a None) --
-    # eliminado, auditoría de Proyectos 2026-08-27. potencia_con_cen_mw
-    # sigue en 0% de los proyectos hoy (dato regulatorio que nadie ha
-    # cargado), así que en la práctica esta función siempre resuelve por
-    # potencia_ac_kw -- que desde el fix del 2026-08-19 sí es
-    # potencia AC confiable, no un valor arbitrario.
-    v = getattr(proyecto, "potencia_con_cen_mw", None)
-    if v:
-        return f"{float(v):.3f}"
+    # Se resuelve por potencia_ac_kw: `potencia_con_cen_mw` estuvo en 0 % de los
+    # proyectos y se retiró el 15-oct.
     kwp = getattr(proyecto, "potencia_ac_kw", None)
     if kwp:
         return f"{float(kwp) / 1000:.3f}"
@@ -53,12 +45,12 @@ def _capacidad_mw(proyecto) -> str:
 
 
 def _nombre_mdc(proyecto) -> str:
-    """Nombre a usar identico en cartas/MDC (p. ej. 'MGS 0040 - La Cacica')."""
-    codigo = getattr(proyecto, "codigo_cnd", None)
-    nombre = proyecto.nombre_comercial
-    if codigo and codigo not in (nombre or ""):
-        return f"{codigo} - {nombre}"
-    return nombre
+    """Nombre a usar identico en cartas/MDC (p. ej. 'MGS 0040 - La Cacica').
+
+    `proyectos.codigo_cnd` (vacío en todas las plantas) se retiró el 15-oct: el
+    nombre comercial ya trae el código MGS.
+    """
+    return proyecto.nombre_comercial
 
 
 def generar_correo(registro, tipo: str) -> dict:

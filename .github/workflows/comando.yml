@@ -33,7 +33,6 @@ on:
           - "backfill_contratos_unificados --reset"
           - "verificar_corte_contratos foto"
           - "verificar_corte_contratos comparar"
-          - "revisar_servicios_banderas (solo lee)"
           - "revisar_decimales_redondeados (solo lee)"
           - "revisar_coordenadas (solo lee)"
           - "sembrar_tipos_fallas --dry-run"
@@ -46,6 +45,7 @@ on:
           - "vincular_participaciones_pendientes (solo lee)"
           - "vincular_participaciones_pendientes --aplicar"
           - "volver_a_portafolio_unico --aplicar"
+          - "respaldar_columnas_proyectos (solo lee)"
           - "DESHACER paso 2 (corte de contratos)"
           - "DESHACER paso 0 (diagnostico)"
       confirmar:
@@ -97,7 +97,6 @@ jobs:
             "backfill_contratos_unificados --reset")     manage backfill_contratos_unificados --reset ;;
             "verificar_corte_contratos foto")            manage verificar_corte_contratos foto ;;
             "verificar_corte_contratos comparar")        manage verificar_corte_contratos comparar ;;
-            "revisar_servicios_banderas (solo lee)")     manage revisar_servicios_banderas ;;
             "revisar_decimales_redondeados (solo lee)")  manage revisar_decimales_redondeados ;;
             "revisar_coordenadas (solo lee)")            manage revisar_coordenadas ;;
             "sembrar_tipos_fallas --dry-run")            manage sembrar_tipos_fallas --dry-run ;;
@@ -113,6 +112,7 @@ jobs:
             "vincular_participaciones_pendientes (solo lee)") manage vincular_participaciones_pendientes ;;
             "vincular_participaciones_pendientes --aplicar")  manage vincular_participaciones_pendientes --aplicar ;;
             "volver_a_portafolio_unico --aplicar")       manage volver_a_portafolio_unico --aplicar ;;
+            "respaldar_columnas_proyectos (solo lee)")   manage respaldar_columnas_proyectos ;;
             "DESHACER paso 2 (corte de contratos)")
               confirmado
               manage migrate contratos 0008

@@ -266,24 +266,18 @@ def derivar_fecha_comercializacion(proyecto, token: str, hoy: date | None = None
     return None
 
 
-def backfill_comercializacion(*, force: bool = False, dry_run: bool = False) -> dict:
+def backfill_comercializacion(*, dry_run: bool = False) -> dict:
     """Rellena `fecha_inicio_comercializacion` derivándola de la generación real.
 
-    - Sin `force`: solo toca proyectos con la fecha en NULL y NO editados a mano.
-      Idempotente: correrlo dos veces no cambia nada la segunda vez.
-    - Con `force`: recalcula TODOS los que no estén editados a mano.
-    - `dry_run`: no escribe; solo reporta lo que haría.
-
-    **`fecha_comercializacion_editada_manual` se respeta siempre**, incluso con
-    `force`: si alguien corrigió la fecha a mano, la generación no la pisa.
+    **Solo llena fechas vacías; nunca pisa una ya cargada**, venga del cálculo o de
+    una corrección a mano. Es la misma regla de la sincronización con TSF, y por
+    eso ya no hace falta marcar las editadas a mano (Sara, 15-oct: se retiró
+    `fecha_comercializacion_editada_manual` y el recálculo forzado). Idempotente.
+    `dry_run`: no escribe; solo reporta lo que haría.
     """
     from apps.proyectos.models import Proyecto
 
-    qs = Proyecto.objects.filter(
-        deleted_at__isnull=True, fecha_comercializacion_editada_manual=False,
-    )
-    if not force:
-        qs = qs.filter(fecha_inicio_comercializacion__isnull=True)
+    qs = Proyecto.objects.filter(deleted_at__isnull=True, fecha_inicio_comercializacion__isnull=True)
     proyectos = list(qs.order_by("nombre_comercial"))
 
     token = ""
@@ -324,7 +318,6 @@ def backfill_comercializacion(*, force: bool = False, dry_run: bool = False) -> 
     return {
         "ok": True,
         "dry_run": dry_run,
-        "force": force,
         "procesados": len(proyectos),
         "actualizados": actualizados,
         "sin_generacion": sin_generacion,

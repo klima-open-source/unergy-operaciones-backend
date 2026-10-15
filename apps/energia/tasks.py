@@ -106,12 +106,12 @@ def backfill_comercializacion() -> str:
     """Rellena la fecha de inicio de comercialización (primer día con generación
     real) de los proyectos que aún no la tienen.
 
-    Idempotente y respeta las fechas editadas a mano, así que una planta nueva
+    Idempotente y solo llena fechas vacías, así que una planta nueva
     entra a Cumplimiento en cuanto registra su primera generación.
     """
     from apps.energia.services.comercializacion import backfill_comercializacion as backfill
 
-    res = backfill(force=False, dry_run=False)
+    res = backfill(dry_run=False)
     resumen = (
         f"{len(res.get('actualizados', []))} fechas nuevas, "
         f"{len(res.get('sin_generacion', []))} sin generación, "

@@ -24,9 +24,9 @@ from apps.proyectos import models as py_models
 CAMPOS_CREACION = [
     "nombre_comercial", "portafolio_id", "sub_project", "topico_liquidaciones",
     "clasificacion_regulatoria", "tipo_tecnologia", "tipo_proyecto",
-    "potencia_ac_kw", "potencia_con_cen_mw", "produccion_especifica_kwh_kwp",
-    "codigo_cnd", "estado", "fecha_entrada_operacion", "fecha_fin_representacion",
-    "fecha_inicio_comercializacion", "fecha_comercializacion_editada_manual",
+    "potencia_ac_kw", "produccion_especifica_kwh_kwp",
+    "estado", "fecha_entrada_operacion", 
+    "fecha_inicio_comercializacion", 
     "gen_mensual_promedio_mwh", "gen_promedio_origen",
     "departamento", "municipio", "direccion_vereda", "latitud", "longitud",
     "altitud_msnm", "operador_red_id", "project_id_solenium",

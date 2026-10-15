@@ -150,9 +150,9 @@ class CumplimientoViewSet(viewsets.GenericViewSet):
 
     @action(detail=False, methods=["post"], url_path="backfill-comercializacion")
     def backfill_comercializacion(self, request):
-        """`dry_run` es true por defecto: no escribe hasta que lo pidan."""
+        """`dry_run` es true por defecto: no escribe hasta que lo pidan. Solo
+        llena fechas vacías (ya no hay `force`)."""
         return Response(comercializacion.backfill_comercializacion(
-            force=par.bandera(request, "force"),
             dry_run=par.bandera(request, "dry_run", defecto=True),
         ))
 

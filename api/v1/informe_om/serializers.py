@@ -31,7 +31,7 @@ class ProyectoRefSerializer(serializers.ModelSerializer):
         model = py_models.Proyecto
         fields = [
             "id", "nombre_comercial", "municipio", "departamento",
-            "potencia_ac_kw", "codigo_cnd", "fecha_entrada_operacion",
+            "potencia_ac_kw", "fecha_entrada_operacion",
         ]
 
 

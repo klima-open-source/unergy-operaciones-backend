@@ -493,12 +493,6 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         payload = dict(entrada.validated_data)
         verificar_unicos(payload, excluir_id=int(pk))
 
-        # Editar la fecha de comercialización a mano marca el flag, para que el
-        # job diario no la vuelva a pisar — salvo que se mande el flag explícito.
-        if ("fecha_inicio_comercializacion" in payload
-                and "fecha_comercializacion_editada_manual" not in payload):
-            proyecto.fecha_comercializacion_editada_manual = True
-
         # Mismo criterio para el promedio de generación: escrito a mano queda
         # marcado 'manual' y el recálculo no lo pisa. Es el caso de las plantas
         # sin histórico, que es justo para lo que existe la carga manual.

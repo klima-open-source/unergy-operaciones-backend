@@ -88,4 +88,3 @@ class DocumentoSerializer(serializers.ModelSerializer):
 class ProyectoDisponibleSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     nombre_comercial = serializers.CharField()
-    codigo_cnd = serializers.CharField(allow_null=True)
