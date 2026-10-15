@@ -90,7 +90,8 @@ def _contratos(q: str) -> list[dict]:
             c.numero_contrato or c.numero_codigo_contrato,
             c.estado,
         ) if x),
-        "url": f"/contratos/{c.id}",
+        # `?tipo=ppa`: la ficha va directo al PPA sin probar antes el endpoint de servicio.
+        "url": f"/contratos/{c.id}?tipo=ppa" if c.grupo == grupos.PPA else f"/contratos/{c.id}",
     } for c in filas]
 
 

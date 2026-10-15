@@ -50,7 +50,7 @@ def _por_vencer(hoy: date) -> dict:
             "id": c.id,
             "titulo": titulo_de_contrato(c),
             "detalle": f"vence el {c.fecha_fin.isoformat()} · en {(c.fecha_fin - hoy).days} días",
-            "url": f"/contratos/{c.id}",
+            "url": f"/contratos/{c.id}?tipo=ppa" if c.grupo == grupos.PPA else f"/contratos/{c.id}",
         } for c in consulta[:MAXIMO]],
     }
 
