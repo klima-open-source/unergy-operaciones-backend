@@ -11,7 +11,7 @@ viven en `proyectos.portafolio_id` (una por planta); este comando las copia, una
 fila por planta con portafolio. Idempotente: lo que ya está no se repite.
 
 Lee las columnas viejas con SQL directo: ya no son del modelo y siguen en la base
-hasta `proyectos/0018` y `contratos/0028`. Después de esas migraciones dice que no
+(`proyectos.portafolio_id` ya no se borra: vuelve a ser la relación) y `contratos.portafolio` hasta `contratos/0028`. Después de esas migraciones dice que no
 hay de dónde leer en vez de fallar.
 
 También imprime, como respaldo en CSV, el texto suelto `contratos.portafolio`
@@ -72,7 +72,7 @@ class Command(BaseCommand):
                 f"{antes}. Filas nuevas: {copiadas}."
             )
         else:
-            self.stdout.write("proyectos.portafolio_id ya no existe (proyectos/0018): "
+            self.stdout.write("proyectos.portafolio_id ya no existe (no debería pasar: ya no se borra): "
                               "no hay de dónde copiar.")
 
         if _existe("contratos", "portafolio"):
