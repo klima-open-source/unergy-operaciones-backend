@@ -122,6 +122,7 @@ CASOS = [
     # `clientes/{id}` contra la acción de lista `vista-comercial`, y las
     # sub-rutas del detalle contra sus propios listados.
     ("/api/v1/clientes/vista-comercial", "vista_comercial"),
+    ("/api/v1/clientes/lista", "lista"),
     ("/api/v1/clientes/7", "retrieve"),
     ("/api/v1/clientes/7/panel", "panel"),
     ("/api/v1/clientes/7/tasas-servicio", "tasas_servicio"),

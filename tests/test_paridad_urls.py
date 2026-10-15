@@ -191,6 +191,7 @@ RUTAS_RETIRADAS = {
 #               red de un `code` de originabot, para que importar un proyecto de
 #               TSF mapee su operador por llave. No existia en FastAPI.
 RUTAS_NUEVAS = {
+    ("/api/v1/clientes/lista", "GET"),
     ("/api/v1/operadores-red/originabot", "POST"),
     ("/api/v1/clientes/originabot", "POST"),
     ("/api/v1/clientes/originabot-arrendador", "POST"),
