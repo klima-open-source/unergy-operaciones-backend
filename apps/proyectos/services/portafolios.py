@@ -1,9 +1,9 @@
 """Portafolios: las capas con las que se agrupan los proyectos.
 
-Un portafolio agrupa proyectos vía `proyectos.portafolio_id` y es la fuente de
-verdad del agrupamiento que usan los informes «Por portafolio». Se siembra UNA
-vez desde el agrupamiento por inversionista para no perder la relación que ya
-existía; de ahí en adelante se gestiona a mano (drag-and-drop en el frontend).
+Un portafolio agrupa plantas vía `portafolio_proyectos`, y una planta puede estar
+en varios. Es la fuente de verdad del agrupamiento que usan los informes «Por
+portafolio». Se gestiona a mano desde el frontend. (La siembra inicial desde los
+inversionistas se retiró: la tabla nunca vuelve a estar vacía.)
 
 Vive en el dominio y no en la API porque `agrupamiento()` lo necesita también el
 generador de informes, no solo esta pantalla.
@@ -14,17 +14,13 @@ los nombres de portafolio son razones sociales de clientes, así que
 en dos capas distintas.
 """
 
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.db.models import Q
 
 from apps.comun.nombre_matching import mejor_candidato
 from apps.contratos.services import plantas
 from apps.plataforma.services.fechas import hoy_col
 from apps.proyectos import models as py_models
-
-
-class SiembraConcurrente(RuntimeError):
-    """Otra petición estaba sembrando los portafolios al mismo tiempo."""
 
 
 def operativos_q() -> Q:
@@ -68,68 +64,50 @@ def aviso_de_parecido(portafolio) -> dict:
     }
 
 
-def sembrar_si_esta_vacio() -> None:
-    """Crea los portafolios desde el primer inversionista de cada proyecto.
-
-    Idempotente por diseño: solo corre cuando la tabla está VACÍA, así no pisa
-    ninguna asignación manual posterior.
-    """
-    if py_models.Portafolio.objects.exists():
-        return
-
-    proyectos = (
-        py_models.Proyecto.objects
-        .filter(operativos_q(), deleted_at__isnull=True, portafolio__isnull=True)
-        .prefetch_related("inversionistas__inversionista__cliente")
+def poner(proyecto_id: int, portafolio_id: int) -> None:
+    """Mete la planta en el portafolio. Idempotente."""
+    py_models.PortafolioProyecto.objects.get_or_create(
+        proyecto_id=proyecto_id, portafolio_id=portafolio_id
     )
 
-    creados: list = []
-    try:
-        with transaction.atomic():
-            for proyecto in proyectos:
-                nombre = _nombre_del_inversionista(proyecto)
-                if not nombre:
-                    continue
-                portafolio, _score = mejor_candidato(
-                    nombre, [(pt, [pt.nombre]) for pt in creados]
-                )
-                if portafolio is None:
-                    portafolio = py_models.Portafolio.objects.create(nombre=nombre)
-                    creados.append(portafolio)
-                proyecto.portafolio = portafolio
-                proyecto.save(update_fields=["portafolio"])
-    except IntegrityError as exc:
-        # Carrera: dos peticiones casi simultáneas viendo la tabla vacía. El
-        # UNIQUE del nombre evita el duplicado, pero sin esto la segunda
-        # transacción reventaba con un IntegrityError crudo en vez de un 409.
-        raise SiembraConcurrente(
-            "No se pudo sembrar los portafolios iniciales: otra solicitud ya lo "
-            "estaba haciendo. Reintenta."
-        ) from exc
+
+def quitar(proyecto_id: int, portafolio_id: int) -> None:
+    """Saca la planta del portafolio; las demás pertenencias quedan."""
+    py_models.PortafolioProyecto.objects.filter(
+        proyecto_id=proyecto_id, portafolio_id=portafolio_id
+    ).delete()
 
 
-def _nombre_del_inversionista(proyecto) -> str | None:
-    for vinculo in proyecto.inversionistas.all():
-        if vinculo.cliente and vinculo.cliente.razon_social_nombre:
-            return vinculo.cliente.razon_social_nombre
-    return None
+def mover(proyecto_id: int, portafolio_id: int | None) -> None:
+    """Deja la planta SOLO en ese portafolio (`None` = en ninguno).
+
+    Es lo que hacía `asignar` cuando una planta tenía un único portafolio. Queda
+    para el frontend anterior, que arrastra la planta de una capa a otra, mientras
+    se promueve el nuevo.
+    """
+    with transaction.atomic():
+        py_models.PortafolioProyecto.objects.filter(proyecto_id=proyecto_id).exclude(
+            portafolio_id=portafolio_id
+        ).delete()
+        if portafolio_id is not None:
+            poner(proyecto_id, portafolio_id)
 
 
 def agrupamiento() -> dict[str, list[str]]:
     """`{nombre de portafolio: [nombre comercial, …]}` para el wizard de informes.
 
-    Siembra si hace falta y solo considera portafolios ACTIVOS y proyectos
-    operativos.
+    Solo plantas operativas. Una planta que está en dos portafolios sale en los dos.
     """
-    sembrar_si_esta_vacio()
-    proyectos = (
-        py_models.Proyecto.objects
-        .filter(operativos_q(), deleted_at__isnull=True, portafolio__activo=True)
-        .select_related("portafolio")
+    filas = (
+        py_models.PortafolioProyecto.objects
+        .filter(proyecto__in=py_models.Proyecto.objects.filter(
+            operativos_q(), deleted_at__isnull=True))
+        .select_related("portafolio", "proyecto")
+        .order_by("portafolio__nombre", "proyecto__nombre_comercial")
     )
     salida: dict[str, list[str]] = {}
-    for proyecto in proyectos:
-        nombres = salida.setdefault(proyecto.portafolio.nombre, [])
-        if proyecto.nombre_comercial not in nombres:
-            nombres.append(proyecto.nombre_comercial)
+    for fila in filas:
+        nombres = salida.setdefault(fila.portafolio.nombre, [])
+        if fila.proyecto.nombre_comercial not in nombres:
+            nombres.append(fila.proyecto.nombre_comercial)
     return salida

@@ -80,6 +80,9 @@ MERGE_COMPUESTO = [
     # UNIQUE (proyecto_id, tipo): si el ganador ya tiene puntero para ese tipo,
     # se descarta el del perdedor.
     ("proyecto_area_contacto", ["tipo"]),
+    # UNIQUE (portafolio_id, proyecto_id): el ganador queda en los portafolios de
+    # los dos, sin repetir.
+    ("portafolio_proyectos", ["portafolio_id"]),
 ]
 MERGE_UNO_A_UNO = ["proyecto_info_tecnica", "proyecto_informe_om"]
 MERGE_ESCALAR_UNICO = ["sub_project", "project_id_solenium", "sunfactory_project_id"]

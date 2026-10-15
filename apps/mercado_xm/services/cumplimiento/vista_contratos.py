@@ -104,9 +104,10 @@ def construir(fecha: date) -> dict:
         c.contrato_id: c
         for c in PpaCompromisoEnergia.objects.filter(año=year, mes=month)
     }
+    # Una planta puede estar en varios portafolios: cada una aporta todos.
     proyectos = [
-        (p, p.portafolio.nombre if p.portafolio else None)
-        for p in Proyecto.objects.select_related("portafolio")
+        (p, sorted(pt.nombre for pt in p.portafolios.all()))
+        for p in Proyecto.objects.prefetch_related("portafolios")
         .filter(deleted_at__isnull=True)
     ]
     por_id = {p.id: (p, port) for p, port in proyectos}
@@ -126,9 +127,8 @@ def construir(fecha: date) -> dict:
         plantas_out, portafolios, faltan = [], [], 0
         for f in filas:
             par = por_id.get(f.get("id")) or por_nombre.get(_norm(f.get("nombre")))
-            proy, portafolio = par if par else (None, None)
-            if portafolio:
-                portafolios.append(portafolio)
+            proy, de_la_planta = par if par else (None, [])
+            portafolios.extend(de_la_planta or [])
 
             frac, dudoso = _pct(f.get("pct_despacho"))
             promedio = getattr(proy, "gen_mensual_promedio_mwh", None) if proy else None

@@ -25,7 +25,6 @@ class ContratoSerializer(serializers.ModelSerializer):
     inversionista_id = serializers.IntegerField(allow_null=True)
     # De la ficha del cliente, por la participación (`contrato_proyectos`).
     inversionista_nombre = serializers.CharField(read_only=True, allow_null=True)
-    portafolio_id = serializers.IntegerField(allow_null=True)
     nombre_proyecto = serializers.SerializerMethodField()
     # El frontend (ServiciosUnificadoView.vue) decide si mostrar la planta o el
     # boton "Sin proyecto" mirando este objeto anidado -- `proyecto_id` solo
@@ -44,7 +43,7 @@ class ContratoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ct_models.ContratoServicio
-        exclude = ["portafolio", *ct_models.COLUMNAS_SOLO_PPA]
+        exclude = [*ct_models.COLUMNAS_SOLO_PPA]
 
     def get_nombre_proyecto(self, obj) -> str | None:
         return obj.proyecto.nombre_comercial if obj.proyecto else None

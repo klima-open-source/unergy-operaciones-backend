@@ -20,7 +20,7 @@ class PortafolioSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = py_models.Portafolio
-        fields = ["id", "nombre", "activo", "proyectos"]
+        fields = ["id", "nombre", "proyectos"]
 
 
 class PortafolioCreateSerializer(serializers.Serializer):
@@ -37,7 +37,6 @@ class PortafolioCreateSerializer(serializers.Serializer):
 
 class PortafolioUpdateSerializer(serializers.Serializer):
     nombre = serializers.CharField(required=False)
-    activo = serializers.BooleanField(required=False)
 
     def validate_nombre(self, valor):
         nombre = (valor or "").strip()
@@ -47,6 +46,12 @@ class PortafolioUpdateSerializer(serializers.Serializer):
 
 
 class AsignarSerializer(serializers.Serializer):
+    """`{proyecto_id, portafolio_id, en_portafolio}`: true la mete, false la saca.
+
+    Sin `en_portafolio` es el cuerpo del frontend anterior: mueve la planta a
+    `portafolio_id` (null = la saca de todos).
+    """
+
     proyecto_id = serializers.IntegerField()
-    # null = quitar el proyecto de su portafolio (queda en el pool).
     portafolio_id = serializers.IntegerField(required=False, allow_null=True)
+    en_portafolio = serializers.BooleanField(required=False)

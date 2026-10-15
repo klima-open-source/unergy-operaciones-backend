@@ -4,7 +4,7 @@ from django.db import IntegrityError
 from django.shortcuts import get_object_or_404
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 
 from api.exceptions import Conflict
@@ -29,9 +29,11 @@ class PortafolioViewSet(
 
     GET    /api/v1/portafolios              capas con sus proyectos + pool «sin portafolio»
     POST   /api/v1/portafolios[?forzar=]    → 201
-    PATCH  /api/v1/portafolios/asignar      asigna o quita un proyecto
-    PATCH  /api/v1/portafolios/{id}[?forzar=]   renombrar / activar
-    DELETE /api/v1/portafolios/{id}         → 204; sus proyectos quedan sin capa
+    PATCH  /api/v1/portafolios/asignar      mete o saca una planta de un portafolio
+    PATCH  /api/v1/portafolios/{id}[?forzar=]   renombrar
+    DELETE /api/v1/portafolios/{id}         → 204; las plantas no se borran
+
+    Una planta puede estar en varios portafolios (`portafolio_proyectos`).
 
     Un nombre parecido a otro responde 409 con el candidato, y el cliente
     reintenta con `?forzar=true`. El UNIQUE de la base queda como red final.
@@ -50,31 +52,32 @@ class PortafolioViewSet(
         return portafolios_serializers.PortafolioSerializer
 
     def list(self, request, *args, **kwargs):
-        try:
-            portafolios_service.sembrar_si_esta_vacio()
-        except portafolios_service.SiembraConcurrente as exc:
-            raise Conflict(str(exc))
+        pertenencias: dict[int, list[int]] = {}
+        for portafolio_id, proyecto_id in py_models.PortafolioProyecto.objects.values_list(
+            "portafolio_id", "proyecto_id"
+        ):
+            pertenencias.setdefault(portafolio_id, []).append(proyecto_id)
+        con_portafolio = {pid for ids in pertenencias.values() for pid in ids}
 
-        proyectos = list(
-            py_models.Proyecto.objects.filter(deleted_at__isnull=True)
+        proyectos = {
+            proyecto.id: portafolios_serializers.ProyectoEnPortafolioSerializer(proyecto).data
+            for proyecto in py_models.Proyecto.objects.filter(deleted_at__isnull=True)
             .order_by("nombre_comercial")
-        )
+        }
         operativos = portafolios_service.ids_operativos()
-        por_capa: dict[int, list] = {}
-        sin_capa: list = []
-        for proyecto in proyectos:
-            item = portafolios_serializers.ProyectoEnPortafolioSerializer(proyecto).data
-            if proyecto.portafolio_id:
-                por_capa.setdefault(proyecto.portafolio_id, []).append(item)
-            elif proyecto.id in operativos:
-                # Al pool solo van los OPERATIVOS sin capa: son los que importan
-                # para los informes.
-                sin_capa.append(item)
-
+        # Al pool solo van los OPERATIVOS sin ningún portafolio: son los que
+        # importan para los informes.
+        sin_capa = [
+            item for pid, item in proyectos.items()
+            if pid not in con_portafolio and pid in operativos
+        ]
         capas = [
             {
-                "id": capa.id, "nombre": capa.nombre, "activo": capa.activo,
-                "proyectos": por_capa.get(capa.id, []),
+                "id": capa.id, "nombre": capa.nombre,
+                "proyectos": sorted(
+                    (proyectos[pid] for pid in pertenencias.get(capa.id, []) if pid in proyectos),
+                    key=lambda item: item["nombre"] or "",
+                ),
             }
             for capa in py_models.Portafolio.objects.order_by("nombre")
         ]
@@ -115,8 +118,6 @@ class PortafolioViewSet(
                         portafolios_service.aviso_de_parecido(candidato)
                     )
             capa.nombre = cambios["nombre"]
-        if "activo" in cambios:
-            capa.activo = cambios["activo"]
 
         try:
             capa.save()
@@ -126,8 +127,7 @@ class PortafolioViewSet(
 
     def destroy(self, request, *args, **kwargs):
         capa = get_object_or_404(py_models.Portafolio, pk=kwargs["pk"])
-        # Los proyectos NO se borran: vuelven al pool sin capa.
-        py_models.Proyecto.objects.filter(portafolio=capa).update(portafolio=None)
+        # Las plantas NO se borran: solo sus pertenencias a esta capa (CASCADE).
         capa.delete()
         return Response(status=204)
 
@@ -150,18 +150,27 @@ class PortafolioViewSet(
         ).exists():
             raise NotFound("Portafolio no encontrado")
 
-        proyecto.portafolio_id = capa_id
-        proyecto.save(update_fields=["portafolio"])
+        if "en_portafolio" not in datos:
+            # Cuerpo del frontend anterior (`{proyecto_id, portafolio_id}`):
+            # mover la planta a esa capa, como cuando solo podía estar en una.
+            portafolios_service.mover(proyecto.id, capa_id)
+        elif capa_id is None:
+            raise ValidationError({"portafolio_id": "Indica el portafolio."})
+        elif datos["en_portafolio"]:
+            portafolios_service.poner(proyecto.id, capa_id)
+        else:
+            portafolios_service.quitar(proyecto.id, capa_id)
         return Response({
             "ok": True,
             "proyecto_id": proyecto.id,
-            "portafolio_id": proyecto.portafolio_id,
+            "portafolio_ids": sorted(
+                proyecto.pertenencias_portafolio.values_list("portafolio_id", flat=True)
+            ),
         })
 
     @staticmethod
     def _salida(capa) -> dict:
         """El POST y el PATCH devuelven la capa SIN sus proyectos, como hoy."""
         return {
-            "id": capa.id, "nombre": capa.nombre, "activo": capa.activo,
-            "proyectos": [],
+            "id": capa.id, "nombre": capa.nombre, "proyectos": [],
         }

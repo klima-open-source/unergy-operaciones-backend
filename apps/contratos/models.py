@@ -275,7 +275,6 @@ class Contrato(Timer):
     fecha_indexacion = models.DateField(null=True, blank=True)
     responsable_iva = models.BooleanField(default=False)
     estado_pago = models.CharField(max_length=20, null=True, blank=True)
-    portafolio = models.CharField(max_length=255, null=True, blank=True)
     codigo_sun_factory = models.CharField(max_length=50, null=True, blank=True)
     nombre_proyecto_ref = models.CharField(max_length=255, null=True, blank=True)
     ubicacion_lat = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)

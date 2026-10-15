@@ -22,7 +22,7 @@ from apps.contratos.models import GrupoContrato
 from apps.proyectos import models as py_models
 
 CAMPOS_CREACION = [
-    "nombre_comercial", "portafolio_id", "sub_project", "topico_liquidaciones",
+    "nombre_comercial", "sub_project", "topico_liquidaciones",
     "clasificacion_regulatoria", "tipo_tecnologia", "tipo_proyecto",
     "potencia_ac_kw", "potencia_con_cen_mw", "produccion_especifica_kwh_kwp",
     "codigo_cnd", "estado", "fecha_entrada_operacion", "fecha_fin_representacion",
@@ -62,7 +62,6 @@ class ProyectoCrearSerializer(serializers.ModelSerializer):
         source="potencia_ac_kw", max_digits=12, decimal_places=3,
         required=False, allow_null=True, write_only=True,
     )
-    portafolio_id = serializers.IntegerField(required=False, allow_null=True)
     operador_red_id = serializers.IntegerField(required=False, allow_null=True)
     latitud = serializers.FloatField(required=False, allow_null=True, min_value=-90, max_value=90)
     longitud = serializers.FloatField(required=False, allow_null=True, min_value=-180, max_value=180)
@@ -271,7 +270,9 @@ class ProyectoSerializer(serializers.ModelSerializer):
         source="potencia_ac_kw", max_digits=12, decimal_places=3,
         read_only=True, allow_null=True,
     )
-    portafolio_id = serializers.IntegerField(allow_null=True)
+    # Los portafolios en que está la planta (`portafolio_proyectos`): pueden ser
+    # varios. Se administran desde la pantalla de portafolios, no desde acá.
+    portafolios = serializers.SerializerMethodField()
     operador_red_id = serializers.IntegerField(allow_null=True)
     operador_red_legal = serializers.SerializerMethodField()
     ppa_contratos = serializers.SerializerMethodField()
@@ -292,7 +293,7 @@ class ProyectoSerializer(serializers.ModelSerializer):
             "id", "potencia_instalada_kwp",   # alias de transición, ver arriba
             "operador_red_legal", "ppa_contratos", "inversionistas",
             "info_tecnica", "inversores", "area_contactos", "servicios",
-            "es_comunidad_energetica",
+            "es_comunidad_energetica", "portafolios",
             "created_at", "updated_at",
         ]
 
@@ -312,6 +313,12 @@ class ProyectoSerializer(serializers.ModelSerializer):
         if por_proyecto is None:
             por_proyecto = plantas.servicios_por_proyecto(hoy)
         return plantas.resumen_servicios([obj], hoy, por_proyecto)[obj.id]
+
+    def get_portafolios(self, obj) -> list[dict]:
+        return [
+            {"id": pt.id, "nombre": pt.nombre}
+            for pt in sorted(obj.portafolios.all(), key=lambda pt: pt.nombre)
+        ]
 
     def get_es_comunidad_energetica(self, obj) -> bool:
         """Si la planta esta hoy en una comunidad energetica, segun sus PPA.

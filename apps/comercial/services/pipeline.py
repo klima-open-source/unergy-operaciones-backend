@@ -908,7 +908,7 @@ def _opciones_proyecto() -> tuple:
         "fronteras__operador_red",
         "info_tecnica",
         "inversores",
-        "portafolio",
+        "portafolios",
     )
 
 
@@ -1054,8 +1054,8 @@ def _identificacion(proyecto) -> dict:
         "origina_code": proyecto.origina_code,
         "project_id_solenium": proyecto.project_id_solenium,
         "sunfactory_project_id": proyecto.sunfactory_project_id,
-        "portafolio_id": proyecto.portafolio_id,
-        "portafolio": proyecto.portafolio.nombre if proyecto.portafolio else None,
+        # Una planta puede estar en varios portafolios (`portafolio_proyectos`).
+        "portafolios": sorted(pt.nombre for pt in proyecto.portafolios.all()),
     }
 
 

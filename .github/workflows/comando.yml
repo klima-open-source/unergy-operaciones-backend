@@ -45,6 +45,8 @@ on:
           - "cargar_patrimonios --aplicar"
           - "vincular_participaciones_pendientes (solo lee)"
           - "vincular_participaciones_pendientes --aplicar"
+          - "copiar_portafolios (solo lee)"
+          - "copiar_portafolios --aplicar"
           - "registrar_tarifas (solo lee)"
           - "registrar_tarifas --aplicar"
           - "DESHACER paso 2 (corte de contratos)"
@@ -113,6 +115,8 @@ jobs:
             "cargar_patrimonios --aplicar")             manage cargar_patrimonios --aplicar ;;
             "vincular_participaciones_pendientes (solo lee)") manage vincular_participaciones_pendientes ;;
             "vincular_participaciones_pendientes --aplicar")  manage vincular_participaciones_pendientes --aplicar ;;
+            "copiar_portafolios (solo lee)")             manage copiar_portafolios ;;
+            "copiar_portafolios --aplicar")              manage copiar_portafolios --aplicar ;;
             "registrar_tarifas (solo lee)")              manage registrar_tarifas ;;
             "registrar_tarifas --aplicar")               manage registrar_tarifas --aplicar ;;
             "DESHACER paso 2 (corte de contratos)")

@@ -63,8 +63,9 @@ def _con_relaciones():
     """
     return (
         py_models.Proyecto.objects
-        .select_related("operador_red", "portafolio")
+        .select_related("operador_red")
         .prefetch_related(
+            "portafolios",
             "inversionistas__inversionista__cliente",
             "inversionistas__patrimonio",
             "info_tecnica",
@@ -190,7 +191,7 @@ class ProyectoViewSet(viewsets.GenericViewSet):
             if request.query_params.get(campo):
                 qs = qs.filter(**{campo: request.query_params[campo]})
         if par.entero(request, "portafolio_id"):
-            qs = qs.filter(portafolio_id=par.entero(request, "portafolio_id"))
+            qs = qs.filter(portafolios__id=par.entero(request, "portafolio_id")).distinct()
         servicio = request.query_params.get("servicio")
         if servicio in SERVICIOS:
             qs = qs.filter(_filtro_servicio(servicio))
