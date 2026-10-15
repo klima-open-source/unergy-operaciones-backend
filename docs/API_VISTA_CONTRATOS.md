@@ -129,7 +129,7 @@ tercero y los listaba en `excluidos`; se quitó junto con `ppa_responsables`, y 
 | `min_mes_mwh` / `max_mes_mwh` | Compromiso mínimo y máximo del contrato **para ese mes**, en MWh. `null` = no hay compromiso cargado — **no es cero** |
 | `gen_prom_total_mwh` | Suma de los promedios de sus plantas, ponderada por el % de despacho. `null` si a alguna planta le falta el promedio (ver abajo) |
 | `estado` | `ok` · `deficit` · `excedente` · `sin_compromisos` · `sin_datos` |
-| `portafolio` | Portafolio dominante de las plantas. `Ayurá (+1)` = hay plantas de más de un portafolio |
+| `portafolio` | Portafolio dominante entre todos los de sus plantas (una planta puede estar en varios). `Ayurá (+1)` = hay más de un portafolio |
 
 **De la planta**
 
