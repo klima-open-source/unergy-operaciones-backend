@@ -1,9 +1,9 @@
-"""Portafolios: una planta puede estar en varios (modelo de Sara, 2026-10-15).
+"""Portafolios: un proyecto está en UN portafolio (Sara, 2026-10-15).
 
-La pertenencia es una fila de `portafolio_proyectos`. La API: `/api/v1/portafolios`
-(lista, crear, renombrar, borrar y `asignar`), `portafolios` en el detalle del
-proyecto y `?portafolio_id=` en su listado; el agrupamiento del asistente de
-informes sale de la misma tabla.
+La pertenencia es `proyectos.portafolio_id`. La API: `/api/v1/portafolios` (lista,
+crear, renombrar, borrar y `asignar`), `portafolio_id`/`portafolio_nombre` en el
+detalle del proyecto y `?portafolio_id=` en su listado; el agrupamiento del
+asistente de informes sale de la misma columna.
 """
 import pytest
 
@@ -93,56 +93,44 @@ def _asignar(datos, cuerpo):
     return _portafolios(datos, "patch", "/api/v1/portafolios/asignar", cuerpo, "asignar")
 
 
-def _en(proyecto):
-    return sorted(proyecto.portafolios.values_list("nombre", flat=True))
+def _de(proyecto):
+    proyecto.refresh_from_db()
+    return proyecto.portafolio.nombre if proyecto.portafolio else None
 
 
-# ── Una planta en varios portafolios ──────────────────────────────────────────
+# ── Un proyecto, un portafolio ────────────────────────────────────────────────
 
-def test_una_planta_puede_estar_en_dos_portafolios(datos):
+def test_ponerla_en_otro_portafolio_la_saca_del_que_tenia(datos):
     for portafolio in (datos["ayura"], datos["caribe"]):
         respuesta = _asignar(datos, {"proyecto_id": datos["gandalf"].id,
-                                     "portafolio_id": portafolio.id, "en_portafolio": True})
+                                     "portafolio_id": portafolio.id})
         assert respuesta.status_code == 200, respuesta.data
 
-    assert _en(datos["gandalf"]) == ["Ayura", "Fondo Caribe"]
-    assert respuesta.data["portafolio_ids"] == sorted([datos["ayura"].id, datos["caribe"].id])
+    assert _de(datos["gandalf"]) == "Fondo Caribe"
+    assert respuesta.data["portafolio_id"] == datos["caribe"].id
 
 
-def test_meterla_dos_veces_no_la_repite(datos):
-    from apps.proyectos.models import PortafolioProyecto
-
-    cuerpo = {"proyecto_id": datos["gandalf"].id, "portafolio_id": datos["ayura"].id,
-              "en_portafolio": True}
-    _asignar(datos, cuerpo)
-    _asignar(datos, cuerpo)
-
-    assert PortafolioProyecto.objects.filter(proyecto=datos["gandalf"]).count() == 1
-
-
-def test_sacarla_de_uno_deja_los_demas(datos):
+def test_null_la_deja_sin_portafolio(datos):
     from apps.proyectos.services import portafolios
 
-    portafolios.poner(datos["gandalf"].id, datos["ayura"].id)
-    portafolios.poner(datos["gandalf"].id, datos["caribe"].id)
+    portafolios.mover(datos["gandalf"].id, datos["ayura"].id)
+    _asignar(datos, {"proyecto_id": datos["gandalf"].id, "portafolio_id": None})
+
+    assert _de(datos["gandalf"]) is None
+
+
+def test_sacarla_de_un_portafolio_que_no_es_el_suyo_no_cambia_nada(datos):
+    """`en_portafolio: false` es el cuerpo del front de varios portafolios."""
+    from apps.proyectos.services import portafolios
+
+    portafolios.mover(datos["gandalf"].id, datos["ayura"].id)
+    _asignar(datos, {"proyecto_id": datos["gandalf"].id, "portafolio_id": datos["caribe"].id,
+                     "en_portafolio": False})
+    assert _de(datos["gandalf"]) == "Ayura"
 
     _asignar(datos, {"proyecto_id": datos["gandalf"].id, "portafolio_id": datos["ayura"].id,
                      "en_portafolio": False})
-
-    assert _en(datos["gandalf"]) == ["Fondo Caribe"]
-
-
-def test_el_cuerpo_del_front_anterior_la_mueve(datos):
-    """Sin `en_portafolio`: el frontend sin promover arrastra de una capa a otra."""
-    from apps.proyectos.services import portafolios
-
-    portafolios.poner(datos["gandalf"].id, datos["ayura"].id)
-
-    _asignar(datos, {"proyecto_id": datos["gandalf"].id, "portafolio_id": datos["caribe"].id})
-    assert _en(datos["gandalf"]) == ["Fondo Caribe"]
-
-    _asignar(datos, {"proyecto_id": datos["gandalf"].id, "portafolio_id": None})
-    assert _en(datos["gandalf"]) == []
+    assert _de(datos["gandalf"]) is None
 
 
 # ── El listado y el borrado ───────────────────────────────────────────────────
@@ -150,24 +138,22 @@ def test_el_cuerpo_del_front_anterior_la_mueve(datos):
 def test_el_listado_trae_cada_capa_con_sus_plantas_y_el_pool(datos):
     from apps.proyectos.services import portafolios
 
-    portafolios.poner(datos["gandalf"].id, datos["ayura"].id)
-    portafolios.poner(datos["gandalf"].id, datos["caribe"].id)
+    portafolios.mover(datos["gandalf"].id, datos["ayura"].id)
 
     respuesta = _portafolios(datos, "get", accion="list")
 
     assert respuesta.status_code == 200
     capas = {c["nombre"]: [p["nombre"] for p in c["proyectos"]]
              for c in respuesta.data["portafolios"]}
-    assert capas == {"Ayura": ["Valle de Gandalf"], "Fondo Caribe": ["Valle de Gandalf"]}
+    assert capas == {"Ayura": ["Valle de Gandalf"], "Fondo Caribe": []}
     assert [p["nombre"] for p in respuesta.data["sin_portafolio"]] == ["Perija"]
-    assert "activo" not in respuesta.data["portafolios"][0]
 
 
-def test_borrar_un_portafolio_no_borra_sus_plantas(datos):
+def test_borrar_un_portafolio_deja_sus_plantas_sin_portafolio(datos):
     from apps.proyectos.models import Proyecto
     from apps.proyectos.services import portafolios
 
-    portafolios.poner(datos["gandalf"].id, datos["ayura"].id)
+    portafolios.mover(datos["gandalf"].id, datos["ayura"].id)
     pk = datos["ayura"].id
 
     respuesta = _portafolios(datos, "delete", f"/api/v1/portafolios/{pk}", accion="destroy",
@@ -175,37 +161,34 @@ def test_borrar_un_portafolio_no_borra_sus_plantas(datos):
 
     assert respuesta.status_code == 204
     assert Proyecto.objects.filter(pk=datos["gandalf"].id).exists()
-    assert _en(datos["gandalf"]) == []
+    assert _de(datos["gandalf"]) is None
 
 
 # ── Informes, proyectos y la fusión ───────────────────────────────────────────
 
-def test_el_asistente_de_informes_la_pone_en_sus_dos_portafolios(datos):
+def test_el_asistente_de_informes_agrupa_por_su_portafolio(datos):
     from apps.proyectos.services import portafolios
 
-    portafolios.poner(datos["gandalf"].id, datos["ayura"].id)
-    portafolios.poner(datos["gandalf"].id, datos["caribe"].id)
-    portafolios.poner(datos["perija"].id, datos["ayura"].id)
+    portafolios.mover(datos["gandalf"].id, datos["ayura"].id)
+    portafolios.mover(datos["perija"].id, datos["ayura"].id)
 
-    assert portafolios.agrupamiento() == {
-        "Ayura": ["Perija", "Valle de Gandalf"],
-        "Fondo Caribe": ["Valle de Gandalf"],
-    }
+    assert portafolios.agrupamiento() == {"Ayura": ["Perija", "Valle de Gandalf"]}
 
 
-def test_el_detalle_del_proyecto_lista_sus_portafolios(datos):
+def test_el_detalle_del_proyecto_trae_su_portafolio(datos):
     from api.v1.proyectos.serializers import ProyectoSerializer
     from apps.proyectos.services import portafolios
 
-    portafolios.poner(datos["gandalf"].id, datos["caribe"].id)
-    portafolios.poner(datos["gandalf"].id, datos["ayura"].id)
+    portafolios.mover(datos["gandalf"].id, datos["caribe"].id)
+    datos["gandalf"].refresh_from_db()
 
-    salida = ProyectoSerializer(datos["gandalf"]).get_portafolios(datos["gandalf"])
+    salida = ProyectoSerializer(datos["gandalf"]).data
 
-    assert [p["nombre"] for p in salida] == ["Ayura", "Fondo Caribe"]
+    assert (salida["portafolio_id"], salida["portafolio_nombre"]) == (
+        datos["caribe"].id, "Fondo Caribe")
 
 
-def test_la_fusion_de_proyectos_lleva_los_portafolios_sin_repetir():
+def test_la_fusion_de_proyectos_hereda_el_portafolio_si_el_ganador_no_tiene():
     from apps.proyectos.services import gestion
 
-    assert ("portafolio_proyectos", ["portafolio_id"]) in gestion.MERGE_COMPUESTO
+    assert "portafolio_id" in gestion.MERGE_ESCALAR_SI_VACIO

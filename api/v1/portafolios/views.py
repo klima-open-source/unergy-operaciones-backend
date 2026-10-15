@@ -29,11 +29,11 @@ class PortafolioViewSet(
 
     GET    /api/v1/portafolios              capas con sus proyectos + pool «sin portafolio»
     POST   /api/v1/portafolios[?forzar=]    → 201
-    PATCH  /api/v1/portafolios/asignar      mete o saca una planta de un portafolio
+    PATCH  /api/v1/portafolios/asignar      pone una planta en un portafolio (o en ninguno)
     PATCH  /api/v1/portafolios/{id}[?forzar=]   renombrar
     DELETE /api/v1/portafolios/{id}         → 204; las plantas no se borran
 
-    Una planta puede estar en varios portafolios (`portafolio_proyectos`).
+    Un proyecto está en un solo portafolio (`proyectos.portafolio_id`).
 
     Un nombre parecido a otro responde 409 con el candidato, y el cliente
     reintenta con `?forzar=true`. El UNIQUE de la base queda como red final.
@@ -52,33 +52,21 @@ class PortafolioViewSet(
         return portafolios_serializers.PortafolioSerializer
 
     def list(self, request, *args, **kwargs):
-        pertenencias: dict[int, list[int]] = {}
-        for portafolio_id, proyecto_id in py_models.PortafolioProyecto.objects.values_list(
-            "portafolio_id", "proyecto_id"
-        ):
-            pertenencias.setdefault(portafolio_id, []).append(proyecto_id)
-        con_portafolio = {pid for ids in pertenencias.values() for pid in ids}
-
-        proyectos = {
-            proyecto.id: portafolios_serializers.ProyectoEnPortafolioSerializer(proyecto).data
-            for proyecto in py_models.Proyecto.objects.filter(deleted_at__isnull=True)
-            .order_by("nombre_comercial")
-        }
+        por_capa: dict[int, list] = {}
+        sin_capa: list = []
         operativos = portafolios_service.ids_operativos()
-        # Al pool solo van los OPERATIVOS sin ningún portafolio: son los que
-        # importan para los informes.
-        sin_capa = [
-            item for pid, item in proyectos.items()
-            if pid not in con_portafolio and pid in operativos
-        ]
+        for proyecto in py_models.Proyecto.objects.filter(deleted_at__isnull=True).order_by(
+            "nombre_comercial"
+        ):
+            item = portafolios_serializers.ProyectoEnPortafolioSerializer(proyecto).data
+            if proyecto.portafolio_id:
+                por_capa.setdefault(proyecto.portafolio_id, []).append(item)
+            elif proyecto.id in operativos:
+                # Al pool solo van los OPERATIVOS sin portafolio: son los que
+                # importan para los informes.
+                sin_capa.append(item)
         capas = [
-            {
-                "id": capa.id, "nombre": capa.nombre,
-                "proyectos": sorted(
-                    (proyectos[pid] for pid in pertenencias.get(capa.id, []) if pid in proyectos),
-                    key=lambda item: item["nombre"] or "",
-                ),
-            }
+            {"id": capa.id, "nombre": capa.nombre, "proyectos": por_capa.get(capa.id, [])}
             for capa in py_models.Portafolio.objects.order_by("nombre")
         ]
         return Response({"portafolios": capas, "sin_portafolio": sin_capa})
@@ -127,7 +115,7 @@ class PortafolioViewSet(
 
     def destroy(self, request, *args, **kwargs):
         capa = get_object_or_404(py_models.Portafolio, pk=kwargs["pk"])
-        # Las plantas NO se borran: solo sus pertenencias a esta capa (CASCADE).
+        # Las plantas NO se borran: quedan sin portafolio (SET_NULL).
         capa.delete()
         return Response(status=204)
 
@@ -150,22 +138,19 @@ class PortafolioViewSet(
         ).exists():
             raise NotFound("Portafolio no encontrado")
 
-        if "en_portafolio" not in datos:
-            # Cuerpo del frontend anterior (`{proyecto_id, portafolio_id}`):
-            # mover la planta a esa capa, como cuando solo podía estar en una.
-            portafolios_service.mover(proyecto.id, capa_id)
-        elif capa_id is None:
-            raise ValidationError({"portafolio_id": "Indica el portafolio."})
-        elif datos["en_portafolio"]:
-            portafolios_service.poner(proyecto.id, capa_id)
-        else:
+        if datos.get("en_portafolio") is False:
+            # Sacarla de ese portafolio (cuerpo del front de varios portafolios).
+            if capa_id is None:
+                raise ValidationError({"portafolio_id": "Indica el portafolio."})
             portafolios_service.quitar(proyecto.id, capa_id)
+        else:
+            # Ponerla en ese portafolio (null = en ninguno): sale del que tenía.
+            portafolios_service.mover(proyecto.id, capa_id)
+        proyecto.refresh_from_db(fields=["portafolio"])
         return Response({
             "ok": True,
             "proyecto_id": proyecto.id,
-            "portafolio_ids": sorted(
-                proyecto.pertenencias_portafolio.values_list("portafolio_id", flat=True)
-            ),
+            "portafolio_id": proyecto.portafolio_id,
         })
 
     @staticmethod

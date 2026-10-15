@@ -1,19 +1,19 @@
 # API de portafolios
 
 Un portafolio es una agrupación de plantas; la usan los informes «Por portafolio».
-**Una planta puede estar en varios portafolios** (modelo de Sara, 2026-10-15): la
-pertenencia es una fila de `portafolio_proyectos (portafolio_id, proyecto_id)`,
-única por pareja.
+**Un proyecto está en un solo portafolio**: `proyectos.portafolio_id` (Sara,
+2026-10-15, después de probar varios por planta con la tabla `portafolio_proyectos`,
+que queda fuera del modelo y se borra en un despliegue posterior).
 
 ## Endpoints
 
 | Método | Ruta | Qué hace |
 |---|---|---|
-| `GET` | `/api/v1/portafolios` | Cada portafolio con sus plantas, y el pool de plantas operativas sin ninguno |
+| `GET` | `/api/v1/portafolios` | Cada portafolio con sus plantas, y el pool de plantas operativas sin portafolio |
 | `POST` | `/api/v1/portafolios[?forzar=true]` | Crea uno → `201`. Nombre parecido a otro → `409` con el candidato |
 | `PATCH` | `/api/v1/portafolios/{id}[?forzar=true]` | Renombra |
-| `DELETE` | `/api/v1/portafolios/{id}` | `204`. Las plantas no se borran, solo sus pertenencias a ese portafolio |
-| `PATCH` | `/api/v1/portafolios/asignar` | Mete o saca una planta de un portafolio |
+| `DELETE` | `/api/v1/portafolios/{id}` | `204`. Sus plantas quedan sin portafolio |
+| `PATCH` | `/api/v1/portafolios/asignar` | Pone una planta en un portafolio (o en ninguno) |
 
 `GET`:
 
@@ -28,30 +28,28 @@ pertenencia es una fila de `portafolio_proyectos (portafolio_id, proyecto_id)`,
 }
 ```
 
-Una planta en dos portafolios aparece en los dos. Ya no hay `activo`.
-
 `asignar`:
 
 ```json
-{ "proyecto_id": 22, "portafolio_id": 4, "en_portafolio": true }
+{ "proyecto_id": 22, "portafolio_id": 4 }
 ```
 
-`true` la mete (idempotente), `false` la saca de ese portafolio y deja los demás.
-Responde `{ "ok": true, "proyecto_id": 22, "portafolio_ids": [4, 7] }`.
-
-Sin `en_portafolio` es el cuerpo del frontend anterior: **mueve** la planta a
-`portafolio_id` (la deja solo ahí; `null` la saca de todos).
+La pone en ese portafolio y la saca del que tenía; `portafolio_id: null` la deja
+sin portafolio. Responde `{ "ok": true, "proyecto_id": 22, "portafolio_id": 4 }`.
+Con `en_portafolio: false` (el cuerpo del front de varios portafolios) la saca de
+`portafolio_id` solo si es el suyo.
 
 ## Dónde más aparece
 
-- `GET /api/v1/proyectos/{id}`: `portafolios: [{id, nombre}]`. `GET /api/v1/proyectos?portafolio_id=4`
-  filtra por pertenencia.
-- Asistente de informes (`/monitoreo/...portfolios`): `{nombre: [plantas]}`, solo plantas
-  operativas; una planta sale en todos sus portafolios.
-- Cumplimiento PPA (`vista-contratos`): el portafolio dominante entre todos los de sus plantas.
+- `GET /api/v1/proyectos/{id}`: `portafolio_id` (escribible) y `portafolio_nombre`.
+  `GET /api/v1/proyectos?portafolio_id=4` filtra.
+- Asistente de informes (`/monitoreo/...portfolios`): `{nombre: [plantas]}`, solo
+  plantas operativas.
+- Cumplimiento PPA (`vista-contratos`): el portafolio dominante entre sus plantas.
+- Fusión de proyectos: si el ganador no tiene portafolio, hereda el del perdedor.
 
 ## Datos
 
-`copiar_portafolios` (solo lee sin `--aplicar`) copia la columna vieja
-`proyectos.portafolio_id` a la tabla, e imprime en CSV el texto suelto
-`contratos.portafolio` antes de su borrado (`contratos/0028`). `proyectos.portafolio_id` no se borra: un proyecto vuelve a estar en un solo portafolio (decisión del 15-oct).
+`volver_a_portafolio_unico` (solo lee sin `--aplicar`) copia `portafolio_proyectos`
+a `proyectos.portafolio_id`. Si una planta quedó en varios portafolios no la toca y
+la lista, para elegir uno a mano.

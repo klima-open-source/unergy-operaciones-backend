@@ -1,8 +1,8 @@
 """Portafolios: las capas con las que se agrupan los proyectos.
 
-Un portafolio agrupa plantas vía `portafolio_proyectos`, y una planta puede estar
-en varios. Es la fuente de verdad del agrupamiento que usan los informes «Por
-portafolio». Se gestiona a mano desde el frontend. (La siembra inicial desde los
+Un portafolio agrupa plantas vía `proyectos.portafolio_id`: un proyecto está en un
+solo portafolio (Sara, 15-oct). Es la fuente de verdad del agrupamiento que usan
+los informes «Por portafolio». Se gestiona a mano desde el frontend. (La siembra inicial desde los
 inversionistas se retiró: la tabla nunca vuelve a estar vacía.)
 
 Vive en el dominio y no en la API porque `agrupamiento()` lo necesita también el
@@ -14,7 +14,6 @@ los nombres de portafolio son razones sociales de clientes, así que
 en dos capas distintas.
 """
 
-from django.db import transaction
 from django.db.models import Q
 
 from apps.comun.nombre_matching import mejor_candidato
@@ -64,50 +63,33 @@ def aviso_de_parecido(portafolio) -> dict:
     }
 
 
-def poner(proyecto_id: int, portafolio_id: int) -> None:
-    """Mete la planta en el portafolio. Idempotente."""
-    py_models.PortafolioProyecto.objects.get_or_create(
-        proyecto_id=proyecto_id, portafolio_id=portafolio_id
-    )
+def mover(proyecto_id: int, portafolio_id: int | None) -> None:
+    """Deja la planta en ese portafolio (`None` = en ninguno). Un proyecto está
+    en un solo portafolio: ponerlo en uno lo saca del que tenía."""
+    py_models.Proyecto.objects.filter(pk=proyecto_id).update(portafolio_id=portafolio_id)
 
 
 def quitar(proyecto_id: int, portafolio_id: int) -> None:
-    """Saca la planta del portafolio; las demás pertenencias quedan."""
-    py_models.PortafolioProyecto.objects.filter(
-        proyecto_id=proyecto_id, portafolio_id=portafolio_id
-    ).delete()
-
-
-def mover(proyecto_id: int, portafolio_id: int | None) -> None:
-    """Deja la planta SOLO en ese portafolio (`None` = en ninguno).
-
-    Es lo que hacía `asignar` cuando una planta tenía un único portafolio. Queda
-    para el frontend anterior, que arrastra la planta de una capa a otra, mientras
-    se promueve el nuevo.
-    """
-    with transaction.atomic():
-        py_models.PortafolioProyecto.objects.filter(proyecto_id=proyecto_id).exclude(
-            portafolio_id=portafolio_id
-        ).delete()
-        if portafolio_id is not None:
-            poner(proyecto_id, portafolio_id)
+    """Saca la planta de ese portafolio, si es el suyo."""
+    py_models.Proyecto.objects.filter(pk=proyecto_id, portafolio_id=portafolio_id).update(
+        portafolio_id=None
+    )
 
 
 def agrupamiento() -> dict[str, list[str]]:
     """`{nombre de portafolio: [nombre comercial, …]}` para el wizard de informes.
 
-    Solo plantas operativas. Una planta que está en dos portafolios sale en los dos.
+    Solo plantas operativas con portafolio.
     """
-    filas = (
-        py_models.PortafolioProyecto.objects
-        .filter(proyecto__in=py_models.Proyecto.objects.filter(
-            operativos_q(), deleted_at__isnull=True))
-        .select_related("portafolio", "proyecto")
-        .order_by("portafolio__nombre", "proyecto__nombre_comercial")
+    proyectos = (
+        py_models.Proyecto.objects
+        .filter(operativos_q(), deleted_at__isnull=True, portafolio__isnull=False)
+        .select_related("portafolio")
+        .order_by("portafolio__nombre", "nombre_comercial")
     )
     salida: dict[str, list[str]] = {}
-    for fila in filas:
-        nombres = salida.setdefault(fila.portafolio.nombre, [])
-        if fila.proyecto.nombre_comercial not in nombres:
-            nombres.append(fila.proyecto.nombre_comercial)
+    for proyecto in proyectos:
+        nombres = salida.setdefault(proyecto.portafolio.nombre, [])
+        if proyecto.nombre_comercial not in nombres:
+            nombres.append(proyecto.nombre_comercial)
     return salida

@@ -46,10 +46,11 @@ class PortafolioUpdateSerializer(serializers.Serializer):
 
 
 class AsignarSerializer(serializers.Serializer):
-    """`{proyecto_id, portafolio_id, en_portafolio}`: true la mete, false la saca.
+    """`{proyecto_id, portafolio_id}`: la pone en ese portafolio y la saca del que
+    tenía (`null` = en ninguno). Un proyecto está en un solo portafolio.
 
-    Sin `en_portafolio` es el cuerpo del frontend anterior: mueve la planta a
-    `portafolio_id` (null = la saca de todos).
+    `en_portafolio: false` (cuerpo del front de varios portafolios) la saca de
+    `portafolio_id` si es el suyo.
     """
 
     proyecto_id = serializers.IntegerField()

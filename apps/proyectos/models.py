@@ -18,6 +18,7 @@ from apps.plataforma.models import Timer
 
 class Proyecto(Timer):
     id = models.BigAutoField(primary_key=True)
+    portafolio = models.ForeignKey("Portafolio", on_delete=models.SET_NULL, db_column="portafolio_id", null=True, blank=True, related_name="proyectos")
     nombre_comercial = models.CharField(max_length=255)
     sub_project = models.CharField(max_length=50, null=True, blank=True)
     topico_liquidaciones = models.CharField(max_length=100, null=True, blank=True)
@@ -147,44 +148,18 @@ class Proyecto(Timer):
 class Portafolio(Timer):
     """Una agrupación de plantas (para los informes «Por portafolio»).
 
-    Una planta puede estar en varios portafolios: la pertenencia es una fila de
-    `portafolio_proyectos` (modelo de Sara, 2026-10-15). Antes era una sola,
-    `proyectos.portafolio_id`, que sigue en la base sin leerse (`activo` se borra en
-    `proyectos/0018`). El 15-oct Sara volvió a un solo portafolio por proyecto: la
-    ronda de reestructura devuelve la relación a esa columna.
+    Un proyecto está en UN portafolio: `proyectos.portafolio_id` (Sara, 15-oct,
+    después de probar varios por planta). La tabla `portafolio_proyectos` de ese
+    intento queda en la base, fuera del modelo, hasta que `volver_a_portafolio_unico`
+    copie sus asignaciones a la columna; luego se borra.
     """
 
     id = models.BigAutoField(primary_key=True)
     nombre = models.CharField(max_length=255)
-    proyectos = models.ManyToManyField(
-        "Proyecto", through="PortafolioProyecto", related_name="portafolios"
-    )
 
     class Meta:
         db_table = "portafolios"
         unique_together = [("nombre",)]
-
-
-class PortafolioProyecto(models.Model):
-    """Que una planta está en un portafolio. Una fila por pareja."""
-
-    id = models.BigAutoField(primary_key=True)
-    portafolio = models.ForeignKey(
-        Portafolio, on_delete=models.CASCADE, db_column="portafolio_id",
-        related_name="pertenencias",
-    )
-    proyecto = models.ForeignKey(
-        "Proyecto", on_delete=models.CASCADE, db_column="proyecto_id",
-        related_name="pertenencias_portafolio",
-    )
-
-    class Meta:
-        db_table = "portafolio_proyectos"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["portafolio", "proyecto"], name="uq_portafolio_proyecto"
-            ),
-        ]
 
 
 class ProyectoInfoTecnica(Timer):

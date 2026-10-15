@@ -45,8 +45,7 @@ on:
           - "cargar_patrimonios --aplicar"
           - "vincular_participaciones_pendientes (solo lee)"
           - "vincular_participaciones_pendientes --aplicar"
-          - "copiar_portafolios (solo lee)"
-          - "copiar_portafolios --aplicar"
+          - "volver_a_portafolio_unico --aplicar"
           - "DESHACER paso 2 (corte de contratos)"
           - "DESHACER paso 0 (diagnostico)"
       confirmar:
@@ -113,8 +112,7 @@ jobs:
             "cargar_patrimonios --aplicar")             manage cargar_patrimonios --aplicar ;;
             "vincular_participaciones_pendientes (solo lee)") manage vincular_participaciones_pendientes ;;
             "vincular_participaciones_pendientes --aplicar")  manage vincular_participaciones_pendientes --aplicar ;;
-            "copiar_portafolios (solo lee)")             manage copiar_portafolios ;;
-            "copiar_portafolios --aplicar")              manage copiar_portafolios --aplicar ;;
+            "volver_a_portafolio_unico --aplicar")       manage volver_a_portafolio_unico --aplicar ;;
             "DESHACER paso 2 (corte de contratos)")
               confirmado
               manage migrate contratos 0008
