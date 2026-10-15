@@ -179,6 +179,25 @@ class ClienteOriginabot:
         """El detalle de una minigranja: `project.id` y `project.terrain_id` salen de aquí."""
         return self._pedir("GET", f"/api/investment/minifarm/{minifarm_id}/")
 
+    # ── Portafolios (`investment.Portfolio`) ──────────────────────────────────
+
+    def portafolios_de_minigranja(self, minifarm_id: int) -> list[dict]:
+        """Los portafolios de TSF en los que está una minigranja: `[{id, name}]`.
+
+        `?minifarm=` filtra la lista de `/api/investment/portfolios/`; una
+        minigranja puede estar en más de uno (en dev, 4 de 211).
+        """
+        datos = self._pedir(
+            "GET", "/api/investment/portfolios/",
+            params={"minifarm": minifarm_id, "page_size": 100},
+        )
+        filas = datos.get("results", []) if isinstance(datos, dict) else datos
+        return [
+            {"id": f["id"], "name": str(f.get("name") or "").strip()}
+            for f in filas
+            if isinstance(f.get("id"), int) and str(f.get("name") or "").strip()
+        ]
+
     # ── Pagos de arriendo (`payment.Payment`) ─────────────────────────────────
 
     def pagos_de_terreno(self, terreno_id: int, anio: int) -> list[dict]:

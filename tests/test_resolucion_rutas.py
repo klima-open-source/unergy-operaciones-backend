@@ -178,6 +178,7 @@ CASOS = [
     ("/api/v1/proyectos/7/merge/9", "merge"),
     ("/api/v1/proyectos/7/info-tecnica", "info_tecnica"),
     ("/api/v1/proyectos/7/inversores", "inversores"),
+    ("/api/v1/proyectos/7/originabot/portafolios", "originabot_portafolios"),
     ("/api/v1/proyectos/7/inversores/3", "inversor"),
     ("/api/v1/proyectos/7/area-contactos", "area_contactos"),
     ("/api/v1/proyectos/7/area-contactos/operacional", "area_contacto"),
