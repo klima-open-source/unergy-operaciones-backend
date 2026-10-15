@@ -33,6 +33,10 @@ class Proyecto(Timer):
     # una copia espejada y se eliminó en la misma migración.
     potencia_ac_kw = models.DecimalField(max_digits=12, decimal_places=3, null=True, blank=True)
     produccion_especifica_kwh_kwp = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    # Capacidad pico (DC) y voltaje de la red: vivían en `proyecto_info_tecnica`
+    # (Sara, 15-oct). El voltaje es texto, p. ej. "13.8/800" (media/baja tensión).
+    capacidad_instalada_kwp = models.DecimalField(max_digits=12, decimal_places=3, null=True, blank=True)
+    voltaje_red = models.CharField(max_length=50, null=True, blank=True)
     estado = models.CharField(max_length=13, choices=[("en_desarrollo", "en_desarrollo"), ("en_operacion", "en_operacion"), ("suspendido", "suspendido"), ("cancelado", "cancelado")], default="en_desarrollo")
     fecha_entrada_operacion = models.DateField(null=True, blank=True)
     fecha_inicio_comercializacion = models.DateField(null=True, blank=True)
@@ -154,51 +158,74 @@ class Portafolio(Timer):
         unique_together = [("nombre",)]
 
 
-class ProyectoInfoTecnica(Timer):
+class TipoEquipo(models.TextChoices):
+    PANEL = "panel", "Paneles"
+    INVERSOR = "inversor", "Inversores"
+    TRANSFORMADOR = "transformador", "Transformador"
+    RECONECTADOR = "reconectador", "Reconectador / relé"
+    TOTALIZADOR = "totalizador", "Totalizador"
+    SEGUIDOR = "seguidor", "Seguidor solar"
+    MEDIDOR_FRONTERA = "medidor_frontera", "Medidores de frontera"
+    MODEM_RECONECTADOR = "modem_reconectador", "Módem del reconectador"
+    MODEM_FRONTERA = "modem_frontera", "Módems de frontera"
+    CCTV = "cctv", "CCTV"
+    SEGURIDAD = "seguridad", "Seguridad física"
+
+
+class Equipo(Timer):
+    """Un equipo de la planta (o un grupo igual: 2 016 paneles de una marca y
+    potencia). Modelo de Sara, 2026-10-15; reemplaza a `proyecto_info_tecnica`,
+    que mezclaba en una fila la marca de cada tipo.
+
+    `potencia` es la de UNA unidad (kWp de un panel). Los inversores llevan la suya
+    cada uno en `ProyectoInversor`, que cuelga del equipo de tipo inversor; ese
+    equipo no lleva marca ni potencia propias. `detalle`: 1P/2P del seguidor, IP
+    del módem, estado del CCTV, la descripción de la seguridad física…
+    """
+
     id = models.BigAutoField(primary_key=True)
-    proyecto = models.ForeignKey("Proyecto", on_delete=models.DO_NOTHING, db_column="proyecto_id", related_name="info_tecnica")
-    voltaje_red = models.CharField(max_length=50, null=True, blank=True)
-    # La potencia AC NO vive acá: es `Proyecto.potencia_ac_kw`. Esta tabla tenía
-    # una copia (`potencia_ac_kw`) que se mantenía espejada a mano en dos
-    # lugares y coincidía en 101 de 101 proyectos -- se eliminó el 2026-09-10.
-    # Lo que sí es de acá es la capacidad PICO (DC), que es otro dato.
-    capacidad_instalada_kwp = models.DecimalField(max_digits=12, decimal_places=3, null=True, blank=True)
-    tipo_tracker = models.CharField(max_length=2, choices=[("1P", "1P"), ("2P", "2P")], null=True, blank=True)
-    cantidad_total_paneles = models.IntegerField(null=True, blank=True)
-    potencia_panel_kwp = models.CharField(max_length=100, null=True, blank=True)
-    marca_paneles = models.CharField(max_length=255, null=True, blank=True)
-    cantidad_inversores = models.IntegerField(null=True, blank=True)
-    potencia_inversores_kwp = models.CharField(max_length=100, null=True, blank=True)
-    marca_inversores = models.CharField(max_length=255, null=True, blank=True)
-    cantidad_strings = models.IntegerField(null=True, blank=True)
-    marca_transformador = models.CharField(max_length=255, null=True, blank=True)
-    marca_reconectador_rele = models.CharField(max_length=500, null=True, blank=True)
-    marca_totalizador = models.CharField(max_length=255, null=True, blank=True)
-    marca_seguidor_solar = models.CharField(max_length=255, null=True, blank=True)
-    marca_medidores_frontera = models.CharField(max_length=255, null=True, blank=True)
-    marca_modem_reconectador = models.CharField(max_length=500, null=True, blank=True)
-    marca_modems_frontera = models.CharField(max_length=255, null=True, blank=True)
-    ip_modem_reconectador = models.CharField(max_length=100, null=True, blank=True)
-    url_ubicacion = models.TextField(null=True, blank=True)
-    cctv_estado = models.TextField(null=True, blank=True)
-    marca_cctv = models.CharField(max_length=255, null=True, blank=True)
-    seguridad_fisica = models.CharField(max_length=255, null=True, blank=True)
-    tiene_internet = models.BooleanField(null=True, blank=True)
+    proyecto = models.ForeignKey("Proyecto", on_delete=models.CASCADE, db_column="proyecto_id", related_name="equipos")
+    tipo = models.CharField(max_length=30, choices=TipoEquipo.choices)
+    cantidad = models.IntegerField(null=True, blank=True)
+    marca = models.CharField(max_length=500, null=True, blank=True)
+    potencia = models.DecimalField(max_digits=12, decimal_places=3, null=True, blank=True)
+    detalle = models.TextField(null=True, blank=True)
 
     class Meta:
-        db_table = "proyecto_info_tecnica"
+        db_table = "equipos"
+        # Un equipo por tipo en cada planta: los 2 016 paneles son UNA fila con su
+        # cantidad. Si alguna vez una planta tiene dos modelos de panel, se separa.
+        constraints = [
+            models.UniqueConstraint(fields=["proyecto", "tipo"], name="uq_equipo_por_tipo"),
+        ]
+
+
+class EstadoInversor(models.TextChoices):
+    ACTIVO = "activo", "Activo"
+    # No se borra: sus fallas lo siguen nombrando.
+    RETIRADO = "retirado", "Retirado"
 
 
 class ProyectoInversor(Timer):
+    """Un inversor de la planta, con su propia potencia (tabla `inversores`).
+
+    Cuelga del equipo de tipo inversor de la planta (`equipo`). `proyecto` se
+    conserva mientras dura la transición: fallas, Generación Solar y la app móvil
+    filtran por él.
+    """
+
     id = models.BigAutoField(primary_key=True)
     proyecto = models.ForeignKey("Proyecto", on_delete=models.DO_NOTHING, db_column="proyecto_id", related_name="inversores")
+    equipo = models.ForeignKey(Equipo, on_delete=models.SET_NULL, db_column="equipo_id", null=True, blank=True, related_name="inversores")
     nombre = models.CharField(max_length=120, null=True, blank=True)
     potencia_nominal_kw = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
     orden = models.IntegerField(default=0)
-    activo = models.BooleanField(default=True)
+    cantidad_strings = models.IntegerField(null=True, blank=True)
+    marca = models.CharField(max_length=255, null=True, blank=True)
+    estado = models.CharField(max_length=20, choices=EstadoInversor.choices, default=EstadoInversor.ACTIVO)
 
     class Meta:
-        db_table = "proyecto_inversores"
+        db_table = "inversores"
         unique_together = [("nombre", "proyecto")]
 
 

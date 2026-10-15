@@ -40,9 +40,8 @@ class Command(BaseCommand):
 
     def handle(self, *args, **opciones):
         filas = [
-            (p.id, p.nombre_comercial, p.potencia_ac_kw, _pico(p))
+            (p.id, p.nombre_comercial, p.potencia_ac_kw, p.capacidad_instalada_kwp)
             for p in Proyecto.objects.filter(deleted_at__isnull=True)
-            .prefetch_related("info_tecnica")
             .order_by("nombre_comercial")
         ]
         con_ambas = [f for f in filas if f[2] and f[3]]
@@ -98,7 +97,3 @@ class Command(BaseCommand):
             self.stdout.write(f"  #{pid} {nombre}: {detalle}")
 
 
-def _pico(proyecto):
-    """La capacidad pico (DC) vive en la info técnica, que puede no existir."""
-    it = next(iter(proyecto.info_tecnica.all()), None)
-    return it.capacidad_instalada_kwp if it else None

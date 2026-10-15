@@ -5,19 +5,21 @@ proyecto vivo, tenga póliza o no (LEFT JOIN), porque la pantalla es el listado 
 proyectos con el estado de su póliza al lado. Por eso el identificador de la ruta
 es `proyecto_id` y no el id de la póliza, y por eso el PUT hace upsert.
 """
+from types import SimpleNamespace
 
 from django.db.models import Prefetch, Q
 
 from apps.contratos import models as ct_models
 from apps.fronteras import models as fr_models
 from apps.proyectos import models as py_models
+from apps.proyectos.services.equipos import ficha_tecnica
 
 
 def proyectos_con_poliza(search=None, tipo_proyecto=None, poliza_om=None):
     """Proyectos vivos con su info técnica, operador y póliza precargados.
 
     Los `select_related`/`prefetch_related` no son opcionales: el serializer lee
-    `info_tecnica`, `operador_red` y las fronteras con SU operador de red para
+    los equipos (la info técnica), `operador_red` y las fronteras con SU operador de red para
     resolver el
     operador de red, y sin precargar son cuatro consultas por fila.
     """
@@ -25,7 +27,8 @@ def proyectos_con_poliza(search=None, tipo_proyecto=None, poliza_om=None):
         py_models.Proyecto.objects.filter(deleted_at__isnull=True)
         .select_related("operador_red")
         .prefetch_related(
-            "info_tecnica",
+            "equipos",
+            "inversores",
             Prefetch(
                 "fronteras",
                 queryset=fr_models.Frontera.objects.filter(
@@ -64,8 +67,10 @@ def build_filas(proyectos):
     """
     filas = []
     for proyecto in proyectos:
-        info = next(iter(proyecto.info_tecnica.all()), None)
-        proyecto.info = info
+        # La info técnica con su forma vieja, armada desde `proyectos` y
+        # `equipos` (desde el 15-oct no hay tabla de info técnica).
+        ficha = ficha_tecnica(proyecto)
+        proyecto.info = SimpleNamespace(**ficha) if ficha else None
         proyecto.poliza = next(iter(getattr(proyecto, "polizas_cargadas", [])), None)
         # Nombre aparte: `operador_red` es el FK y no acepta un string.
         proyecto.operador_red_nombre = _operador_red_legal(proyecto)

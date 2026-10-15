@@ -69,7 +69,7 @@ def _con_relaciones():
         .prefetch_related(
             "inversionistas__inversionista__cliente",
             "inversionistas__patrimonio",
-            "info_tecnica",
+            "equipos__inversores",
             "inversores",
             "area_contactos__cliente",
             "contratos_ppa__contrato",
@@ -368,17 +368,18 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         potencia en NULL para siempre a menos que alguien volviera a editar
         Información técnica a mano (auditoría 2026-08-27: 35 proyectos con ese
         vacío, la mayoría creados justo así). Con una sola columna el espejo
-        sobra y el modo de fallo tampoco puede volver.
+        sobra y el modo de fallo tampoco puede volver. Desde el 15-oct la
+        capacidad también vive en el proyecto.
         """
+        campos = []
         if proyecto.potencia_ac_kw is None and potencia_ac_kw is not None:
             proyecto.potencia_ac_kw = potencia_ac_kw
-            proyecto.save(update_fields=["potencia_ac_kw"])
-        if capacidad_kwp is None:
-            return
-        it, _ = py_models.ProyectoInfoTecnica.objects.get_or_create(proyecto_id=proyecto.id)
-        if it.capacidad_instalada_kwp is None:
-            it.capacidad_instalada_kwp = capacidad_kwp
-            it.save(update_fields=["capacidad_instalada_kwp"])
+            campos.append("potencia_ac_kw")
+        if proyecto.capacidad_instalada_kwp is None and capacidad_kwp is not None:
+            proyecto.capacidad_instalada_kwp = capacidad_kwp
+            campos.append("capacidad_instalada_kwp")
+        if campos:
+            proyecto.save(update_fields=campos)
 
     @action(
         detail=False, methods=["post"],
@@ -683,36 +684,77 @@ class ProyectoViewSet(viewsets.GenericViewSet):
 
     @action(detail=True, methods=["get", "put"], url_path="info-tecnica")
     def info_tecnica(self, request, pk=None):
+        """La vieja info técnica, para el frontend que todavía la usa.
+
+        Desde el 15-oct no hay tabla: se arma desde `proyectos` y `equipos` y se
+        guarda repartiéndola (`apps/proyectos/services/equipos.py`). La ficha
+        nueva usa `/proyectos/{id}/equipos`.
+        """
+        from apps.proyectos.services import equipos as equipos_svc
+
         proyecto = self._simple(pk)
-        it = py_models.ProyectoInfoTecnica.objects.filter(proyecto_id=pk).first()
-
         if request.method == "GET":
-            if not it:
+            ficha = equipos_svc.ficha_tecnica(self._proyecto(proyecto.id))
+            if not ficha:
                 raise NotFound("Info técnica no encontrada")
-            return Response(py_serializers.ProyectoInfoTecnicaSerializer(
-                it, context={"proyecto": proyecto},
-            ).data)
+            return Response(ficha)
 
-        entrada = py_serializers.ProyectoInfoTecnicaSerializer(
-            it, data=request.data, partial=bool(it),
-        )
+        entrada = py_serializers.ProyectoInfoTecnicaSerializer(data=request.data, partial=True)
         entrada.is_valid(raise_exception=True)
-        # La potencia AC se edita desde este formulario pero se GUARDA en el
-        # proyecto, su única casa desde el 2026-09-10. Se saca ANTES de guardar
-        # la info técnica porque ya no es un campo de esa tabla.
-        #
-        # Un `null` no borra: igual que el espejo que esto reemplaza, solo
-        # escribe cuando viene un valor. Para dejar la potencia en blanco está
-        # PATCH /proyectos/{id}.
-        ac = entrada.validated_data.pop("potencia_ac_kw", None)
+        datos = dict(entrada.validated_data)
+        # La potencia AC va al proyecto. Un `null` no borra: para dejarla en
+        # blanco está PATCH /proyectos/{id}.
+        ac = datos.pop("potencia_ac_kw", None)
         with transaction.atomic():
-            it = entrada.save(proyecto_id=int(pk))
             if ac is not None:
                 proyecto.potencia_ac_kw = ac
                 proyecto.save(update_fields=["potencia_ac_kw"])
-        return Response(py_serializers.ProyectoInfoTecnicaSerializer(
-            it, context={"proyecto": proyecto},
-        ).data)
+            equipos_svc.guardar_ficha_tecnica(proyecto, datos)
+        return Response(equipos_svc.ficha_tecnica(self._proyecto(proyecto.id)) or {})
+
+    # ── Equipos ───────────────────────────────────────────────────────────
+
+    @action(detail=True, methods=["get", "post"], url_path="equipos")
+    def equipos(self, request, pk=None):
+        """Los equipos de la planta (uno por tipo); el de inversores trae los suyos."""
+        from apps.proyectos.services import equipos as equipos_svc
+
+        self._simple(pk)
+        if request.method == "GET":
+            filas = (py_models.Equipo.objects.filter(proyecto_id=pk)
+                     .prefetch_related("inversores").order_by("tipo"))
+            return Response(py_serializers.EquipoSerializer(filas, many=True).data)
+
+        entrada = py_serializers.EquipoSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        try:
+            equipo = entrada.save(proyecto_id=int(pk))
+        except IntegrityError:
+            raise Conflict("La planta ya tiene un equipo de ese tipo: edítalo.")
+        if equipo.tipo == py_models.TipoEquipo.INVERSOR:
+            py_models.ProyectoInversor.objects.filter(
+                proyecto_id=pk, equipo__isnull=True).update(equipo=equipo)
+            equipos_svc.actualizar_cantidad_inversores(int(pk))
+        return Response(py_serializers.EquipoSerializer(equipo).data,
+                        status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["patch", "delete"], url_path=r"equipos/(?P<equipo_id>\d+)")
+    def equipo(self, request, pk=None, equipo_id=None):
+        equipo = py_models.Equipo.objects.filter(pk=equipo_id, proyecto_id=pk).first()
+        if not equipo:
+            raise NotFound("Equipo no encontrado")
+        if request.method == "DELETE":
+            if equipo.inversores.exists():
+                raise Conflict("Tiene inversores: elimínalos o retíralos primero.")
+            equipo.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        entrada = py_serializers.EquipoSerializer(equipo, data=request.data, partial=True)
+        entrada.is_valid(raise_exception=True)
+        try:
+            equipo = entrada.save()
+        except IntegrityError:
+            raise Conflict("La planta ya tiene un equipo de ese tipo.")
+        return Response(py_serializers.EquipoSerializer(equipo).data)
 
     # ── Inversores ────────────────────────────────────────────────────────
 
@@ -721,7 +763,7 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         potencia AC nominal del proyecto. Sin potencia AC configurada no se
         valida: no hay contra qué comparar.
 
-        Un inversor retirado (`activo=False`) ya no aporta capacidad real. Antes
+        Un inversor retirado (`estado=retirado`) ya no aporta capacidad real. Antes
         contaba igual, así que reemplazar uno retirado por uno nuevo podía
         rechazarse por una suma que ya no existía físicamente.
         """
@@ -734,7 +776,7 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         )
         if ac is None or ac <= 0:
             return
-        qs = py_models.ProyectoInversor.objects.filter(proyecto_id=proyecto_id, activo=True)
+        qs = py_models.ProyectoInversor.objects.filter(proyecto_id=proyecto_id, estado="activo")
         if excluir_id is not None:
             qs = qs.exclude(pk=excluir_id)
         suma = sum(float(i.potencia_nominal_kw or 0) for i in qs) + float(nuevo_kw)
@@ -756,7 +798,7 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         if request.method == "GET":
             filas = (
                 py_models.ProyectoInversor.objects
-                .filter(proyecto_id=pk, activo=True)
+                .filter(proyecto_id=pk, estado="activo")
                 .order_by("orden", "id")
             )
             return Response(py_serializers.ProyectoInversorSerializer(filas, many=True).data)
@@ -764,8 +806,11 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         entrada = py_serializers.ProyectoInversorSerializer(data=request.data)
         entrada.is_valid(raise_exception=True)
         self._validar_suma_inversores(pk, entrada.validated_data.get("potencia_nominal_kw"))
+        from apps.proyectos.services import equipos as equipos_svc
+
         try:
-            entrada.save(proyecto_id=int(pk))
+            entrada.save(proyecto_id=int(pk), equipo=equipos_svc.equipo_de_inversores(int(pk)))
+            equipos_svc.actualizar_cantidad_inversores(int(pk))
         except IntegrityError:
             # Doble clic, o dos peticiones casi simultáneas del prefill de
             # inversores típicos: sin esto sube como 500 crudo de Postgres.
@@ -783,8 +828,11 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         inv = py_models.ProyectoInversor.objects.filter(pk=inv_id, proyecto_id=pk).first()
         if not inv:
             raise NotFound("Inversor no encontrado")
+        from apps.proyectos.services.equipos import actualizar_cantidad_inversores
+
         if request.method == "DELETE":
             inv.delete()
+            actualizar_cantidad_inversores(int(pk))
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         entrada = py_serializers.ProyectoInversorSerializer(
@@ -801,6 +849,7 @@ class ProyectoViewSet(viewsets.GenericViewSet):
             raise Conflict(
                 f'Ya existe un inversor llamado "{inv.nombre}" en este proyecto.'
             )
+        actualizar_cantidad_inversores(int(pk))
         return Response(entrada.data)
 
     # ── Puntero de contactos por área ─────────────────────────────────────

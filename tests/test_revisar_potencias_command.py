@@ -66,14 +66,11 @@ def base_limpia():
 
 
 def _planta(nombre, ac=None, pico=None):
-    from apps.proyectos.models import Proyecto, ProyectoInfoTecnica
+    from apps.proyectos.models import Proyecto
 
-    proyecto = Proyecto.objects.create(nombre_comercial=nombre, potencia_ac_kw=ac)
-    if pico is not None:
-        ProyectoInfoTecnica.objects.create(
-            proyecto=proyecto, capacidad_instalada_kwp=pico,
-        )
-    return proyecto
+    return Proyecto.objects.create(
+        nombre_comercial=nombre, potencia_ac_kw=ac, capacidad_instalada_kwp=pico,
+    )
 
 
 def _correr():
@@ -133,16 +130,15 @@ def test_lista_las_que_no_tienen_ac(base_limpia):
 
 def test_no_escribe_nada(base_limpia):
     """El comando es un reporte: las correcciones no se pueden adivinar."""
-    from apps.proyectos.models import Proyecto, ProyectoInfoTecnica
+    from apps.proyectos.models import Proyecto
 
     planta = _planta("Bayunca", ac=3000, pico=1230)
 
     _correr()
 
-    assert float(Proyecto.objects.get(pk=planta.id).potencia_ac_kw) == 3000.0
-    assert float(
-        ProyectoInfoTecnica.objects.get(proyecto_id=planta.id).capacidad_instalada_kwp
-    ) == 1230.0
+    planta = Proyecto.objects.get(pk=planta.id)
+    assert float(planta.potencia_ac_kw) == 3000.0
+    assert float(planta.capacidad_instalada_kwp) == 1230.0
 
 
 def test_la_banda_sana_se_calcula_con_los_datos_de_la_base(base_limpia):

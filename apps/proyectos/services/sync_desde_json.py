@@ -108,15 +108,14 @@ def _rellenar(proyecto, fila: dict) -> bool:
 
 
 def _paneles(proyecto, cantidad: int) -> bool:
-    """Crea o rellena la info técnica con el número de paneles."""
-    info = py_models.ProyectoInfoTecnica.objects.filter(proyecto=proyecto).first()
-    if info is None:
-        py_models.ProyectoInfoTecnica.objects.create(
-            proyecto=proyecto, cantidad_total_paneles=cantidad
-        )
+    """Crea o rellena el equipo de paneles con su cantidad. No pisa una ya cargada."""
+    equipo, creado = py_models.Equipo.objects.get_or_create(
+        proyecto=proyecto, tipo=py_models.TipoEquipo.PANEL, defaults={"cantidad": cantidad},
+    )
+    if creado:
         return True
-    if not info.cantidad_total_paneles:
-        info.cantidad_total_paneles = cantidad
-        info.save(update_fields=["cantidad_total_paneles"])
+    if not equipo.cantidad:
+        equipo.cantidad = cantidad
+        equipo.save(update_fields=["cantidad"])
         return True
     return False

@@ -21,7 +21,7 @@ from django.db import connection, transaction
 from api.exceptions import Conflict
 from apps.plataforma.services.auditoria import registrar_borrado
 from apps.proyectos.models import (
-    Proyecto, ProyectoInfoTecnica, ProyectoInversionista, ProyectoInversor,
+    Equipo, Proyecto, ProyectoInversionista, ProyectoInversor,
 )
 
 # Relaciones que el ORM sí conoce y que bloquean el borrado.
@@ -61,7 +61,7 @@ TABLAS_CASCADE_SIN_RELACION = [
 #   MERGE_UNO_A_UNO  : `proyecto_id` UNIQUE → si el ganador ya tiene fila, se
 #                      descarta la del perdedor.
 MERGE_SIMPLE = [
-    "proyecto_inversores", "fronteras", "fallas",
+    "inversores", "fronteras", "fallas",
     "asic_solicitudes", "rec_procesos",
     "costos_variables", "gestion_registros", "cumplimiento_mensual",
 ]
@@ -80,8 +80,11 @@ MERGE_COMPUESTO = [
     # UNIQUE (proyecto_id, tipo): si el ganador ya tiene puntero para ese tipo,
     # se descarta el del perdedor.
     ("proyecto_area_contacto", ["tipo"]),
+    # UNIQUE (proyecto_id, tipo): si el ganador ya tiene ese tipo de equipo, queda
+    # el suyo; los inversores del perdedor ya pasaron al ganador (MERGE_SIMPLE).
+    ("equipos", ["tipo"]),
 ]
-MERGE_UNO_A_UNO = ["proyecto_info_tecnica", "proyecto_informe_om"]
+MERGE_UNO_A_UNO = ["proyecto_informe_om"]
 MERGE_ESCALAR_UNICO = ["sub_project", "project_id_solenium", "sunfactory_project_id"]
 # No-únicos: si el ganador los tiene vacíos, se rellenan con los del perdedor. A
 # diferencia de los únicos, no hace falta liberarlos antes: no hay constraint.
@@ -89,6 +92,8 @@ MERGE_ESCALAR_SI_VACIO = [
     "municipio", "departamento", "latitud", "longitud", "codigo_tsf",
     # Un solo portafolio por proyecto: si el ganador no tiene, hereda el del perdedor.
     "portafolio_id",
+    # Desde el 15-oct viven en el proyecto (antes, en la info técnica).
+    "capacidad_instalada_kwp", "voltaje_red",
 ]
 
 
@@ -113,7 +118,7 @@ def borrar(proyecto: Proyecto) -> None:
     """Borra el proyecto y sus sub-recursos directos. Borrado FÍSICO: a
     diferencia de Cliente, aquí el modelo no lleva soft-delete para esta ruta."""
     with transaction.atomic():
-        for modelo in (ProyectoInversionista, ProyectoInversor, ProyectoInfoTecnica):
+        for modelo in (ProyectoInversionista, ProyectoInversor, Equipo):
             modelo.objects.filter(proyecto_id=proyecto.id).delete()
         from apps.clientes.models import ProyectoAreaContacto
 

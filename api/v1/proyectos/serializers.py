@@ -24,7 +24,7 @@ from apps.proyectos import models as py_models
 CAMPOS_CREACION = [
     "nombre_comercial", "portafolio_id", "sub_project", "topico_liquidaciones",
     "clasificacion_regulatoria", "tipo_tecnologia", "tipo_proyecto",
-    "potencia_ac_kw", "produccion_especifica_kwh_kwp",
+    "potencia_ac_kw", "produccion_especifica_kwh_kwp", "capacidad_instalada_kwp", "voltaje_red",
     "estado", "fecha_entrada_operacion", 
     "fecha_inicio_comercializacion", 
     "gen_mensual_promedio_mwh", "gen_promedio_origen",
@@ -173,57 +173,55 @@ class ProyectoInversionistaSerializer(serializers.ModelSerializer):
         return v
 
 
-class ProyectoInfoTecnicaSerializer(serializers.ModelSerializer):
-    """La info técnica de la planta.
+class ProyectoInfoTecnicaSerializer(serializers.Serializer):
+    """`PUT /proyectos/{id}/info-tecnica`, con la forma de la vieja info técnica.
 
-    `potencia_ac_kw` NO es una columna de esta tabla desde el 2026-09-10: vive
-    en `Proyecto`, que es su única casa. Se declara acá porque el formulario de
-    Información técnica es donde se edita --es un dato técnico y ahí lo busca
-    quien lo llena--, así que entra por este serializer y la vista lo guarda en
-    el proyecto. `write_only` porque el valor de salida no sale del modelo de
-    esta tabla sino del proyecto: lo agrega `to_representation`.
+    Desde el 15-oct no hay tabla de info técnica: `equipos.guardar_ficha_tecnica`
+    reparte estos campos en `proyectos`, `equipos` e `inversores`. Se conserva
+    para el frontend que todavía lo llama; la ficha nueva usa `/equipos`.
+    `potencia_ac_kw` va al proyecto.
     """
 
-    proyecto_id = serializers.IntegerField(read_only=True)
+    voltaje_red = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    capacidad_instalada_kwp = serializers.DecimalField(
+        max_digits=12, decimal_places=3, required=False, allow_null=True)
     potencia_ac_kw = serializers.DecimalField(
-        max_digits=12, decimal_places=3,
-        required=False, allow_null=True, write_only=True,
-    )
-
-    class Meta:
-        model = py_models.ProyectoInfoTecnica
-        exclude = ["proyecto"]
-        extra_kwargs = {"id": {"read_only": True}}
-
-    def to_representation(self, instance):
-        datos = super().to_representation(instance)
-        # Del contexto cuando quien serializa ya tiene el proyecto en la mano
-        # (el detalle y el listado lo pasan): `instance.proyecto` seria una
-        # consulta por fila, o sea 100 consultas de mas en un listado de 100.
-        proyecto = self.context.get("proyecto") or getattr(instance, "proyecto", None)
-        datos["potencia_ac_kw"] = (
-            float(proyecto.potencia_ac_kw)
-            if proyecto is not None and proyecto.potencia_ac_kw is not None
-            else None
-        )
-        return datos
-
-    def get_fields(self):
-        campos = super().get_fields()
-        for campo in campos.values():
-            if not campo.read_only:
-                campo.required = False
-        return campos
+        max_digits=12, decimal_places=3, required=False, allow_null=True)
+    tipo_tracker = serializers.ChoiceField(choices=["1P", "2P"], required=False, allow_null=True,
+                                           allow_blank=True)
+    cantidad_total_paneles = serializers.IntegerField(required=False, allow_null=True)
+    potencia_panel_kwp = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    marca_paneles = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    cantidad_inversores = serializers.IntegerField(required=False, allow_null=True)
+    potencia_inversores_kwp = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    marca_inversores = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    cantidad_strings = serializers.IntegerField(required=False, allow_null=True)
+    marca_transformador = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    marca_reconectador_rele = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    marca_totalizador = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    marca_seguidor_solar = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    marca_medidores_frontera = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    marca_modem_reconectador = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    marca_modems_frontera = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    ip_modem_reconectador = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    url_ubicacion = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    cctv_estado = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    marca_cctv = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    seguridad_fisica = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    tiene_internet = serializers.BooleanField(required=False, allow_null=True)
 
 
 class ProyectoInversorSerializer(serializers.ModelSerializer):
+    """Un inversor de la planta, con su potencia. Cuelga del equipo de inversores."""
+
     proyecto_id = serializers.IntegerField(read_only=True)
+    equipo_id = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = py_models.ProyectoInversor
         fields = [
-            "id", "proyecto_id", "nombre", "potencia_nominal_kw", "orden",
-            "activo", "created_at", "updated_at",
+            "id", "proyecto_id", "equipo_id", "nombre", "potencia_nominal_kw", "orden",
+            "cantidad_strings", "marca", "estado", "created_at", "updated_at",
         ]
         extra_kwargs = {
             "id": {"read_only": True},
@@ -232,8 +230,35 @@ class ProyectoInversorSerializer(serializers.ModelSerializer):
             "nombre": {"required": False, "allow_null": True},
             "potencia_nominal_kw": {"required": False, "allow_null": True},
             "orden": {"required": False, "allow_null": True},
-            "activo": {"required": False},
+            "cantidad_strings": {"required": False, "allow_null": True},
+            "marca": {"required": False, "allow_null": True},
+            "estado": {"required": False},
         }
+
+
+class EquipoSerializer(serializers.ModelSerializer):
+    """Un equipo de la planta. El de tipo inversor trae sus inversores."""
+
+    proyecto_id = serializers.IntegerField(read_only=True)
+    tipo_etiqueta = serializers.CharField(source="get_tipo_display", read_only=True)
+    inversores = serializers.SerializerMethodField()
+
+    class Meta:
+        model = py_models.Equipo
+        fields = ["id", "proyecto_id", "tipo", "tipo_etiqueta", "cantidad", "marca", "potencia",
+                  "detalle", "inversores", "created_at", "updated_at"]
+        extra_kwargs = {
+            "id": {"read_only": True},
+            "created_at": {"read_only": True},
+            "updated_at": {"read_only": True},
+        }
+
+    def get_inversores(self, obj) -> list | None:
+        if obj.tipo != py_models.TipoEquipo.INVERSOR:
+            return None
+        filas = sorted(obj.inversores.all(), key=lambda i: (i.orden, i.id))
+        return ProyectoInversorSerializer(filas, many=True).data
+
 
 
 class ProyectoAreaContactoSerializer(serializers.Serializer):
@@ -284,6 +309,7 @@ class ProyectoSerializer(serializers.ModelSerializer):
     ppa_contratos = serializers.SerializerMethodField()
     inversionistas = ProyectoInversionistaSerializer(many=True, read_only=True)
     info_tecnica = serializers.SerializerMethodField()
+    equipos = serializers.SerializerMethodField()
     inversores = ProyectoInversorSerializer(many=True, read_only=True)
     area_contactos = serializers.SerializerMethodField()
     servicios = serializers.SerializerMethodField()
@@ -298,7 +324,7 @@ class ProyectoSerializer(serializers.ModelSerializer):
         fields = CAMPOS_CREACION + [
             "id", "potencia_instalada_kwp",   # alias de transición, ver arriba
             "operador_red_legal", "ppa_contratos", "inversionistas",
-            "info_tecnica", "inversores", "area_contactos", "servicios",
+            "info_tecnica", "equipos", "inversores", "area_contactos", "servicios",
             "es_comunidad_energetica", "portafolio_nombre",
             "created_at", "updated_at",
         ]
@@ -363,13 +389,16 @@ class ProyectoSerializer(serializers.ModelSerializer):
         return PpaResumenSerializer(contratos, many=True).data
 
     def get_info_tecnica(self, obj):
-        it = next(iter(obj.info_tecnica.all()), None)
-        # El proyecto va por contexto porque `potencia_ac_kw` sale de él: sin
-        # esto, cada fila del listado consultaria su propio proyecto otra vez.
-        return (
-            ProyectoInfoTecnicaSerializer(it, context={"proyecto": obj}).data
-            if it else None
-        )
+        """La forma vieja (un objeto con la marca de cada tipo), armada desde
+        `proyectos` y `equipos`: la ficha anterior y Comercial la leen así."""
+        from apps.proyectos.services.equipos import ficha_tecnica
+
+        return ficha_tecnica(obj)
+
+    def get_equipos(self, obj) -> list:
+        return EquipoSerializer(
+            sorted(obj.equipos.all(), key=lambda e: e.tipo), many=True
+        ).data
 
     def get_area_contactos(self, obj) -> list:
         return [

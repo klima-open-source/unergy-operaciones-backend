@@ -14,10 +14,9 @@ from __future__ import annotations
 
 import logging
 
-from django.db.models import Q
-
 from apps.comun.nombre_matching import mejor_candidato
-from apps.proyectos.models import Proyecto, ProyectoInfoTecnica
+from apps.proyectos.models import Proyecto
+from apps.proyectos.services.equipos import ficha_tecnica, guardar_ficha_tecnica
 
 from apps.comun.integraciones.solenium_client import SoleniumClient
 
@@ -63,9 +62,14 @@ def _match_solenium_seguro(proyecto: Proyecto, solenium_projects: list[dict]) ->
     return item if item and score >= UMBRAL_INFO_TECNICA_SOLENIUM else None
 
 
-def _cambios_info_tecnica(proyecto: Proyecto, it: ProyectoInfoTecnica, detalle: dict) -> dict:
+def _cambios_info_tecnica(proyecto: Proyecto, detalle: dict) -> dict:
     """Solo los campos vacíos -- nunca pisa un valor ya cargado. `detalle` es
-    la respuesta de get_project_detail()['results']."""
+    la respuesta de get_project_detail()['results'].
+
+    Lee y escribe con la forma de la vieja info técnica: desde el 2026-10-15 esos
+    campos viven en `proyectos` y `equipos`, y `guardar_ficha_tecnica` los reparte.
+    """
+    ficha = ficha_tecnica(proyecto) or {}
     cambios: dict = {}
 
     # `installed_capacity` de Solenium es capacidad DC. Antes esto también
@@ -75,38 +79,43 @@ def _cambios_info_tecnica(proyecto: Proyecto, it: ProyectoInfoTecnica, detalle: 
     # Solenium no expone un valor AC separado, así que simplemente no se
     # escribe -- mejor vacío que un DC mal etiquetado como AC.
     capacidad = _num(detalle.get("installed_capacity"))
-    if capacidad is not None and it.capacidad_instalada_kwp is None:
+    if capacidad is not None and proyecto.capacidad_instalada_kwp is None:
         cambios["info_tecnica.capacidad_instalada_kwp"] = capacidad
 
     voltaje = _texto(detalle.get("grid_voltage"))
-    if voltaje is not None and it.voltaje_red is None:
+    if voltaje is not None and proyecto.voltaje_red is None:
         cambios["info_tecnica.voltaje_red"] = voltaje
 
     paneles = detalle.get("panel_quantity")
     paneles = int(paneles) if isinstance(paneles, (int, float)) or (isinstance(paneles, str) and paneles.isdigit()) else None
-    if paneles is not None and it.cantidad_total_paneles is None:
+    if paneles is not None and ficha.get("cantidad_total_paneles") is None:
         cambios["info_tecnica.cantidad_total_paneles"] = paneles
 
     potencia_panel = _texto(detalle.get("panel_power"))
-    if potencia_panel is not None and it.potencia_panel_kwp is None:
+    if potencia_panel is not None and ficha.get("potencia_panel_kwp") is None:
         cambios["info_tecnica.potencia_panel_kwp"] = potencia_panel
 
-    potencia_inv = _texto(detalle.get("inverter_power"))
-    if potencia_inv is not None and it.potencia_inversores_kwp is None:
-        cambios["info_tecnica.potencia_inversores_kwp"] = potencia_inv
+    # `inverter_power` ya no se guarda: la potencia es la de cada inversor.
 
     cant_inv = detalle.get("inverter_quantity")
     cant_inv = int(cant_inv) if isinstance(cant_inv, (int, float)) or (isinstance(cant_inv, str) and cant_inv.isdigit()) else None
-    if cant_inv is not None and it.cantidad_inversores is None:
+    if cant_inv is not None and ficha.get("cantidad_inversores") is None:
         cambios["info_tecnica.cantidad_inversores"] = cant_inv
 
     return cambios
 
 
-def _aplicar_cambios(proyecto: Proyecto, it: ProyectoInfoTecnica, cambios: dict) -> None:
+def _aplicar_cambios(proyecto: Proyecto, cambios: dict) -> None:
+    ficha = {}
     for clave, valor in cambios.items():
         objeto, campo = clave.split(".", 1)
-        setattr(it if objeto == "info_tecnica" else proyecto, campo, valor)
+        if objeto == "info_tecnica":
+            ficha[campo] = valor
+        else:
+            setattr(proyecto, campo, valor)
+    proyecto.save()
+    if ficha:
+        guardar_ficha_tecnica(proyecto, ficha)
 
 
 def backfill_info_tecnica_solenium(apply: bool = False) -> dict:
@@ -114,17 +123,11 @@ def backfill_info_tecnica_solenium(apply: bool = False) -> dict:
     capacidad_instalada_kwp (como proxy de "sin info técnica de Solenium").
     Ver scripts/backfill_info_tecnica_solenium.py para el CLI (dry-run por
     defecto)."""
-    # Sin capacidad instalada = sin info técnica de Solenium. Incluye a los
-    # que no tienen fila de info técnica en absoluto.
+    # Sin capacidad instalada = sin info técnica de Solenium.
     candidatos_proyecto = list(
         Proyecto.objects
-        .filter(deleted_at__isnull=True)
-        .filter(
-            Q(info_tecnica__isnull=True)
-            | Q(info_tecnica__capacidad_instalada_kwp__isnull=True)
-        )
-        .distinct()
-        .prefetch_related("info_tecnica")
+        .filter(deleted_at__isnull=True, capacidad_instalada_kwp__isnull=True)
+        .prefetch_related("equipos", "inversores")
         .order_by("nombre_comercial")
     )
     if not candidatos_proyecto:
@@ -171,8 +174,7 @@ def backfill_info_tecnica_solenium(apply: bool = False) -> dict:
             continue
         detalle = (detalle_resp or {}).get("results") or {}
 
-        it = p.info_tecnica.first() or ProyectoInfoTecnica(proyecto_id=p.id)
-        cambios = _cambios_info_tecnica(p, it, detalle)
+        cambios = _cambios_info_tecnica(p, detalle)
 
         # Vincular project_id_solenium de paso, si no lo tenía y nadie más lo
         # reclamó ya en esta misma corrida -- evita re-adivinar por nombre la
@@ -191,9 +193,7 @@ def backfill_info_tecnica_solenium(apply: bool = False) -> dict:
 
         asignados.append({"proyecto_id": p.id, "nombre": p.nombre_comercial, "cambios": cambios})
         if apply:
-            _aplicar_cambios(p, it, cambios)
-            it.save()
-            p.save()
+            _aplicar_cambios(p, cambios)
 
     return {
         "ok": True,
@@ -206,8 +206,7 @@ def backfill_info_tecnica_solenium(apply: bool = False) -> dict:
 def sincronizar_info_tecnica_solenium_si_aplica(proyecto: Proyecto) -> dict | None:
     """Best-effort para UN proyecto, en el momento de crearlo/confirmarlo (ver
     app/api/v1/proyectos.py). Nunca sobreescribe, y nunca lanza."""
-    it = proyecto.info_tecnica.first()
-    if it and it.capacidad_instalada_kwp is not None:
+    if proyecto.capacidad_instalada_kwp is not None:
         return None  # ya tiene info técnica de alguna fuente, no hay nada que rellenar
     try:
         client = SoleniumClient()
@@ -222,9 +221,7 @@ def sincronizar_info_tecnica_solenium_si_aplica(proyecto: Proyecto) -> dict | No
         detalle_resp = client.get_project_detail(item["id"])
         detalle = (detalle_resp or {}).get("results") or {}
 
-        if it is None:
-            it = ProyectoInfoTecnica(proyecto_id=proyecto.id)
-        cambios = _cambios_info_tecnica(proyecto, it, detalle)
+        cambios = _cambios_info_tecnica(proyecto, detalle)
         nuevo_id = str(item["id"])
         if not proyecto.project_id_solenium:
             conflicto = Proyecto.objects.filter(
@@ -234,9 +231,7 @@ def sincronizar_info_tecnica_solenium_si_aplica(proyecto: Proyecto) -> dict | No
                 cambios["proyecto.project_id_solenium"] = nuevo_id
         if not cambios:
             return None
-        _aplicar_cambios(proyecto, it, cambios)
-        it.save()
-        proyecto.save()
+        _aplicar_cambios(proyecto, cambios)
         return cambios
     except Exception:
         logger.warning(

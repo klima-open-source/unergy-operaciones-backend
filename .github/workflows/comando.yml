@@ -46,6 +46,8 @@ on:
           - "vincular_participaciones_pendientes --aplicar"
           - "volver_a_portafolio_unico --aplicar"
           - "respaldar_columnas_proyectos (solo lee)"
+          - "pasar_info_tecnica_a_equipos (solo lee)"
+          - "pasar_info_tecnica_a_equipos --aplicar"
           - "DESHACER paso 2 (corte de contratos)"
           - "DESHACER paso 0 (diagnostico)"
       confirmar:
@@ -113,6 +115,8 @@ jobs:
             "vincular_participaciones_pendientes --aplicar")  manage vincular_participaciones_pendientes --aplicar ;;
             "volver_a_portafolio_unico --aplicar")       manage volver_a_portafolio_unico --aplicar ;;
             "respaldar_columnas_proyectos (solo lee)")   manage respaldar_columnas_proyectos ;;
+            "pasar_info_tecnica_a_equipos (solo lee)")   manage pasar_info_tecnica_a_equipos ;;
+            "pasar_info_tecnica_a_equipos --aplicar")    manage pasar_info_tecnica_a_equipos --aplicar ;;
             "DESHACER paso 2 (corte de contratos)")
               confirmado
               manage migrate contratos 0008

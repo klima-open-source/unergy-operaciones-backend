@@ -22,7 +22,7 @@ from apps.energia.services import cgm as svc
 from apps.energia.services.reporte import borders as borders_svc
 from apps.energia.services.reporte import curvas as curvas_energia
 from apps.fronteras.models import Frontera, OperadorRed
-from apps.proyectos.models import ProyectoInfoTecnica
+from apps.proyectos.models import Proyecto
 
 logger = logging.getLogger("operaciones.reporte_cgm")
 
@@ -81,9 +81,9 @@ def _datos_proyectos_para_resumen(gaia, fronteras: list[Frontera]) -> dict[int, 
     # llenó capacidad_instalada_kwp en proyectos que antes tenían None).
     capacidad_dc: dict[int, float | None] = {
         pid: float(cap) if cap is not None else None
-        for pid, cap in ProyectoInfoTecnica.objects.filter(
-            proyecto_id__in=proyecto_ids
-        ).values_list("proyecto_id", "capacidad_instalada_kwp")
+        for pid, cap in Proyecto.objects.filter(
+            id__in=proyecto_ids
+        ).values_list("id", "capacidad_instalada_kwp")
     }
 
     mapa_borders = curvas_energia.construir_mapa_borders(gaia)

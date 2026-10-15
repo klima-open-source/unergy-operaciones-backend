@@ -20,6 +20,7 @@ from __future__ import annotations
 import enum
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
+from types import SimpleNamespace
 
 from django.db import transaction
 from django.db.models import Count, Q, Sum
@@ -29,6 +30,7 @@ from apps.comun.nombre_matching import mejor_candidato
 from apps.comun.series_mensuales import serie_mensual_kwh
 from apps.plataforma.services.fechas import hoy_col
 from apps.contratos.services import contrato_partes
+from apps.proyectos.services.equipos import ficha_tecnica
 
 ETAPAS = ("oportunidad", "oferta", "contrato", "firmado", "operando", "terminado")
 ETAPA_ORDEN = {e: i for i, e in enumerate(ETAPAS)}
@@ -906,7 +908,7 @@ def _opciones_proyecto() -> tuple:
     return (
         "operador_red",
         "fronteras__operador_red",
-        "info_tecnica",
+        "equipos",
         "inversores",
         "portafolio",
     )
@@ -1123,8 +1125,11 @@ def _servicios_planta(proyecto) -> dict:
 def _ficha_tecnica(proyecto) -> dict:
     """La ficha técnica: red, paneles, inversores, equipos y almacenamiento.
 
-    Casi todo vive en `proyecto_info_tecnica` (una fila por planta) y esa fila
-    **puede no existir**: ahí sus campos salen null y el bloque viaja igual.
+    Desde el 2026-10-15 sale de `proyectos` y `equipos` (antes, de
+    `proyecto_info_tecnica`), armada con la forma vieja por `ficha_tecnica`; si
+    la planta no tiene nada técnico, sus campos salen null y el bloque viaja
+    igual. `potencia_kwp` de inversores, `tiene_internet` y `url_mapa` ya no se
+    guardan y salen null.
 
     `inversores.equipos` es la lista REAL cargada en la plataforma —los
     inversores son los que se usan para reportar fallas por inversor— y no el
@@ -1139,13 +1144,14 @@ def _ficha_tecnica(proyecto) -> dict:
     están en la misma tabla: son credenciales de acceso al equipo y esta
     superficie es de consulta.
     """
-    it = proyecto.info_tecnica.first()
+    ficha = ficha_tecnica(proyecto)
+    it = SimpleNamespace(**ficha) if ficha else None
 
     def _it(attr):
         return getattr(it, attr, None) if it is not None else None
 
     inversores = sorted(
-        (i for i in proyecto.inversores.all() if i.activo),
+        (i for i in proyecto.inversores.all() if i.estado == "activo"),
         key=lambda i: (i.orden if i.orden is not None else 0, i.id))
     return {
         "voltaje_red": _it("voltaje_red"),
@@ -1407,10 +1413,10 @@ def _nodo_proyecto(proyecto, ofertas, operadores=None) -> dict:
                 # Dirección o vereda: la ubicación fina, que en zona rural es lo
                 # único que hay además de las coordenadas.
                 "direccion": proyecto.direccion_vereda,
-                # El enlace al mapa que cargó operaciones (Google Maps u otro).
-                # No se genera uno a partir de lat/lon: si está en null es que
-                # nadie lo cargó, y fabricarlo taparía la diferencia.
-                "url_mapa": (it.url_ubicacion if (it := proyecto.info_tecnica.first()) else None),
+                # El enlace al mapa que cargaba operaciones. Desde el 15-oct no
+                # se guarda (la ubicación es latitud/longitud); la llave se
+                # conserva en null para no romper a quien la lea.
+                "url_mapa": None,
             },
             "operador_red": operador,
             # Id del catálogo `operadores_red`, para cruzar. Null cuando el

@@ -205,7 +205,7 @@ def _calcular_resumen(
         "nombre": str,
         "frt_gen": str | None,        -- codigo_frontera de Generación
         "frt_con": str | None,        -- codigo_frontera de Consumo
-        "capacidad_dc_kwp": float | None,      -- ProyectoInfoTecnica.capacidad_instalada_kwp
+        "capacidad_dc_kwp": float | None,      -- Proyecto.capacidad_instalada_kwp
         "capacidad_efectiva_mw": float | None, -- Proyecto.potencia_ac_kw / 1000 (Generación)
         "main_meter_gen": int | None, "backup_meter_gen": int | None,
         "main_meter_con": int | None, "backup_meter_con": int | None,

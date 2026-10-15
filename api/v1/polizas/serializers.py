@@ -1,6 +1,6 @@
 """Serializers de la vista de pólizas.
 
-La fila mezcla tres tablas —`proyectos`, `proyecto_info_tecnica` y `polizas`— y
+La fila mezcla `proyectos`, la info técnica (armada desde `equipos`) y `polizas`, y
 sale plana, que es como la consume la pantalla. Los campos de la póliza salen en
 `None` (y `poliza_om` en `False`) cuando el proyecto todavía no tiene una: la
 fila existe igual, con la parte de póliza vacía.
