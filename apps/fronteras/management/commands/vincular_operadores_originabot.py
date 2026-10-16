@@ -8,25 +8,20 @@ correr cuantas veces haga falta.
 originabot no publica un listado de operadores: el catálogo completo viene en
 `grid_operator_data.options` del detalle de cualquier proyecto, y de ahí se lee.
 
-Necesita un token de Unergy Auth del mismo entorno que ORIGINABOT_URL (el
-backend no tiene credenciales propias para originabot). Uso:
+Va con el usuario de Operaciones en originabot (ORIGINABOT_USER y
+ORIGINABOT_PASSWORD, ver `apps/comun/integraciones/originabot.py`). Uso:
 
-    uv run python manage.py vincular_operadores_originabot --token "$TOKEN" --dry-run
-    uv run python manage.py vincular_operadores_originabot --token "$TOKEN"
+    uv run python manage.py vincular_operadores_originabot --dry-run
+    uv run python manage.py vincular_operadores_originabot
 
 Si va a CREAR operadores, los lista y pide confirmación antes de escribir nada
 (`--si` la salta, para correrlo sin terminal interactiva).
-
-El token también se puede pasar en ORIGINABOT_TOKEN, para que no quede en el
-historial de la shell.
 """
-import os
-
-import httpx
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
+from apps.comun.integraciones.originabot import ClienteOriginabot, OriginabotError
 from apps.fronteras.services import operadores_originabot
 
 
@@ -38,33 +33,25 @@ class Command(BaseCommand):
     help = "Vincula (o crea) los operadores de red de originabot por su code."
 
     def add_arguments(self, parser):
-        parser.add_argument("--token", help="Bearer de Unergy Auth. Por defecto, ORIGINABOT_TOKEN.")
         parser.add_argument("--dry-run", action="store_true", help="Hace todo y lo deshace al final.")
         parser.add_argument("--si", action="store_true", help="No pedir confirmación para crear operadores.")
 
-    def _catalogo(self, token: str) -> list[dict]:
-        base = settings.ORIGINABOT_URL.rstrip("/")
-        with httpx.Client(timeout=60, headers={"Authorization": f"Bearer {token}"}) as cliente:
-            lista = cliente.get(f"{base}/api/minifarm/projects/", params={"page_size": 1})
-            if lista.status_code in (401, 403):
-                raise CommandError(f"originabot rechazó el token ({lista.status_code}). ¿Es del mismo entorno que {base}?")
-            lista.raise_for_status()
-            resultados = lista.json().get("results") or []
+    def _catalogo(self) -> list[dict]:
+        ob = ClienteOriginabot()
+        try:
+            resultados = ob.proyectos(page_size=1)
             if not resultados:
                 raise CommandError("originabot no devolvió ningún proyecto del que leer el catálogo.")
-            detalle = cliente.get(f"{base}/api/minifarm/projects/{resultados[0]['id']}/")
-            detalle.raise_for_status()
-        opciones = (detalle.json().get("grid_operator_data") or {}).get("options") or []
+            detalle = ob.proyecto(resultados[0]["id"])
+        except OriginabotError as exc:
+            raise CommandError(str(exc))
+        opciones = (detalle.get("grid_operator_data") or {}).get("options") or []
         if not opciones:
             raise CommandError("El detalle del proyecto no trae grid_operator_data.options.")
         return opciones
 
     def handle(self, *args, **opts):
-        token = opts.get("token") or os.getenv("ORIGINABOT_TOKEN")
-        if not token:
-            raise CommandError("Falta el token: --token o ORIGINABOT_TOKEN.")
-
-        opciones = self._catalogo(token)
+        opciones = self._catalogo()
         self.stdout.write(f"originabot ({settings.ORIGINABOT_URL}): {len(opciones)} operadores.")
 
         a_crear = []

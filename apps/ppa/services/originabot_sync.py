@@ -8,8 +8,8 @@ originabot:
   originabot tiene exactamente las minigranjas de las plantas del contrato; lo que
   hubiera allá y aquí no esté, se quita. (PATCH de `minifarms`, que ya es la lista
   entera.)
-- **Si no llega, queda pendiente.** Sin token de Unergy (login propio) u originabot
-  caído, el PPA queda `pendiente`/`error` (`originabot_pendiente` lo marca) y el
+- **Si no llega, queda pendiente.** Con originabot caído (o rechazando al usuario
+  de Operaciones), el PPA queda `error` (`originabot_pendiente` lo marca) y el
   próximo intento vuelve a calcular la lista desde las plantas de ese momento.
 - **Crear un PPA en originabot nunca es automático**: solo con `crear=True`, que
   manda la ficha del PPA después de que la persona confirma («Esta acción creará
@@ -26,8 +26,8 @@ originabot:
   Una planta sin minigranja en originabot no se lleva y se avisa en el detalle:
   como la lista se reemplaza, esa planta no queda en el PPA de allá.
 
-Las llamadas van con el token de Unergy Auth de quien hizo el cambio
-(`apps/comun/integraciones/originabot.py`). Que falle NO deshace el cambio en
+Las llamadas van con el usuario de Operaciones en originabot, sea quien sea el
+que hizo el cambio (`apps/comun/integraciones/originabot.py`). Que falle NO deshace el cambio en
 Operaciones: aquí se crea y se configura el PPA.
 """
 from __future__ import annotations
@@ -49,9 +49,6 @@ SINCRONIZADO = "sincronizado"
 PENDIENTE = "pendiente"
 ERROR = "error"
 
-SIN_TOKEN = (
-    "El cambio no llegó a originabot: entra con Unergy Auth y pulsa «Sincronizar»."
-)
 SIN_VINCULO = (
     "Este PPA no existe en originabot: créalo o vincúlalo a uno de allá para que "
     "sus plantas lleguen."
@@ -117,20 +114,12 @@ def _nombre(contrato) -> str:
 
 
 def sincronizar(
-    contrato, token: str | None, *, vincular_a: int | None = None,
+    contrato, *, vincular_a: int | None = None,
     off_taker_id: int | None = None, crear: bool = False,
 ) -> None:
     """Lleva a originabot lo pendiente del PPA y deja el resultado en el contrato
     (`originabot_sync_*`). No lanza: un fallo queda como `error` con su motivo."""
-    if not token:
-        if contrato.originabot_ppa_id is None and not (vincular_a or crear):
-            if plantas_de(contrato):
-                _marcar(contrato, PENDIENTE, SIN_VINCULO)
-        elif contrato.originabot_pendiente or vincular_a or crear:
-            _marcar(contrato, PENDIENTE, SIN_TOKEN)
-        return
-
-    ob = ClienteOriginabot(token)
+    ob = ClienteOriginabot()
     try:
         if vincular_a:
             ob.ppa(vincular_a)  # que exista; 404 → error legible

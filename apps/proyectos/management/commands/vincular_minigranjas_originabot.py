@@ -10,11 +10,9 @@ No crea nada en ningún sistema: solo escribe el vínculo aquí. Idempotente.
     uv run python manage.py vincular_minigranjas_originabot --dry-run
     uv run python manage.py vincular_minigranjas_originabot
 
-Necesita un token de Unergy Auth del mismo entorno que ORIGINABOT_URL, en
---token o en ORIGINABOT_TOKEN.
+Va con el usuario de Operaciones en originabot (ORIGINABOT_USER y
+ORIGINABOT_PASSWORD, ver `apps/comun/integraciones/originabot.py`).
 """
-import os
-
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db.models import Q
@@ -28,14 +26,10 @@ class Command(BaseCommand):
     help = "Guarda en cada planta su minigranja de originabot."
 
     def add_arguments(self, parser):
-        parser.add_argument("--token", help="Bearer de Unergy Auth. Por defecto, ORIGINABOT_TOKEN.")
         parser.add_argument("--dry-run", action="store_true", help="Solo informa; no guarda nada.")
 
     def handle(self, *args, **opts):
-        token = opts.get("token") or os.getenv("ORIGINABOT_TOKEN")
-        if not token:
-            raise CommandError("Falta el token: --token o ORIGINABOT_TOKEN.")
-        ob = ClienteOriginabot(token)
+        ob = ClienteOriginabot()
 
         pendientes = (
             Proyecto.objects.filter(deleted_at__isnull=True, originabot_minifarm_id__isnull=True)

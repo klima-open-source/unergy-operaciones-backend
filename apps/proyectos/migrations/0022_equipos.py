@@ -21,7 +21,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('proyectos', '0020_columnas_fuera_del_estado'),
+        ('proyectos', '0021_columnas_fuera_del_estado'),
     ]
 
     operations = [

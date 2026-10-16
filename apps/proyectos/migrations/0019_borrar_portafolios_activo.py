@@ -13,7 +13,7 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('proyectos', '0017_borrar_es_patrimonio_autonomo'),
+        ('proyectos', '0018_borrar_es_patrimonio_autonomo'),
     ]
 
     operations = [

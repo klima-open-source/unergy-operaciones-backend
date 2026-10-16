@@ -222,7 +222,7 @@ def valor_de_proyecto(proyecto_id: int, periodo: str) -> tuple[float, float] | N
     return (canon, iva)
 
 
-def indexacion(contrato, arrendador=None) -> dict:
+def indexacion(contrato, arrendador=None, ipc=None) -> dict:
     """Serie de indexación anual y mensual de un contrato de arriendo.
 
     Año CALENDARIO (1 de enero) usando solo el año de la fecha de firma — a
@@ -236,7 +236,8 @@ def indexacion(contrato, arrendador=None) -> dict:
     )
     hoy = date.today()
     serie = serie_indexacion(
-        contrato.fecha_firma_contrato, base, tasas_ipc(), hoy.year, hoy.month
+        contrato.fecha_firma_contrato, base,
+        tasas_ipc() if ipc is None else ipc, hoy.year, hoy.month,
     )
     return {
         "anual": [
@@ -249,6 +250,23 @@ def indexacion(contrato, arrendador=None) -> dict:
              "valor": f["valor_mensual"]}
             for f in serie
         ],
+    }
+
+
+def indexacion_con_arrendadores(contrato) -> dict:
+    """La serie del contrato y la de cada uno de sus arrendadores, de una vez.
+
+    La ficha de arriendo pedía la del contrato y después una por arrendador: una
+    petición más por cada uno. Acá va todo en una respuesta, con las tasas de IPC
+    leídas una sola vez. `arrendadores` va por id (en texto: es una clave JSON).
+    """
+    ipc = tasas_ipc()
+    arrendadores = ar_models.ArrArrendador.objects.filter(contrato=contrato).order_by("id")
+    return {
+        **indexacion(contrato, ipc=ipc),
+        "arrendadores": {
+            str(a.id): indexacion(contrato, a, ipc=ipc) for a in arrendadores
+        },
     }
 
 

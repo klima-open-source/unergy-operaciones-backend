@@ -10,7 +10,7 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('proyectos', '0016_proyecto_originabot_proyecto_id_and_more'),
+        ('proyectos', '0017_portafolio_originabot'),
     ]
 
     operations = [

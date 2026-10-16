@@ -51,6 +51,7 @@ class ClienteViewSet(viewsets.GenericViewSet):
     """Clientes: la razón social con la que Unergy contrata.
 
     GET|POST /api/v1/clientes            ·  GET /api/v1/clientes/vista-comercial
+    GET /api/v1/clientes/lista           catálogo liviano para los selectores, sin paginar
     GET|PATCH|DELETE /api/v1/clientes/{id}
     POST /api/v1/clientes/{id}/test-correo
     GET /api/v1/clientes/{id}/tasas-servicio  ·  PUT …/tasa-servicio
@@ -106,6 +107,22 @@ class ClienteViewSet(viewsets.GenericViewSet):
         return self.get_paginated_response(
             cl_serializers.ClienteListSerializer(pagina, many=True).data
         )
+
+    @action(detail=False, methods=["get"], url_path="lista")
+    def lista(self, request):
+        """Todos los clientes con lo que muestra un selector, en una sola respuesta.
+
+        El listado paginado tiene tope de 100 filas (`api/pagination.py`) y los
+        selectores necesitan todos: pedirlos página a página eran varias
+        peticiones por cada vista que abre un selector de clientes. Con cuatro
+        columnas y `values()` cabe en una respuesta chica.
+        """
+        items = list(
+            cl_models.Cliente.objects.filter(deleted_at__isnull=True)
+            .order_by("razon_social_nombre")
+            .values("id", "razon_social_nombre", "nit_cedula", "tipo_persona")
+        )
+        return Response({"total": len(items), "items": items})
 
     def _avisar_nombre_parecido(self, request, nombre, excluir_id=None):
         """409 estructurado si ya hay un cliente con nombre muy parecido.

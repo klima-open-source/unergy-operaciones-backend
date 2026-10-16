@@ -16,7 +16,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('proyectos', '0018_borrar_portafolios_activo'),
+        ('proyectos', '0019_borrar_portafolios_activo'),
     ]
 
     operations = [

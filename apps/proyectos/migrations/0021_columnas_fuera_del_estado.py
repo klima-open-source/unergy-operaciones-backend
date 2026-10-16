@@ -21,7 +21,7 @@ SRV = ("srv_operacion", "srv_representacion", "srv_cgm", "srv_ppa")
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('proyectos', '0019_portafolio_unico'),
+        ('proyectos', '0020_portafolio_unico'),
     ]
 
     operations = [
