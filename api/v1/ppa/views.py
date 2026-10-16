@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from django.db import transaction
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 
 from api.exceptions import Conflict, NoProcesable
@@ -48,7 +48,7 @@ class PpaViewSet(
     POST   /api/v1/ppa/{id}/originabot          sincroniza; o vincula/crea allá
 
     **originabot.** Crear un PPA o cambiar sus plantas lleva el cambio a
-    originabot con el token de Unergy Auth de quien lo hizo
+    originabot con el usuario de Operaciones en originabot
     (`apps/ppa/services/originabot_sync.py`). Si no llega, el contrato queda
     `pendiente`/`error` y el cambio en Operaciones se mantiene.
 
@@ -169,7 +169,7 @@ class PpaViewSet(
         except ValueError as exc:
             raise NoProcesable(str(exc))
 
-        originabot_sync.sincronizar(resultado.contrato, request.auth)
+        originabot_sync.sincronizar(resultado.contrato)
 
         cuerpo = ppa_serializers.ContratoSerializer(
             self._contrato(resultado.contrato.pk)
@@ -206,7 +206,7 @@ class PpaViewSet(
             originabot_sync.registrar_cambio(
                 contrato, plantas_antes, originabot_sync.plantas_de(contrato)
             )
-            originabot_sync.sincronizar(contrato, request.auth)
+            originabot_sync.sincronizar(contrato)
 
         return Response(
             ppa_serializers.ContratoSerializer(self._contrato(contrato.pk)).data
@@ -218,11 +218,9 @@ class PpaViewSet(
         """Los PPAs y off takers de originabot, para vincular un PPA a mano.
 
         `contrato_id` dice a qué PPA de Operaciones está vinculado ya cada uno.
-        Con el token de Unergy Auth de quien pide: sin él, 403.
+        Con el usuario de Operaciones en originabot.
         """
-        if not request.auth:
-            raise PermissionDenied("Para ver los PPAs de originabot entra con Unergy Auth.")
-        ob = originabot_sync.ClienteOriginabot(request.auth)
+        ob = originabot_sync.ClienteOriginabot()
         try:
             ppas, offtakers = ob.ppas(), ob.offtakers()
         except originabot_sync.OriginabotError as exc:
@@ -258,7 +256,7 @@ class PpaViewSet(
         entrada = ppa_serializers.SincronizarOriginabotSerializer(data=request.data)
         entrada.is_valid(raise_exception=True)
         originabot_sync.sincronizar(
-            contrato, request.auth,
+            contrato,
             vincular_a=entrada.validated_data.get("originabot_ppa_id"),
             off_taker_id=entrada.validated_data.get("off_taker_id"),
             crear=entrada.validated_data["crear"],

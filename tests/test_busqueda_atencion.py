@@ -92,6 +92,17 @@ def test_busca_en_los_cuatro_tipos_con_la_ruta_de_su_ficha():
     assert buscar("900111")["clientes"][0]["id"] == cl.id
 
 
+def test_un_ppa_lleva_su_tipo_en_la_ruta():
+    """`?tipo=ppa`: la ficha de contrato va directo al PPA, sin probar antes el
+    endpoint de servicio (que para un PPA responde 404)."""
+    from apps.contratos.models import Contrato
+    from apps.plataforma.services.busqueda import buscar
+
+    c = Contrato.objects.create(grupo="ppa", nombre_interno="PPA Reserva Norte")
+
+    assert buscar("reserva norte")["contratos"][0]["url"] == f"/contratos/{c.id}?tipo=ppa"
+
+
 def test_una_letra_no_busca():
     from apps.plataforma.services.busqueda import buscar
 

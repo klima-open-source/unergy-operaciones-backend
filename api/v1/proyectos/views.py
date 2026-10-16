@@ -18,7 +18,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef, Q
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 
 from api.exceptions import Conflict, NoProcesable, ServicioNoDisponible
@@ -35,6 +35,7 @@ from apps.proyectos import models as py_models
 from apps.comun.integraciones.originabot import ClienteOriginabot, OriginabotError
 from apps.proyectos.services import gen_promedio, gestion, pendientes as pendientes_svc
 from apps.proyectos.services import originabot_minigranjas as minigranjas_svc
+from apps.proyectos.services import portafolios_originabot
 from apps.proyectos.services.operador_red import sincronizar_operador_red
 from apps.proyectos.services.resolucion import id_por_nombre
 from apps.proyectos.services.unicidad import (
@@ -609,13 +610,11 @@ class ProyectoViewSet(viewsets.GenericViewSet):
 
         Si la planta no la tiene guardada, la resuelve una vez (nombre exacto o
         código TSF único, ver `apps/proyectos/services/originabot_minigranjas.py`)
-        y la guarda. Con el token de Unergy Auth de quien sincroniza: sin él, 403.
+        y la guarda. Con el usuario de Operaciones en originabot.
         """
         proyecto = self._simple(pk)
-        if not request.auth:
-            raise PermissionDenied("Para sincronizar con TSF entra con Unergy Auth.")
         try:
-            minifarm = minigranjas_svc.minigranja_de(proyecto, ClienteOriginabot(request.auth))
+            minifarm = minigranjas_svc.minigranja_de(proyecto, ClienteOriginabot())
         except OriginabotError as exc:
             raise NoProcesable(str(exc))
         if minifarm is None:
@@ -624,6 +623,31 @@ class ProyectoViewSet(viewsets.GenericViewSet):
                 "o importa el proyecto desde TSF."
             )
         return Response({"originabot_minifarm_id": minifarm})
+
+    @action(detail=True, methods=["post"], url_path="originabot/portafolios")
+    def originabot_portafolios(self, request, pk=None):
+        """Los portafolios de TSF de la planta, llevados a los de Operaciones.
+
+        `?simular=true`: qué cambiaría (crear, vincular, renombrar, agregar,
+        quitar), sin escribir. Sin él, lo aplica; `{crear: true}` permite crear
+        los portafolios que falten (la interfaz lo confirma antes). Ver
+        `apps/proyectos/services/portafolios_originabot.py`. Con el usuario
+        de Operaciones en originabot.
+        """
+        proyecto = self._simple(pk)
+        if not proyecto.originabot_minifarm_id:
+            raise NoProcesable("La planta no tiene su minigranja de TSF: sincronízala primero.")
+        try:
+            de_tsf = ClienteOriginabot().portafolios_de_minigranja(
+                proyecto.originabot_minifarm_id
+            )
+        except OriginabotError as exc:
+            raise NoProcesable(str(exc))
+        if request.query_params.get("simular", "").lower() in ("1", "true"):
+            return Response(portafolios_originabot.plan(proyecto, de_tsf))
+        return Response(portafolios_originabot.aplicar(
+            proyecto, de_tsf, crear=request.data.get("crear") is True
+        ))
 
     @action(
         detail=True, methods=["post"],

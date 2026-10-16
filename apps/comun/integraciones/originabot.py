@@ -1,16 +1,26 @@
-"""Cliente HTTP de originabot (TSF), con el token de Unergy Auth de quien pide.
+"""Cliente HTTP de originabot (TSF), con el usuario de Operaciones.
 
-El backend no tiene credenciales propias para originabot: cada llamada va con el
-Bearer de la persona que hizo el cambio en Operaciones (`request.auth`, ver
-`api.authentication.UnergyAuthAuthentication`), y originabot decide con SUS
-permisos. Un token del login propio de Operaciones no le sirve a originabot.
+Operaciones llama a originabot SIEMPRE como el user «operaciones» de Unergy Auth
+(`ORIGINABOT_USER` / `ORIGINABOT_PASSWORD`), nunca con el token de quien está en
+sesión: así funciona igual para quien entró con el login propio de Operaciones,
+y lo que se ve y se cambia en TSF no depende de los permisos de cada persona.
+En los logs de originabot queda ese usuario, no la persona.
 
-Lo usan la unión de PPAs (`apps/ppa/services/originabot_sync.py`) y las cuentas
-de cobro de arriendos (`apps/arriendos/services/cuentas_cobro_originabot.py`).
+El token se pide a Unergy Auth (`ORIGINABOT_AUTH_URL`, del mismo entorno que
+`ORIGINABOT_URL`), se guarda por proceso hasta poco antes de vencer y, si
+originabot lo rechaza igual, se pide otro una vez.
+
+Lo usan la unión de PPAs (`apps/ppa/services/originabot_sync.py`), las cuentas
+de cobro de arriendos (`apps/arriendos/services/cuentas_cobro_originabot.py`) y
+la minigranja de cada planta (`apps/proyectos/services/originabot_minigranjas.py`).
 """
 from __future__ import annotations
 
+import base64
+import json
 import logging
+import threading
+import time
 
 import httpx
 from django.conf import settings
@@ -19,27 +29,83 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT = 20.0
 
+#: Margen antes del vencimiento del token para pedir otro.
+MARGEN_VENCIMIENTO_S = 60
+#: Si el token no dice cuándo vence, cuánto se usa.
+VIGENCIA_POR_DEFECTO_S = 240
+
 
 class OriginabotError(Exception):
     """originabot no hizo lo pedido. El mensaje es apto para mostrarle a una persona."""
 
 
-class ClienteOriginabot:
-    def __init__(self, token: str):
-        self._base = settings.ORIGINABOT_URL.rstrip("/")
-        self._headers = {"Authorization": f"Bearer {token}"}
+_candado = threading.Lock()
+_token: str | None = None
+_vence: float = 0.0
 
+
+def _vencimiento(token: str) -> float:
+    """El `exp` del JWT (sin verificar la firma: solo se usa para renovarlo a tiempo)."""
+    try:
+        carga = token.split(".")[1]
+        datos = json.loads(base64.urlsafe_b64decode(carga + "=" * (-len(carga) % 4)))
+        return float(datos["exp"]) - MARGEN_VENCIMIENTO_S
+    except Exception:
+        return time.time() + VIGENCIA_POR_DEFECTO_S
+
+
+def _login() -> str:
+    usuario, clave = settings.ORIGINABOT_USER, settings.ORIGINABOT_PASSWORD
+    if not (usuario and clave):
+        raise OriginabotError(
+            "Operaciones no tiene configurado su usuario de originabot "
+            "(ORIGINABOT_USER y ORIGINABOT_PASSWORD)."
+        )
+    url = f"{settings.ORIGINABOT_AUTH_URL.rstrip('/')}/auth/login/"
+    # dj-rest-auth: un correo va como `email`; cualquier otra cosa, como `username`.
+    cuerpo = {"email": usuario} if "@" in usuario else {"username": usuario}
+    try:
+        r = httpx.post(url, json={**cuerpo, "password": clave}, timeout=TIMEOUT)
+    except httpx.HTTPError as exc:
+        logger.error("Unergy Auth no respondió al login de originabot (%s): %s", url, exc)
+        raise OriginabotError("No se pudo entrar a originabot: Unergy Auth no respondió.") from exc
+    if r.status_code in (400, 401):
+        logger.error("Unergy Auth rechazó el usuario de originabot en %s: %s", url, r.text[:300])
+        raise OriginabotError(
+            "originabot rechazó el usuario de Operaciones: revisa ORIGINABOT_USER y "
+            "ORIGINABOT_PASSWORD (y que ORIGINABOT_AUTH_URL sea del mismo entorno)."
+        )
+    if r.status_code >= 400:
+        raise OriginabotError(f"No se pudo entrar a originabot (Unergy Auth respondió {r.status_code}).")
+    datos = r.json()
+    token = datos.get("access") or datos.get("access_token")
+    if not token:
+        raise OriginabotError("Unergy Auth respondió sin token de acceso.")
+    return token
+
+
+def token_de_servicio(renovar: bool = False) -> str:
+    """El token del usuario de Operaciones, del caché si sigue vigente."""
+    global _token, _vence
+    with _candado:
+        if renovar or _token is None or time.time() >= _vence:
+            _token = _login()
+            _vence = _vencimiento(_token)
+        return _token
+
+
+class ClienteOriginabot:
     def _pedir(self, metodo: str, ruta: str, **kwargs) -> dict | list:
-        url = f"{self._base}{ruta}"
-        try:
-            r = httpx.request(metodo, url, headers=self._headers, timeout=TIMEOUT, **kwargs)
-        except httpx.HTTPError as exc:
-            logger.error("originabot no respondió (%s %s): %s", metodo, url, exc)
-            raise OriginabotError("originabot no respondió.") from exc
+        url = f"{settings.ORIGINABOT_URL.rstrip('/')}{ruta}"
+        r = self._enviar(metodo, url, token_de_servicio(), **kwargs)
+        if r.status_code == 401:
+            # Vencido o revocado antes de lo que decía: uno nuevo, una vez.
+            r = self._enviar(metodo, url, token_de_servicio(renovar=True), **kwargs)
         if r.status_code in (401, 403):
+            logger.error("originabot rechazó al usuario de Operaciones (%s %s): %s", metodo, url, r.status_code)
             raise OriginabotError(
-                "originabot rechazó tu sesión: entra con Unergy Auth (del mismo entorno) "
-                "y con permiso sobre PPAs en originabot."
+                "originabot no le permite esto al usuario de Operaciones "
+                f"({r.status_code}): revisa sus permisos en originabot."
             )
         if r.status_code == 404:
             raise OriginabotError(f"originabot no encontró {ruta}.")
@@ -47,6 +113,16 @@ class ClienteOriginabot:
             logger.error("originabot respondió %s en %s %s: %s", r.status_code, metodo, url, r.text[:500])
             raise OriginabotError(f"originabot rechazó el cambio ({r.status_code}): {r.text[:300]}")
         return r.json()
+
+    @staticmethod
+    def _enviar(metodo: str, url: str, token: str, **kwargs) -> httpx.Response:
+        try:
+            return httpx.request(
+                metodo, url, headers={"Authorization": f"Bearer {token}"}, timeout=TIMEOUT, **kwargs
+            )
+        except httpx.HTTPError as exc:
+            logger.error("originabot no respondió (%s %s): %s", metodo, url, exc)
+            raise OriginabotError("originabot no respondió.") from exc
 
     # ── PPAs (`investment.PPA`) ───────────────────────────────────────────────
 
@@ -90,9 +166,37 @@ class ClienteOriginabot:
             if isinstance(m.get("id"), int)
         ]
 
+    def proyectos(self, page_size: int = 1) -> list[dict]:
+        """La primera página de proyectos de minigranja (`/api/minifarm/projects/`)."""
+        datos = self._pedir("GET", "/api/minifarm/projects/", params={"page_size": page_size})
+        return datos.get("results", []) if isinstance(datos, dict) else datos
+
+    def proyecto(self, proyecto_id: int) -> dict:
+        """El detalle de un proyecto: el único que trae `grid_operator_data` con el catálogo."""
+        return self._pedir("GET", f"/api/minifarm/projects/{proyecto_id}/")
+
     def minigranja(self, minifarm_id: int) -> dict:
         """El detalle de una minigranja: `project.id` y `project.terrain_id` salen de aquí."""
         return self._pedir("GET", f"/api/investment/minifarm/{minifarm_id}/")
+
+    # ── Portafolios (`investment.Portfolio`) ──────────────────────────────────
+
+    def portafolios_de_minigranja(self, minifarm_id: int) -> list[dict]:
+        """Los portafolios de TSF en los que está una minigranja: `[{id, name}]`.
+
+        `?minifarm=` filtra la lista de `/api/investment/portfolios/`; una
+        minigranja puede estar en más de uno (en dev, 4 de 211).
+        """
+        datos = self._pedir(
+            "GET", "/api/investment/portfolios/",
+            params={"minifarm": minifarm_id, "page_size": 100},
+        )
+        filas = datos.get("results", []) if isinstance(datos, dict) else datos
+        return [
+            {"id": f["id"], "name": str(f.get("name") or "").strip()}
+            for f in filas
+            if isinstance(f.get("id"), int) and str(f.get("name") or "").strip()
+        ]
 
     # ── Pagos de arriendo (`payment.Payment`) ─────────────────────────────────
 
@@ -120,8 +224,8 @@ class ClienteOriginabot:
     def descargar(url: str) -> bytes:
         """Un archivo de originabot por su URL firmada (Backblaze/S3).
 
-        SIN el token: la firma va en la URL, y el Bearer de Unergy Auth no tiene
-        por qué salir hacia el bucket.
+        SIN el token: la firma va en la URL, y el Bearer del usuario de
+        Operaciones no tiene por qué salir hacia el bucket.
         """
         try:
             r = httpx.get(url, timeout=60.0, follow_redirects=True)

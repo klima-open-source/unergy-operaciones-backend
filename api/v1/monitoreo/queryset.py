@@ -9,6 +9,7 @@ framework.
 import calendar
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
 from apps.contratos import models as ct_models
@@ -161,6 +162,63 @@ def build_generation(sub_project: str, desde: date, hasta: date) -> dict:
         # sitio podian salir una depurada y la otra no en el mismo grafico.
         "fuente": fuente,
     }
+
+
+#: Cuántas plantas acepta `build_generacion_mensual` por llamada. Cada una es una
+#: consulta a la API de Unergy; con 8 hilos, 20 caben holgadas en el timeout de
+#: gunicorn (120 s) aun con la API lenta.
+MAX_PLANTAS_MENSUAL = 20
+
+
+def build_generacion_mensual(sub_projects: list[str], desde: date, hasta: date) -> dict:
+    """Generación por MES de varias plantas, con su curva P90, en una llamada.
+
+    El Ranking vs P90 de Informes mensuales pedía `getGeneration` una vez por mes
+    y por planta, en serie: un portafolio de 30 plantas en un año eran 360
+    peticiones al Worker de Cloudflare (y 360 consultas a la API de Unergy). Acá
+    cada planta se consulta UNA vez para todo el rango, en paralelo, y se suma
+    por mes. Solo viajan los totales: la curva intervalo a intervalo de un año
+    son decenas de miles de filas por planta.
+
+    El P90 de cada mes sale de `curva_p90_kwh` (los doce valores), no de
+    `p90_monthly`, que es solo el del mes en que arranca el rango.
+    """
+    (pedir_desde, pedir_hasta), (desde_dt, hasta_dt) = unergy_api.ventana_utc(desde, hasta)
+    try:
+        token_ = unergy_api.token()
+    except Exception as exc:
+        return {"ok": False, "error": f"Error API Unergy: {exc}"}
+
+    def una(sub_project):
+        try:
+            lecturas, fuente = unergy_api.lecturas_con_respaldo(
+                token_, sub_project, pedir_desde, pedir_hasta
+            )
+        except Exception:
+            logger.debug("sin lecturas para sub_project=%s", sub_project, exc_info=True)
+            return sub_project, {}, "error"
+        meses: dict[str, float] = {}
+        for entrada in unergy_api.deltas(lecturas, desde_dt, hasta_dt):
+            mes = entrada["date"][:7]
+            meses[mes] = meses.get(mes, 0.0) + float(entrada.get("kwh") or 0)
+        return sub_project, {m: round(v, 3) for m, v in meses.items()}, fuente
+
+    with ThreadPoolExecutor(max_workers=unergy_api.HILOS) as pool:
+        resultados = list(pool.map(una, sub_projects))
+
+    proyectos = {
+        p.sub_project: p
+        for p in py_models.Proyecto.objects.filter(sub_project__in=sub_projects)
+    }
+    salida = {}
+    for sub_project, meses, fuente in resultados:
+        simulacion = _simulacion(proyectos.get(sub_project), desde) or {}
+        salida[sub_project] = {
+            "meses": meses,
+            "curva_p90_kwh": simulacion.get("curva_p90_kwh"),
+            "fuente": fuente,
+        }
+    return {"ok": True, "proyectos": salida}
 
 
 def _lista_de_kwh(valor):

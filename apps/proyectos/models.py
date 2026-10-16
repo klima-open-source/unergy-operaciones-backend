@@ -159,10 +159,22 @@ class Portafolio(Timer):
     proyectos = models.ManyToManyField(
         "Proyecto", through="PortafolioProyecto", related_name="portafolios"
     )
+    # El `investment.Portfolio` de originabot (TSF) del que viene, si viene de
+    # ahí. Es la llave al sincronizar: TSF repite nombres («Exagon 2» son cuatro
+    # portafolios distintos) y aquí `nombre` es único. Null = creado en
+    # Operaciones; esos la sincronización con TSF no los toca.
+    originabot_portfolio_id = models.IntegerField(null=True, blank=True)
 
     class Meta:
         db_table = "portafolios"
         unique_together = [("nombre",)]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["originabot_portfolio_id"],
+                condition=models.Q(originabot_portfolio_id__isnull=False),
+                name="uq_portafolio_originabot",
+            ),
+        ]
 
 
 class PortafolioProyecto(models.Model):

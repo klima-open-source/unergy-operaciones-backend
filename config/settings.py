@@ -208,6 +208,13 @@ GRPC_TIMEOUT = float(os.getenv("GRPC_TIMEOUT", "5"))
 # originabot (TSF). Hoy solo lo usa `manage.py vincular_operadores_originabot`.
 # Cambia por entorno: devoriginabot.uner.gy en dev, originabot.uner.gy en prod.
 ORIGINABOT_URL = os.getenv("ORIGINABOT_URL", "https://originabot.uner.gy")
+# El user «operaciones» de Unergy Auth: Operaciones llama a originabot SIEMPRE
+# con él, nunca con el token de quien está en sesión. Se loguea contra
+# ORIGINABOT_AUTH_URL, que tiene que ser el Auth del mismo entorno que
+# ORIGINABOT_URL (devauth -> devoriginabot). Ver apps/comun/integraciones/originabot.py.
+ORIGINABOT_AUTH_URL = os.getenv("ORIGINABOT_AUTH_URL", "https://auth.unergy.io")
+ORIGINABOT_USER = os.getenv("ORIGINABOT_USER", "")
+ORIGINABOT_PASSWORD = os.getenv("ORIGINABOT_PASSWORD", "")
 
 UNERGY_AUTH_HTTP_URL = os.getenv("UNERGY_AUTH_HTTP_URL", "")
 if UNERGY_AUTH_HTTP_URL and ENTORNO != "development":

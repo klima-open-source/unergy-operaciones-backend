@@ -3,7 +3,7 @@
 Contra un originabot falso en memoria: lo que se prueba es la regla, no la red.
 
 - Operaciones manda: la lista de minigranjas de allá se REEMPLAZA por la de aquí;
-- sin token de Unergy queda pendiente y el próximo intento reemplaza con lo de ese momento;
+- si originabot no responde queda marcado y el próximo intento reemplaza con lo de ese momento;
 - un PPA sin vínculo se crea allá con todas sus plantas, si hay off taker;
 - vincular a mano a uno existente también reemplaza;
 - una planta sin minigranja no se lleva y se avisa.
@@ -119,7 +119,7 @@ def ob(monkeypatch):
     from apps.ppa.services import originabot_sync
 
     falso = OriginabotFalso()
-    monkeypatch.setattr(originabot_sync, "ClienteOriginabot", lambda token: falso)
+    monkeypatch.setattr(originabot_sync, "ClienteOriginabot", lambda: falso)
     return falso
 
 
@@ -160,7 +160,7 @@ def test_reemplaza_la_lista_entera_de_originabot(ob, plantas):
 
     contrato = _ppa([plantas["UNO"]], originabot_ppa_id=10)
     _cambiar(contrato, [plantas["DOS"]])
-    originabot_sync.sincronizar(contrato, "tok")
+    originabot_sync.sincronizar(contrato)
 
     assert ob.ppas[10]["minifarms"] == [2]
     contrato.refresh_from_db()
@@ -171,21 +171,31 @@ def test_reemplaza_la_lista_entera_de_originabot(ob, plantas):
     assert plantas["DOS"].originabot_minifarm_id == 2
 
 
-def test_sin_token_queda_pendiente_y_despues_reemplaza_con_lo_de_ese_momento(ob, plantas):
+def test_si_originabot_falla_queda_marcado_y_despues_reemplaza_con_lo_de_ese_momento(ob, plantas, monkeypatch):
     from apps.ppa.services import originabot_sync
 
+    class Caido:
+        """Cualquier llamada falla, como con originabot caído."""
+
+        def __getattr__(self, _nombre):
+            def falla(*_a, **_k):
+                raise originabot_sync.OriginabotError("originabot no respondió.")
+            return falla
+
+    monkeypatch.setattr(originabot_sync, "ClienteOriginabot", lambda: Caido())
     contrato = _ppa([plantas["UNO"]], originabot_ppa_id=10)
     _cambiar(contrato, [plantas["UNO"], plantas["DOS"]])
-    originabot_sync.sincronizar(contrato, None)
+    originabot_sync.sincronizar(contrato)
     _cambiar(contrato, [plantas["DOS"], plantas["TRES"]])
-    originabot_sync.sincronizar(contrato, None)
+    originabot_sync.sincronizar(contrato)
 
     contrato.refresh_from_db()
-    assert contrato.originabot_sync_estado == "pendiente"
+    assert contrato.originabot_sync_estado == "error"
     assert contrato.originabot_pendiente == {"reemplazar": True}
     assert ob.parches == []
 
-    originabot_sync.sincronizar(contrato, "tok")
+    monkeypatch.setattr(originabot_sync, "ClienteOriginabot", lambda: ob)
+    originabot_sync.sincronizar(contrato)
     assert ob.ppas[10]["minifarms"] == [2, 3]
 
 
@@ -194,7 +204,7 @@ def test_si_ya_coincide_no_escribe_en_originabot(ob, plantas):
 
     ob.ppas[10]["minifarms"] = [1]
     contrato = _ppa([plantas["UNO"]], originabot_ppa_id=10)
-    originabot_sync.sincronizar(contrato, "tok")
+    originabot_sync.sincronizar(contrato)
     assert ob.parches == []
 
 
@@ -202,7 +212,7 @@ def test_minigranja_renombrada_se_encuentra_por_su_codigo_unico(ob, plantas):
     from apps.ppa.services import originabot_sync
 
     contrato = _ppa([plantas["TRES"]], originabot_ppa_id=10)
-    originabot_sync.sincronizar(contrato, "tok")
+    originabot_sync.sincronizar(contrato)
 
     plantas["TRES"].refresh_from_db()
     assert plantas["TRES"].originabot_minifarm_id == 3
@@ -215,7 +225,7 @@ def test_planta_sin_minigranja_no_queda_alla_y_se_avisa(ob, plantas):
     from apps.ppa.services import originabot_sync
 
     contrato = _ppa([plantas["TRES"], plantas["SINTSF"], plantas["CINCO"]], originabot_ppa_id=10)
-    originabot_sync.sincronizar(contrato, "tok")
+    originabot_sync.sincronizar(contrato)
 
     contrato.refresh_from_db()
     assert ob.ppas[10]["minifarms"] == [3]
@@ -228,7 +238,7 @@ def test_ppa_sin_vinculo_se_crea_con_todas_sus_plantas(ob, plantas):
     from apps.ppa.services import originabot_sync
 
     contrato = _ppa([plantas["UNO"], plantas["TRES"]])
-    originabot_sync.sincronizar(contrato, "tok", off_taker_id=1, crear=True)
+    originabot_sync.sincronizar(contrato, off_taker_id=1, crear=True)
 
     contrato.refresh_from_db()
     assert ob.creados == [{"id": 50, "name": "Terpel 1", "off_taker": 1, "minifarms": [1, 3]}]
@@ -240,7 +250,7 @@ def test_sin_off_taker_queda_pendiente_y_no_crea_nada(ob, plantas):
     from apps.ppa.services import originabot_sync
 
     contrato = _ppa([plantas["UNO"]])
-    originabot_sync.sincronizar(contrato, "tok", crear=True)
+    originabot_sync.sincronizar(contrato, crear=True)
 
     contrato.refresh_from_db()
     assert ob.creados == []
@@ -256,7 +266,7 @@ def test_nunca_crea_en_originabot_sin_confirmacion_explicita(ob, plantas):
     from apps.ppa.services import originabot_sync
 
     contrato = _ppa([plantas["UNO"]])
-    originabot_sync.sincronizar(contrato, "tok", off_taker_id=1)
+    originabot_sync.sincronizar(contrato, off_taker_id=1)
 
     contrato.refresh_from_db()
     assert ob.creados == []
@@ -273,7 +283,7 @@ def test_el_off_taker_sale_del_comprador_por_nombre_y_se_recuerda(ob, plantas):
     contrato = _ppa([plantas["UNO"]])
     contrato.comprador_id = terpel.id
     contrato.save()
-    originabot_sync.sincronizar(contrato, "tok", crear=True)
+    originabot_sync.sincronizar(contrato, crear=True)
 
     assert ob.creados[0]["off_taker"] == 1
     terpel.refresh_from_db()
@@ -284,7 +294,7 @@ def test_vincular_a_uno_existente_reemplaza_sus_minigranjas(ob, plantas):
     from apps.ppa.services import originabot_sync
 
     contrato = _ppa([plantas["TRES"]])
-    originabot_sync.sincronizar(contrato, "tok", vincular_a=10)
+    originabot_sync.sincronizar(contrato, vincular_a=10)
 
     contrato.refresh_from_db()
     assert contrato.originabot_ppa_id == 10
@@ -296,7 +306,7 @@ def test_no_se_vinculan_dos_contratos_al_mismo_ppa(ob, plantas):
 
     _ppa([], originabot_ppa_id=10)
     otro = _ppa([plantas["UNO"]])
-    originabot_sync.sincronizar(otro, "tok", vincular_a=10)
+    originabot_sync.sincronizar(otro, vincular_a=10)
 
     otro.refresh_from_db()
     assert otro.originabot_ppa_id is None
@@ -310,7 +320,7 @@ def test_si_originabot_falla_queda_error_y_el_cambio_espera(ob, plantas):
     contrato = _ppa([], originabot_ppa_id=10)
     _cambiar(contrato, [plantas["DOS"]])
     ob.falla = OriginabotError("originabot no respondió.")
-    originabot_sync.sincronizar(contrato, "tok")
+    originabot_sync.sincronizar(contrato)
 
     contrato.refresh_from_db()
     assert contrato.originabot_sync_estado == "error"
@@ -331,7 +341,8 @@ def admin_local():
     return {"HTTP_AUTHORIZATION": f"Bearer {cuentas.token_de(u, movil=False)}"}
 
 
-def test_patch_con_login_propio_guarda_y_deja_pendiente(ob, plantas, admin_local):
+def test_patch_con_login_propio_tambien_llega_a_originabot(ob, plantas, admin_local):
+    """originabot va con el usuario de Operaciones: el login de la persona no importa."""
     from django.test import Client
 
     contrato = _ppa([plantas["UNO"]], originabot_ppa_id=10)
@@ -340,17 +351,28 @@ def test_patch_con_login_propio_guarda_y_deja_pendiente(ob, plantas, admin_local
         content_type="application/json", **admin_local,
     )
     assert r.status_code == 200
-    # El cambio en Operaciones se guarda aunque no llegue a originabot.
     assert {p["id"] for p in r.json()["proyectos"]} == {plantas["UNO"].id, plantas["DOS"].id}
-    assert r.json()["originabot_sync_estado"] == "pendiente"
-    assert ob.parches == []
+    assert r.json()["originabot_sync_estado"] == "sincronizado"
+    assert ob.ppas[10]["minifarms"] == [1, 2]
 
 
-def test_opciones_sin_unergy_auth_es_403(admin_local):
+def test_opciones_con_login_propio_responde(admin_local, monkeypatch):
+    """Antes era 403 sin sesión de Unergy Auth; ahora va con el usuario de Operaciones."""
     from django.test import Client
 
+    from apps.ppa.services import originabot_sync
+
+    class Opciones:
+        def ppas(self):
+            return [{"id": 10, "name": "Terpel #1", "minifarms": [1]}]
+
+        def offtakers(self):
+            return [{"id": 1, "name": "Terpel"}]
+
+    monkeypatch.setattr(originabot_sync, "ClienteOriginabot", lambda: Opciones())
     r = Client().get("/api/v1/ppa/originabot/opciones", **admin_local)
-    assert r.status_code == 403
+    assert r.status_code == 200
+    assert r.json()["ppas"][0]["nombre"] == "Terpel #1"
 
 
 def test_comando_vincular_minigranjas_dry_run_no_escribe(monkeypatch, plantas):
@@ -361,13 +383,13 @@ def test_comando_vincular_minigranjas_dry_run_no_escribe(monkeypatch, plantas):
     from apps.proyectos.management.commands import vincular_minigranjas_originabot as cmd
 
     falso = OriginabotFalso()
-    monkeypatch.setattr(cmd, "ClienteOriginabot", lambda token: falso)
+    monkeypatch.setattr(cmd, "ClienteOriginabot", lambda: falso)
 
-    call_command("vincular_minigranjas_originabot", "--token", "tok", "--dry-run")
+    call_command("vincular_minigranjas_originabot", "--dry-run")
     plantas["UNO"].refresh_from_db()
     assert plantas["UNO"].originabot_minifarm_id is None
 
-    call_command("vincular_minigranjas_originabot", "--token", "tok")
+    call_command("vincular_minigranjas_originabot")
     for clave, esperado in (("UNO", 1), ("DOS", 2), ("TRES", 3), ("CINCO", None), ("SINTSF", None)):
         plantas[clave].refresh_from_db()
         assert plantas[clave].originabot_minifarm_id == esperado, clave
@@ -375,34 +397,18 @@ def test_comando_vincular_minigranjas_dry_run_no_escribe(monkeypatch, plantas):
 
 def test_endpoint_minigranja_de_la_planta(monkeypatch, plantas, admin_local):
     """«Sincronizar con TSF» necesita la minigranja: la resuelve y la guarda, con
-    el token de Unergy de quien sincroniza; con el login propio es 403."""
+    el usuario de Operaciones en originabot (también con el login propio)."""
     from django.test import Client
 
     from api.v1.proyectos import views as py_views
-    from apps.comun.integraciones.unergy_auth import cliente as unergy_auth
-    from apps.comun.integraciones.unergy_auth.cliente import IdentidadUnergy
 
     falso = OriginabotFalso()
-    monkeypatch.setattr(py_views, "ClienteOriginabot", lambda token: falso)
+    monkeypatch.setattr(py_views, "ClienteOriginabot", lambda: falso)
     c = Client()
 
-    # Login propio: no hay token que mandar a originabot.
     r = c.post(f"/api/v1/proyectos/{plantas['TRES'].id}/originabot/minigranja", **admin_local)
-    assert r.status_code == 403
-
-    # Con un token de Unergy Auth.
-    from apps.plataforma.models import Usuario
-
-    Usuario.objects.get_or_create(
-        email="admin-ppa@unergy.io", defaults={"nombre": "A", "rol": "admin", "activo": True},
-    )
-    monkeypatch.setattr(unergy_auth, "habilitado", lambda: True)
-    monkeypatch.setattr(unergy_auth, "validar_token", lambda t: IdentidadUnergy(1, "admin-ppa@unergy.io", "a", "A", ()))
-    r = c.post(f"/api/v1/proyectos/{plantas['TRES'].id}/originabot/minigranja",
-               HTTP_AUTHORIZATION="Bearer token-unergy")
     assert r.status_code == 200
     assert r.json() == {"originabot_minifarm_id": 3}
 
-    r = c.post(f"/api/v1/proyectos/{plantas['SINTSF'].id}/originabot/minigranja",
-               HTTP_AUTHORIZATION="Bearer token-unergy")
+    r = c.post(f"/api/v1/proyectos/{plantas['SINTSF'].id}/originabot/minigranja", **admin_local)
     assert r.status_code == 404
