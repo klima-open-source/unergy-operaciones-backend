@@ -294,8 +294,8 @@ def test_representamos_es_tener_contrato_de_representacion():
 
 @pytest.mark.parametrize("bandera", ["srv_operacion", "srv_representacion", "srv_cgm", "srv_ppa"])
 def test_nadie_lee_la_bandera(bandera):
-    """Las columnas `srv_*` salieron del modelo (`proyectos/0020`): nadie las nombra
-    fuera de las migraciones y del comando que las respalda antes de borrarlas."""
+    """Las columnas `srv_*` salieron del modelo y se borraron (`proyectos/0025`):
+    nadie las nombra fuera de las migraciones."""
     from pathlib import Path
 
     raiz = Path(__file__).resolve().parents[1]
@@ -304,5 +304,5 @@ def test_nadie_lee_la_bandera(bandera):
         for carpeta in ("apps", "api", "config")
         for p in (raiz / carpeta).rglob("*.py")
         if "migrations" not in p.parts and bandera in p.read_text(encoding="utf-8")
-    } - {"apps/proyectos/management/commands/respaldar_columnas_proyectos.py"}
+    }
     assert not leen, sorted(leen)
