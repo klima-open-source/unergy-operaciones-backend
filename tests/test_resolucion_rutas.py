@@ -54,6 +54,7 @@ CASOS = [
     # (2026-09-03): ya no hay a quien resolverlas.
     ("/api/v1/generacion-solar/monitoring", "monitoring"),
     ("/api/v1/generacion-solar/monitoring/7", "monitoring_detalle"),
+    ("/api/v1/generacion-solar/monitoring/tarjetas", "monitoring_tarjetas"),
     ("/api/v1/generacion-solar/monitoring/7/inverters-power",
      "monitoring_inverters_power"),
     ("/api/v1/generacion-solar/proyecto/7/historial", "historial"),
@@ -122,6 +123,7 @@ CASOS = [
     # `clientes/{id}` contra la acción de lista `vista-comercial`, y las
     # sub-rutas del detalle contra sus propios listados.
     ("/api/v1/clientes/vista-comercial", "vista_comercial"),
+    ("/api/v1/clientes/lista", "lista"),
     ("/api/v1/clientes/7", "retrieve"),
     ("/api/v1/clientes/7/panel", "panel"),
     ("/api/v1/clientes/7/tasas-servicio", "tasas_servicio"),

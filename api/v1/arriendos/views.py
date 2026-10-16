@@ -80,6 +80,11 @@ class ArriendoViewSet(viewsets.GenericViewSet):
         if contrato is None:
             raise NotFound("Contrato de arriendo no encontrado")
 
+        # `?arrendadores=todos`: además la serie de cada arrendador, en la misma
+        # respuesta, en vez de una petición por arrendador.
+        if request.query_params.get("arrendadores") == "todos":
+            return Response(panel_service.indexacion_con_arrendadores(contrato))
+
         arrendador = None
         arrendador_id = request.query_params.get("arrendador_id")
         if arrendador_id:
