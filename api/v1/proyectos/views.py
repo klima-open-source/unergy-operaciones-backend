@@ -623,8 +623,9 @@ class ProyectoViewSet(viewsets.GenericViewSet):
         """Los portafolios de TSF de la planta, llevados a los de Operaciones.
 
         `?simular=true`: qué cambiaría (crear, vincular, renombrar, agregar,
-        quitar), sin escribir. Sin él, lo aplica; `{crear: true}` permite crear
-        los portafolios que falten (la interfaz lo confirma antes). Ver
+        quitar, no_se_mueve, varios_en_tsf), sin escribir. Sin él, lo aplica;
+        `{crear: true}` permite crear los portafolios que falten (la interfaz lo
+        confirma antes). La planta queda en UN portafolio. Ver
         `apps/proyectos/services/portafolios_originabot.py`. Con el usuario
         de Operaciones en originabot.
         """

@@ -4,8 +4,10 @@ Lo que no puede fallar:
 - el vínculo es por id de TSF, porque TSF repite nombres y aquí son únicos;
 - un portafolio de Operaciones con el mismo nombre se vincula, no se duplica;
 - crear es opt-in (la interfaz lo confirma);
-- solo se saca a la planta de portafolios que vienen de TSF: los creados en
-  Operaciones no se tocan.
+- una planta está en UN portafolio: si TSF la tiene en uno, va a ese; si la
+  tiene en varios, no se mueve;
+- solo se saca o se mueve a la planta de un portafolio que viene de TSF: los
+  creados en Operaciones no se tocan.
 """
 import pytest
 
@@ -72,11 +74,8 @@ def planta(datos):
 
 
 def _de(planta):
-    from apps.proyectos.models import PortafolioProyecto
-
-    return sorted(
-        PortafolioProyecto.objects.filter(proyecto=planta).values_list("portafolio__nombre", flat=True)
-    )
+    planta.refresh_from_db()
+    return planta.portafolio.nombre if planta.portafolio else None
 
 
 def test_crea_solo_si_se_permite_y_la_agrega(planta):
@@ -91,7 +90,7 @@ def test_crea_solo_si_se_permite_y_la_agrega(planta):
     con = svc.aplicar(planta, tsf, crear=True)
     assert [c["nombre"] for c in con["crear"]] == ["Skandia 1"]
     assert Portafolio.objects.get().originabot_portfolio_id == 207
-    assert _de(planta) == ["Skandia 1"]
+    assert _de(planta) == "Skandia 1"
 
 
 def test_vincula_el_homonimo_de_operaciones_en_vez_de_duplicarlo(planta):
@@ -106,7 +105,7 @@ def test_vincula_el_homonimo_de_operaciones_en_vez_de_duplicarlo(planta):
     svc.aplicar(planta, [{"id": 207, "name": "Skandia 1"}], crear=False)
     propio.refresh_from_db()
     assert propio.originabot_portfolio_id == 207
-    assert _de(planta) == ["SKANDIA 1"]
+    assert _de(planta) == "SKANDIA 1"
 
 
 def test_nombre_repetido_en_tsf_no_choca(planta):
@@ -120,19 +119,79 @@ def test_nombre_repetido_en_tsf_no_choca(planta):
     assert Portafolio.objects.get(originabot_portfolio_id=12).nombre == "Exagon 2 (TSF 12)"
 
 
-def test_quita_solo_de_los_que_vienen_de_tsf(planta):
-    from apps.proyectos.models import Portafolio, PortafolioProyecto
+def test_quita_solo_si_el_suyo_viene_de_tsf(planta):
+    from apps.proyectos.models import Portafolio
     from apps.proyectos.services import portafolios_originabot as svc
 
-    de_tsf = Portafolio.objects.create(nombre="Sun Factory 1.1", originabot_portfolio_id=82)
-    propio = Portafolio.objects.create(nombre="Informe Gerencia")
-    for p in (de_tsf, propio):
-        PortafolioProyecto.objects.create(portafolio=p, proyecto=planta)
+    planta.portafolio = Portafolio.objects.create(nombre="Sun Factory 1.1", originabot_portfolio_id=82)
+    planta.save()
 
     cambios = svc.aplicar(planta, [], crear=False)
 
     assert [q["nombre"] for q in cambios["quitar"]] == ["Sun Factory 1.1"]
-    assert _de(planta) == ["Informe Gerencia"]
+    assert _de(planta) is None
+
+
+def test_no_saca_ni_mueve_de_uno_de_operaciones(planta):
+    from apps.proyectos.models import Portafolio
+    from apps.proyectos.services import portafolios_originabot as svc
+
+    planta.portafolio = Portafolio.objects.create(nombre="Informe Gerencia")
+    planta.save()
+
+    assert svc.aplicar(planta, [], crear=False)["quitar"] == []
+    assert _de(planta) == "Informe Gerencia"
+
+    Portafolio.objects.create(nombre="Skandia 1", originabot_portfolio_id=207)
+    cambios = svc.aplicar(planta, [{"id": 207, "name": "Skandia 1"}], crear=False)
+
+    assert cambios["agregar"] == [] and cambios["no_se_mueve"]["nombre"] == "Informe Gerencia"
+    assert _de(planta) == "Informe Gerencia"
+
+
+def test_mueve_de_uno_de_tsf_a_otro(planta):
+    from apps.proyectos.models import Portafolio
+    from apps.proyectos.services import portafolios_originabot as svc
+
+    planta.portafolio = Portafolio.objects.create(nombre="Sun Factory 1.1", originabot_portfolio_id=82)
+    planta.save()
+
+    cambios = svc.aplicar(planta, [{"id": 207, "name": "Skandia 1"}], crear=True)
+
+    assert [a["nombre"] for a in cambios["agregar"]] == ["Skandia 1"]
+    assert cambios["agregar"][0]["portafolio_id"] is not None
+    assert [q["nombre"] for q in cambios["quitar"]] == ["Sun Factory 1.1"]
+    assert _de(planta) == "Skandia 1"
+
+
+def test_sin_crear_no_la_saca_del_suyo(planta):
+    from apps.proyectos.models import Portafolio
+    from apps.proyectos.services import portafolios_originabot as svc
+
+    planta.portafolio = Portafolio.objects.create(nombre="Sun Factory 1.1", originabot_portfolio_id=82)
+    planta.save()
+
+    cambios = svc.aplicar(planta, [{"id": 207, "name": "Skandia 1"}], crear=False)
+
+    assert cambios["agregar"] == [] and cambios["quitar"] == []
+    assert _de(planta) == "Sun Factory 1.1"
+
+
+def test_varios_en_tsf_no_la_mueve_pero_los_vincula(planta):
+    from apps.proyectos.models import Portafolio
+    from apps.proyectos.services import portafolios_originabot as svc
+
+    propio = Portafolio.objects.create(nombre="Exagon 2")
+    tsf = [{"id": 11, "name": "Exagon 2"}, {"id": 12, "name": "Exagon 3"}]
+
+    cambios = svc.aplicar(planta, tsf, crear=True)
+
+    assert [v["id"] for v in cambios["varios_en_tsf"]] == [11, 12]
+    assert cambios["agregar"] == [] and cambios["quitar"] == []
+    propio.refresh_from_db()
+    assert propio.originabot_portfolio_id == 11
+    assert Portafolio.objects.filter(originabot_portfolio_id=12).exists()
+    assert _de(planta) is None
 
 
 def test_renombra_lo_que_tsf_renombro(planta):
@@ -149,10 +208,10 @@ def test_renombra_lo_que_tsf_renombro(planta):
 
 
 def test_sin_cambios_lo_dice(planta):
-    from apps.proyectos.models import Portafolio, PortafolioProyecto
+    from apps.proyectos.models import Portafolio
     from apps.proyectos.services import portafolios_originabot as svc
 
-    p = Portafolio.objects.create(nombre="Skandia 1", originabot_portfolio_id=207)
-    PortafolioProyecto.objects.create(portafolio=p, proyecto=planta)
+    planta.portafolio = Portafolio.objects.create(nombre="Skandia 1", originabot_portfolio_id=207)
+    planta.save()
 
     assert svc.plan(planta, [{"id": 207, "name": "Skandia 1"}])["hay_cambios"] is False
