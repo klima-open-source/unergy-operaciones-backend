@@ -47,6 +47,8 @@ on:
           - "respaldar_columnas_proyectos (solo lee)"
           - "borrar_franjas_retiradas (solo lee)"
           - "borrar_franjas_retiradas --aplicar"
+          - "pasar_marca_inversores_a_equipo (solo lee)"
+          - "pasar_marca_inversores_a_equipo --aplicar"
           - "DESHACER paso 2 (corte de contratos)"
           - "DESHACER paso 0 (diagnostico)"
       confirmar:
@@ -115,6 +117,8 @@ jobs:
             "respaldar_columnas_proyectos (solo lee)")   manage respaldar_columnas_proyectos ;;
             "borrar_franjas_retiradas (solo lee)")       manage borrar_franjas_retiradas ;;
             "borrar_franjas_retiradas --aplicar")        manage borrar_franjas_retiradas --aplicar ;;
+            "pasar_marca_inversores_a_equipo (solo lee)") manage pasar_marca_inversores_a_equipo ;;
+            "pasar_marca_inversores_a_equipo --aplicar")  manage pasar_marca_inversores_a_equipo --aplicar ;;
             "DESHACER paso 2 (corte de contratos)")
               confirmado
               manage migrate contratos 0008

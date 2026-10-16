@@ -190,7 +190,8 @@ class Equipo(Timer):
 
     `potencia` es la de UNA unidad (kWp de un panel). Los inversores llevan la suya
     cada uno en `ProyectoInversor`, que cuelga del equipo de tipo inversor; ese
-    equipo no lleva marca ni potencia propias. `detalle`: 1P/2P del seguidor, IP
+    equipo no lleva potencia propia, pero sí la marca: todos los inversores de una
+    planta son de la misma (Sara, 2026-10-16). `detalle`: 1P/2P del seguidor, IP
     del módem, estado del CCTV, la descripción de la seguridad física…
     """
 
@@ -232,7 +233,7 @@ class ProyectoInversor(Timer):
     potencia_nominal_kw = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
     orden = models.IntegerField(default=0)
     cantidad_strings = models.IntegerField(null=True, blank=True)
-    marca = models.CharField(max_length=255, null=True, blank=True)
+    # La marca no va aquí: es la del equipo de inversores (`equipo.marca`).
     estado = models.CharField(max_length=20, choices=EstadoInversor.choices, default=EstadoInversor.ACTIVO)
 
     class Meta:

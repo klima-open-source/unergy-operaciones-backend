@@ -221,7 +221,7 @@ class ProyectoInversorSerializer(serializers.ModelSerializer):
         model = py_models.ProyectoInversor
         fields = [
             "id", "proyecto_id", "equipo_id", "nombre", "potencia_nominal_kw", "orden",
-            "cantidad_strings", "marca", "estado", "created_at", "updated_at",
+            "cantidad_strings", "estado", "created_at", "updated_at",
         ]
         extra_kwargs = {
             "id": {"read_only": True},
@@ -231,7 +231,6 @@ class ProyectoInversorSerializer(serializers.ModelSerializer):
             "potencia_nominal_kw": {"required": False, "allow_null": True},
             "orden": {"required": False, "allow_null": True},
             "cantidad_strings": {"required": False, "allow_null": True},
-            "marca": {"required": False, "allow_null": True},
             "estado": {"required": False},
         }
 

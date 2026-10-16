@@ -147,8 +147,9 @@ def test_con_inversores_cargados_manda_su_cantidad(base_limpia):
     f = _ficha(proyecto)
     # El retirado no cuenta; el 11 escrito a mano no pisa a los cargados.
     assert f["cantidad_inversores"] == 2
+    # La marca es del equipo de inversores, no de cada inversor.
     assert f["marca_inversores"] == "Huawei"
-    assert set(ProyectoInversor.objects.values_list("marca", flat=True)) == {"Huawei"}
+    assert equipos.equipo_de_inversores(proyecto.id).marca == "Huawei"
 
 
 def test_los_campos_que_ya_no_se_guardan_salen_en_null(base_limpia):

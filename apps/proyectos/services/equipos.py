@@ -29,6 +29,7 @@ MAPA: dict[str, tuple[str, str]] = {
     "potencia_panel_kwp": (T.PANEL, "potencia"),
     "marca_paneles": (T.PANEL, "marca"),
     "cantidad_inversores": (T.INVERSOR, "cantidad"),
+    "marca_inversores": (T.INVERSOR, "marca"),
     "cantidad_strings": (T.INVERSOR, "detalle"),
     "marca_transformador": (T.TRANSFORMADOR, "marca"),
     "marca_reconectador_rele": (T.RECONECTADOR, "marca"),
@@ -44,8 +45,6 @@ MAPA: dict[str, tuple[str, str]] = {
     "seguridad_fisica": (T.SEGURIDAD, "detalle"),
 }
 DEL_PROYECTO = ("capacidad_instalada_kwp", "voltaje_red")
-# La marca de los inversores es de cada inversor, no del equipo.
-MARCA_INVERSORES = "marca_inversores"
 # Ya no se guardan: la potencia de los inversores es la de cada uno (el texto
 # "300, 60 y 36" no coincidía con ellos), el internet sale del contrato y la
 # ubicación de latitud/longitud.
@@ -122,30 +121,21 @@ def guardar_ficha_tecnica(proyecto: Proyecto, datos: dict) -> list[str]:
             equipo = equipos[tipo] = Equipo(proyecto=proyecto, tipo=tipo)
         setattr(equipo, atributo, None if _vacio(valor) else valor)
         equipo.save()
-
-    if MARCA_INVERSORES in datos:
-        marca = None if _vacio(datos[MARCA_INVERSORES]) else datos[MARCA_INVERSORES]
-        ProyectoInversor.objects.filter(proyecto=proyecto).update(marca=marca)
-        if marca and not ProyectoInversor.objects.filter(proyecto=proyecto).exists():
-            avisos.append("marca_inversores: la planta no tiene inversores cargados; no se guardó")
     return avisos
 
 
 def ficha_tecnica(proyecto: Proyecto) -> dict | None:
     """La info técnica con la forma vieja, armada desde `proyectos` y `equipos`.
 
-    Usa `proyecto.equipos.all()` y `proyecto.inversores.all()`: con prefetch no
+    Usa `proyecto.equipos.all()`: con prefetch no
     cuesta consultas. `None` si la planta no tiene nada técnico cargado.
     """
     equipos = {e.tipo: e for e in proyecto.equipos.all()}
-    inversores = [i for i in proyecto.inversores.all() if i.estado == "activo"]
     ficha: dict = {c: getattr(proyecto, c) for c in DEL_PROYECTO}
     for campo, (tipo, atributo) in MAPA.items():
         equipo = equipos.get(tipo)
         valor = getattr(equipo, atributo) if equipo else None
         ficha[campo] = _de_texto_del_equipo(campo, valor) if atributo == "detalle" else valor
-    marcas = sorted({i.marca for i in inversores if i.marca})
-    ficha[MARCA_INVERSORES] = ", ".join(marcas) or None
     for campo in DESCARTADOS:
         ficha[campo] = None
     if all(v is None for v in ficha.values()):
