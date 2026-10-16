@@ -44,10 +44,7 @@ on:
           - "cargar_patrimonios --aplicar"
           - "vincular_participaciones_pendientes (solo lee)"
           - "vincular_participaciones_pendientes --aplicar"
-          - "volver_a_portafolio_unico --aplicar"
           - "respaldar_columnas_proyectos (solo lee)"
-          - "pasar_info_tecnica_a_equipos (solo lee)"
-          - "pasar_info_tecnica_a_equipos --aplicar"
           - "borrar_franjas_retiradas (solo lee)"
           - "borrar_franjas_retiradas --aplicar"
           - "DESHACER paso 2 (corte de contratos)"
@@ -115,10 +112,7 @@ jobs:
             "cargar_patrimonios --aplicar")             manage cargar_patrimonios --aplicar ;;
             "vincular_participaciones_pendientes (solo lee)") manage vincular_participaciones_pendientes ;;
             "vincular_participaciones_pendientes --aplicar")  manage vincular_participaciones_pendientes --aplicar ;;
-            "volver_a_portafolio_unico --aplicar")       manage volver_a_portafolio_unico --aplicar ;;
             "respaldar_columnas_proyectos (solo lee)")   manage respaldar_columnas_proyectos ;;
-            "pasar_info_tecnica_a_equipos (solo lee)")   manage pasar_info_tecnica_a_equipos ;;
-            "pasar_info_tecnica_a_equipos --aplicar")    manage pasar_info_tecnica_a_equipos --aplicar ;;
             "borrar_franjas_retiradas (solo lee)")       manage borrar_franjas_retiradas ;;
             "borrar_franjas_retiradas --aplicar")        manage borrar_franjas_retiradas --aplicar ;;
             "DESHACER paso 2 (corte de contratos)")

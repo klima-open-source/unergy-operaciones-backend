@@ -146,8 +146,7 @@ class Portafolio(Timer):
 
     Un proyecto está en UN portafolio: `proyectos.portafolio_id` (Sara, 15-oct,
     después de probar varios por planta). La tabla `portafolio_proyectos` de ese
-    intento queda en la base, fuera del modelo, hasta que `volver_a_portafolio_unico`
-    copie sus asignaciones a la columna; luego se borra.
+    intento se copió a la columna y se borró (`0023`, 2026-10-16).
     """
 
     id = models.BigAutoField(primary_key=True)

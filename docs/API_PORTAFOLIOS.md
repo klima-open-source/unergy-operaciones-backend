@@ -50,6 +50,6 @@ Con `en_portafolio: false` (el cuerpo del front de varios portafolios) la saca d
 
 ## Datos
 
-`volver_a_portafolio_unico` (solo lee sin `--aplicar`) copia `portafolio_proyectos`
-a `proyectos.portafolio_id`. Si una planta quedó en varios portafolios no la toca y
-la lista, para elegir uno a mano.
+El 2026-10-16 `volver_a_portafolio_unico` copió `portafolio_proyectos` a
+`proyectos.portafolio_id` en producción (ninguna planta cambió) y la migración
+`proyectos/0023` borró la tabla y el comando.
