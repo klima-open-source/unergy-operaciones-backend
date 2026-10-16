@@ -76,10 +76,6 @@ HORARIOS = {
         "task": "mercado_xm.ingesta_bolsa",
         "schedule": crontab(hour=11, minute=0),
     },
-    "evo-forecast-ingest": {
-        "task": "mercado_xm.ingesta_pronostico_clima",
-        "schedule": crontab(hour=6, minute=0),
-    },
     # Cada 6 h. Es el unico con intervalo y no franja fija: no depende de que
     # una fuente publique a cierta hora, solo de no quedarse atras.
     "tsf-sync": {

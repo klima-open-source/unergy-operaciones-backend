@@ -1,27 +1,23 @@
-"""Cliente y persistencia del proxy EVO (DailySpot + Clima).
+"""Cliente de EVO y el guardado del precio de bolsa diario.
 
-EVO es un servicio interno al que se llega por Tailscale. Este backend le hace
-de proxy autenticado y, además, GUARDA lo que pasa: las series de precio de
-bolsa y los índices climáticos quedan en la base para poder consultarlas sin
-depender de que EVO esté arriba.
+EVO es un servicio interno al que se llega por Tailscale. Lo único que queda de
+él es la tarea `mercado_xm.ingesta_bolsa`: trae el DailySpot del día y lo guarda
+en `precios_bolsa_diario`, que leen el tablero, Descubrimientos y Cumplimiento.
 
-`ponytail: SQL crudo, no seis modelos de Django`. Las seis tablas
-(`precios_bolsa_diario`, `precios_bolsa_horario`, `clima_forecasts`,
-`clima_oni_monthly`, `clima_price_monthly`, `clima_precip_monthly`) están entre
-las que nunca tuvieron modelo SQLAlchemy (ver apps/README.md) y solo las toca
-este módulo, siempre con `INSERT … ON CONFLICT DO UPDATE`. Reproducir ese upsert
-con el ORM exige `bulk_create(update_conflicts=…)` y una lista de campos por
-tabla: más código para la misma sentencia. Si algún otro recurso empieza a
-leerlas, ahí sí valen los modelos.
+El proxy `/api/v1/evo`, el clima y el detalle por hora se retiraron el
+2026-10-16 (ver `apps/mercado_xm/migrations/0004_borrar_clima_y_bolsa_horario.py`):
+el front ya no los mostraba y el que sí los mostraba hablaba con EVO directo.
+
+`ponytail: SQL crudo, no un modelo de Django`. La tabla nunca tuvo modelo (ver
+apps/README.md) y solo la toca este módulo, con `INSERT … ON CONFLICT DO UPDATE`.
 """
 
 import json
 import logging
 import os
-import threading
 
 import httpx
-from django.db import close_old_connections, connection
+from django.db import connection
 
 logger = logging.getLogger("operaciones.evo")
 
@@ -72,31 +68,6 @@ def get(ruta: str, params: dict | None = None) -> dict:
         raise EvoRespondioError(exc.response.status_code, exc.response.text) from exc
 
 
-def consultar(sql: str, params: dict) -> list[dict]:
-    """Ejecuta un SELECT y devuelve dicts con los nombres de columna."""
-    with connection.cursor() as cursor:
-        cursor.execute(sql, params)
-        columnas = [c[0] for c in cursor.description]
-        return [dict(zip(columnas, fila)) for fila in cursor.fetchall()]
-
-
-def en_segundo_plano(funcion, *args) -> None:
-    """Lanza `funcion` en un hilo, cerrando la conexión al terminar.
-
-    Un hilo de Django que toca la base NO pasa por el ciclo de request, que es
-    quien normalmente cierra la conexión: sin `close_old_connections` cada
-    llamada deja una conexión abierta hasta agotar el pool. Ese es el mismo
-    motivo de los hooks de Celery en `config/celery.py`.
-    """
-    def envoltura():
-        try:
-            funcion(*args)
-        finally:
-            close_old_connections()
-
-    threading.Thread(target=envoltura, daemon=True).start()
-
-
 # ---------------------------------------------------------------------------
 # Persistencia — «lo mejor que se pueda»: si falla, se loguea y se sigue
 # ---------------------------------------------------------------------------
@@ -124,31 +95,13 @@ _SQL_BOLSA_DIARIO = """
         source_data = EXCLUDED.source_data
 """
 
-_SQL_BOLSA_HORARIO = """
-    INSERT INTO precios_bolsa_horario
-        (fecha, hora, precio_cop_kwh, gen_hidro, gen_termica,
-         gen_renovable, gen_menor, planta_marginal)
-    VALUES (%(fecha)s, %(hora)s, %(precio)s, %(hidro)s, %(termica)s,
-            %(renovable)s, %(menor)s, %(marginal)s)
-    ON CONFLICT (fecha, hora) DO UPDATE SET
-        precio_cop_kwh = EXCLUDED.precio_cop_kwh,
-        gen_hidro = EXCLUDED.gen_hidro,
-        gen_termica = EXCLUDED.gen_termica,
-        gen_renovable = EXCLUDED.gen_renovable,
-        gen_menor = EXCLUDED.gen_menor,
-        planta_marginal = EXCLUDED.planta_marginal
-"""
-
 
 def guardar_dailyspot(datos: dict) -> None:
-    """Guarda el DailySpot del día y sus 24 horas. No levanta nunca."""
+    """Guarda el resumen del DailySpot del día. No levanta nunca."""
     fecha = datos.get("date")
     if not fecha:
         return
     resumen = datos.get("summary", {})
-    precios = datos.get("prices", {})
-    generacion = datos.get("generation", {})
-    marginales = datos.get("marginal_plants", {})
 
     try:
         with connection.cursor() as cursor:
@@ -167,38 +120,6 @@ def guardar_dailyspot(datos: dict) -> None:
                 "spread": resumen.get("spread"),
                 "source": json.dumps({"fetched_at": datos.get("fetched_at")}),
             })
-            for hora_txt, precio in precios.items():
-                gen = generacion.get(hora_txt, {})
-                cursor.execute(_SQL_BOLSA_HORARIO, {
-                    "fecha": fecha, "hora": int(hora_txt), "precio": precio,
-                    "hidro": gen.get("Hidraulica"),
-                    "termica": gen.get("Termica"),
-                    "renovable": gen.get("Renovables"),
-                    "menor": gen.get("Menores"),
-                    "marginal": marginales.get(hora_txt),
-                })
-        logger.info("DailySpot guardado para %s (%d horas)", fecha, len(precios))
+        logger.info("DailySpot guardado para %s", fecha)
     except Exception:
         logger.exception("no se pudo guardar el DailySpot")
-
-
-def guardar_forecast(datos: dict) -> None:
-    """Guarda el pronóstico climático del día. No levanta nunca."""
-    if not datos.get("models_available"):
-        return
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                INSERT INTO clima_forecasts
-                    (forecast_date, forecast_json, model_version)
-                VALUES (CURRENT_DATE, %(datos)s, %(version)s)
-                ON CONFLICT DO NOTHING
-                """,
-                {
-                    "datos": json.dumps(datos, default=str),
-                    "version": datos.get("source", "unknown"),
-                },
-            )
-    except Exception:
-        logger.exception("no se pudo guardar el pronóstico climático")

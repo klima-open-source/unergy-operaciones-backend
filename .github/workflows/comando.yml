@@ -48,6 +48,8 @@ on:
           - "respaldar_columnas_proyectos (solo lee)"
           - "pasar_info_tecnica_a_equipos (solo lee)"
           - "pasar_info_tecnica_a_equipos --aplicar"
+          - "borrar_franjas_retiradas (solo lee)"
+          - "borrar_franjas_retiradas --aplicar"
           - "DESHACER paso 2 (corte de contratos)"
           - "DESHACER paso 0 (diagnostico)"
       confirmar:
@@ -117,6 +119,8 @@ jobs:
             "respaldar_columnas_proyectos (solo lee)")   manage respaldar_columnas_proyectos ;;
             "pasar_info_tecnica_a_equipos (solo lee)")   manage pasar_info_tecnica_a_equipos ;;
             "pasar_info_tecnica_a_equipos --aplicar")    manage pasar_info_tecnica_a_equipos --aplicar ;;
+            "borrar_franjas_retiradas (solo lee)")       manage borrar_franjas_retiradas ;;
+            "borrar_franjas_retiradas --aplicar")        manage borrar_franjas_retiradas --aplicar ;;
             "DESHACER paso 2 (corte de contratos)")
               confirmado
               manage migrate contratos 0008

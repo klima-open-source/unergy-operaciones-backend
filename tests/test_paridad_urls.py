@@ -37,7 +37,6 @@ PREFIJOS_PORTADOS = [
     "/api/v1/cumplimiento",
     "/api/v1/dashboard",
     "/api/v1/estados-resultados",
-    "/api/v1/evo",
     "/api/v1/facturacion",
     "/api/v1/fallas",
     "/api/v1/finanzas/mandatos",
@@ -90,6 +89,10 @@ PREFIJOS_RETIRADOS = [
     # 2026-10-13  La lista con la que la vista vieja de Costos › Mandatos adivinaba
     # el inversionista. La vista se retiró: la reemplazó Liquidaciones › Mandatos.
     "/api/v1/mandato-inversionistas",
+    # 2026-10-16  El proxy de EVO (DailySpot + clima). El front nunca lo llamo: su
+    # ruta de Nuxt hablaba con EVO directo. Se fueron con las paginas Clima & ENSO,
+    # Balance Energia y la Precio de Bolsa vieja (hoy es la pestaña de SIMEM).
+    "/api/v1/evo",
 ]
 
 # Rutas SUELTAS retiradas. No van arriba porque su recurso sigue vivo: quitar

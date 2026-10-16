@@ -210,12 +210,12 @@ De esas 28, **10 se usan de verdad** (aparecen en un `FROM`/`INSERT`/`UPDATE`):
 |---|---|---|---|
 | `api_keys` | 12 | `plataforma` | ✅ modelo declarado, recurso portado |
 | `precios_bolsa_diario` | 6 | `mercado_xm` | pendiente |
-| `clima_oni_monthly` | 4 | `energia` (evo_proxy) | pendiente |
+| `clima_oni_monthly` | 4 | `energia` (evo_proxy) | 🗑 borrada (`mercado_xm/0004`, 2026-10-16) |
 | `email_envios` | 3 | `plataforma` | pendiente |
-| `clima_price_monthly` | 3 | `energia` | pendiente |
-| `clima_precip_monthly` | 3 | `energia` | pendiente |
-| `clima_forecasts` | 3 | `energia` | pendiente |
-| `precios_bolsa_horario` | 2 | `mercado_xm` | pendiente |
+| `clima_price_monthly` | 3 | `energia` | 🗑 borrada (`mercado_xm/0004`) |
+| `clima_precip_monthly` | 3 | `energia` | 🗑 borrada (`mercado_xm/0004`) |
+| `clima_forecasts` | 3 | `energia` | 🗑 borrada (`mercado_xm/0004`) |
+| `precios_bolsa_horario` | 2 | `mercado_xm` | 🗑 borrada (`mercado_xm/0004`) |
 | `alarma_estado` | 2 | `monitoreo` | pendiente |
 | `audit_log` | 1 | `plataforma` | pendiente |
 

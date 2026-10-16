@@ -96,8 +96,8 @@ hay. Marcadas ⚠ las que exigen partir un archivo actual.
 | `garantias` | `gar_calculo`, `gar_componente_real`, `gar_componente_pred`, `xm_archivo`, `xm_medida`, `garantias_ajustes`, `garantia_snapshot`, `garantia_pagado`, `balcttos_neto` | `garantias_modelo`, `garantias_ajustes`, `garantias_proyecciones` |
 | `retos` | `retos_trimestre`, `retos_metrica`, `retos_valor_semanal` | `retos` |
 
-**Fuera de toda app:** `evo_proxy` y `liquidaciones_proxy` no tienen modelo — son
-pasarelas HTTP. En Django van como `integraciones/` o directamente como un
+**Fuera de toda app:** `liquidaciones_proxy` no tiene modelo — es una
+pasarela HTTP (`evo_proxy` se retiró el 2026-10-16). En Django van como `integraciones/` o directamente como un
 servicio de dominio con su cliente, no como app.
 
 ---
