@@ -87,9 +87,6 @@ CASOS = [
     # `generacion/{pk}` contra sus acciones de lista literales.
     ("/api/v1/generacion/bulk", "bulk"),
     ("/api/v1/generacion/resumen/por-proyecto", "resumen_por_proyecto"),
-    # `evo/clima/forecast` contra `evo/clima/forecast/{id}`.
-    ("/api/v1/evo/clima/forecast", "clima_forecast"),
-    ("/api/v1/evo/clima/forecast/12", "clima_forecast_detalle"),
     # `registros-cnd/{pk}` contra sus tres acciones de lista literales, y las
     # sub-rutas de equipos/documentos contra su propio listado.
     ("/api/v1/registros-cnd/catalogos", "catalogos"),

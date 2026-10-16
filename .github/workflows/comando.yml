@@ -47,6 +47,8 @@ on:
           - "vincular_participaciones_pendientes --aplicar"
           - "copiar_portafolios (solo lee)"
           - "copiar_portafolios --aplicar"
+          - "borrar_franjas_retiradas (solo lee)"
+          - "borrar_franjas_retiradas --aplicar"
           - "DESHACER paso 2 (corte de contratos)"
           - "DESHACER paso 0 (diagnostico)"
       confirmar:
@@ -115,6 +117,8 @@ jobs:
             "vincular_participaciones_pendientes --aplicar")  manage vincular_participaciones_pendientes --aplicar ;;
             "copiar_portafolios (solo lee)")             manage copiar_portafolios ;;
             "copiar_portafolios --aplicar")              manage copiar_portafolios --aplicar ;;
+            "borrar_franjas_retiradas (solo lee)")       manage borrar_franjas_retiradas ;;
+            "borrar_franjas_retiradas --aplicar")        manage borrar_franjas_retiradas --aplicar ;;
             "DESHACER paso 2 (corte de contratos)")
               confirmado
               manage migrate contratos 0008

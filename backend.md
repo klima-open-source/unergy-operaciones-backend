@@ -178,7 +178,7 @@ Configuradas en `config.py` y consumidas por routers/servicios:
 - **SunFactory / Solenium** (`SUNFACTORY_*`, `SOLENIUM_*`) — cronogramas EPC (próximos a
   energizarse) y datos de inversores FMO; auth OAuth2 username/password.
 - **Quoia / Gaia** (`QUOIA_*`, `GAIA_*`) — fronteras CGM y medidores.
-- **EVO Energy** (`EVO_*`) — DailySpot + clima (vía Tailscale).
+- **EVO Energy** (`EVO_*`) — DailySpot diario, solo la tarea `ingesta_bolsa` (vía Tailscale).
 - **SMTP** (`SMTP_*`) — envío de informes mensuales aprobados.
 - **BD externas read-only** (`ORIGINA_DATABASE_URL`, `REQUESTSDB_DATABASE_URL`) — usadas
   por `services/correlation.py` para cruces de datos.

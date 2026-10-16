@@ -34,17 +34,3 @@ def ingesta_bolsa() -> str:
     evo.guardar_dailyspot(datos)
     return f"precios de bolsa de {fecha} persistidos"
 
-
-@shared_task(name="mercado_xm.ingesta_pronostico_clima")
-def ingesta_pronostico_clima() -> str:
-    """Trae de EVO el pronóstico de clima y lo persiste."""
-    from apps.mercado_xm.services import evo
-
-    try:
-        datos = evo.get("/clima/forecast")
-    except evo.EvoNoConfigurado:
-        logger.info("EVO_API_URL sin configurar — ingesta de pronóstico omitida")
-        return "omitida: EVO sin configurar"
-
-    evo.guardar_forecast(datos)
-    return "pronóstico persistido"
