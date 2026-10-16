@@ -304,6 +304,10 @@ class ProyectoSerializer(serializers.ModelSerializer):
     # Un proyecto está en un solo portafolio (Sara, 15-oct).
     portafolio_id = serializers.IntegerField(allow_null=True)
     portafolio_nombre = serializers.CharField(source="portafolio.nombre", read_only=True, default=None)
+    # ALIAS DE TRANSICIÓN, se quita cuando suba el front de un solo portafolio:
+    # el front de varios lee `portafolios` (lista). Con el back nuevo y el front
+    # viejo, sin esto el selector de la ficha y la columna de Servicios salen vacíos.
+    portafolios = serializers.SerializerMethodField()
     operador_red_id = serializers.IntegerField(allow_null=True)
     operador_red_legal = serializers.SerializerMethodField()
     ppa_contratos = serializers.SerializerMethodField()
@@ -326,8 +330,13 @@ class ProyectoSerializer(serializers.ModelSerializer):
             "operador_red_legal", "ppa_contratos", "inversionistas",
             "info_tecnica", "equipos", "inversores", "area_contactos", "servicios",
             "es_comunidad_energetica", "portafolio_nombre",
+            "portafolios",  # alias de transición, ver arriba
             "created_at", "updated_at",
         ]
+
+    def get_portafolios(self, obj) -> list[dict]:
+        p = obj.portafolio
+        return [{"id": p.id, "nombre": p.nombre}] if p else []
 
     def get_servicios(self, obj) -> dict:
         """`{operacion, representacion, cgm, ppa}`, de los contratos vigentes.

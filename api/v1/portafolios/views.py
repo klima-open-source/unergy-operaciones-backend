@@ -151,6 +151,9 @@ class PortafolioViewSet(
             "ok": True,
             "proyecto_id": proyecto.id,
             "portafolio_id": proyecto.portafolio_id,
+            # Alias de transición para el front de varios portafolios; se quita
+            # cuando suba el front de uno solo.
+            "portafolio_ids": [proyecto.portafolio_id] if proyecto.portafolio_id else [],
         })
 
     @staticmethod
